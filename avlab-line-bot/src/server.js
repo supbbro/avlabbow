@@ -1,0 +1,166 @@
+'use strict';
+
+require('dotenv').config();
+const crypto = require('crypto');
+const express = require('express');
+const { GoogleSheetsRuntime, installGlobals, formatDate } = require('./runtime');
+const { ids } = require('./config');
+
+for (const key of ['LINE_CHANNEL_ACCESS_TOKEN', 'LINE_CHANNEL_SECRET']) {
+  if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
+}
+
+const runtime = new GoogleSheetsRuntime();
+installGlobals(runtime);
+const bot = require('./legacy-bot');
+const externalTeaching = require('./external-teaching');
+const app = express();
+const port = Number(process.env.PORT || 3000);
+let serial = Promise.resolve();
+
+function enqueue(job) {
+  const next = serial.then(job, job);
+  serial = next.catch(error => console.error('Queued job failed:', error));
+  return next;
+}
+
+function validLineSignature(buffer, signature) {
+  if (!signature) return false;
+  const expected = crypto.createHmac('sha256', process.env.LINE_CHANNEL_SECRET).update(buffer).digest('base64');
+  const left = Buffer.from(signature);
+  const right = Buffer.from(expected);
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+async function lineRequest(path, body) {
+  const response = await fetch(`https://api.line.me/v2/bot${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) throw new Error(`LINE API ${response.status}: ${await response.text()}`);
+}
+
+function toLineMessage(reply) {
+  const normalized = typeof reply === 'string' ? { text: reply } : reply;
+  if (!normalized?.text) return null;
+  const message = { type: 'text', text: String(normalized.text).slice(0, 5000) };
+  if (normalized.quickReply?.items?.length) message.quickReply = { items: normalized.quickReply.items.slice(0, 13) };
+  return message;
+}
+
+async function handleLineEvent(event) {
+  await runtime.loadAll();
+  let reply = null;
+  const sourceType = event.source?.type || 'user';
+  const context = {
+    sourceType,
+    userId: event.source?.userId || '',
+    chatId: event.source?.groupId || event.source?.roomId || event.source?.userId || ''
+  };
+  if (event.type === 'follow') {
+    reply = bot.getMainMenu();
+  } else if (event.type === 'join') {
+    reply = externalTeaching.joinReply();
+  } else if (event.type === 'leave') {
+    externalTeaching.disableGroup(context.chatId);
+  } else if (event.type === 'message') {
+    const userId = context.userId;
+    if (!userId) return;
+    if (event.message?.id && runtime.cache.get(`message:${event.message.id}`)) return;
+    if (event.message?.id) runtime.cache.put(`message:${event.message.id}`, '1', 60);
+    bot.recordUser(userId);
+    if (event.message.type === 'text') {
+      const text = event.message.text.trim();
+      reply = externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
+    } else if (event.message.type === 'sticker') {
+      reply = { text: '怎說', quickReply: { items: [
+        { type: 'action', action: { type: 'message', label: '👨‍🎓 對外學生', text: '對外學生' } },
+        { type: 'action', action: { type: 'message', label: '👩‍💼 中心助理', text: '中心助理' } }
+      ] } };
+    }
+  }
+  await runtime.flush();
+  const message = toLineMessage(reply);
+  if (message && event.replyToken) await lineRequest('/message/reply', { replyToken: event.replyToken, messages: [message] });
+}
+
+app.get('/', (_req, res) => res.type('text').send('AV Lab LINE Bot is running'));
+app.get('/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+
+app.post('/webhook', express.raw({ type: 'application/json', limit: '1mb' }), (req, res) => {
+  if (!validLineSignature(req.body, req.get('x-line-signature'))) return res.status(401).send('Invalid signature');
+  let payload;
+  try { payload = JSON.parse(req.body.toString('utf8')); }
+  catch { return res.status(400).send('Invalid JSON'); }
+  res.status(200).send('OK');
+  for (const event of payload.events || []) enqueue(() => handleLineEvent(event));
+});
+
+app.use('/automation', express.json({ limit: '1mb' }));
+app.use('/automation', (req, res, next) => {
+  const supplied = req.get('x-automation-secret') || req.get('authorization')?.replace(/^Bearer\s+/i, '');
+  if (!process.env.AUTOMATION_SECRET || supplied !== process.env.AUTOMATION_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+});
+
+function eventFromBody(body, spreadsheetId, sheetName) {
+  const sheet = runtime.openById(spreadsheetId).getSheetByName(body.sheetName || sheetName);
+  if (!sheet) throw new Error(`Sheet not found: ${body.sheetName || sheetName}`);
+  return {
+    value: body.value,
+    oldValue: body.oldValue,
+    values: body.values || [],
+    range: sheet.getRange(Number(body.row || 1), Number(body.column || 1))
+  };
+}
+
+const automations = {
+  'leave-submit': [bot.onLeaveFormSubmit, ids.leave, '表單回覆 1'],
+  'retest-submit': [bot.onRetestFormSubmit, ids.retest, '表單回覆 1'],
+  'availability-submit': [bot.onAvailabilityFormSubmit, ids.schedule, '表單回覆 1'],
+  'master-edit': [bot.onMasterSheetEdit, ids.master, '教學考試點名和通過情況總表'],
+  'task-edit': [bot.onTaskSheetEdit, ids.task, '1142 教學考官安排彙整']
+};
+
+app.post('/automation/:name', (req, res) => {
+  const target = automations[req.params.name];
+  if (!target) return res.status(404).json({ error: 'Unknown automation' });
+  enqueue(async () => {
+    await runtime.loadAll();
+    target[0](eventFromBody(req.body, target[1], target[2]));
+    await runtime.flush();
+  }).then(() => res.json({ ok: true })).catch(error => {
+    console.error(error); res.status(500).json({ error: error.message });
+  });
+});
+
+const completedSchedules = new Set();
+async function schedulerTick() {
+  const stamp = formatDate(new Date(), 'yyyy-MM-dd HH:mm');
+  const date = stamp.slice(0, 10);
+  const time = stamp.slice(11);
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: process.env.TZ || 'Asia/Taipei', weekday: 'short' }).format(new Date());
+  const jobs = [];
+  jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders]);
+  if (time === '20:00') jobs.push([`daily:${date}`, bot.sendTomorrowTaskReminders]);
+  if (weekday === 'Mon' && time === '01:00') jobs.push([`weekly:${date}`, bot.calculateWeeklyGodOfGamblers]);
+  for (const [key, fn] of jobs) {
+    if (completedSchedules.has(key)) continue;
+    await enqueue(async () => { await runtime.loadAll(); fn(); await runtime.flush(); });
+    completedSchedules.add(key);
+  }
+  if (completedSchedules.size > 5000) completedSchedules.clear();
+}
+setInterval(() => schedulerTick().catch(console.error), 30_000).unref();
+
+app.listen(port, '0.0.0.0', error => {
+  if (error) {
+    console.error(`Unable to listen on port ${port}:`, error);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`Listening on port ${port}`);
+});
+
+module.exports = { app, validLineSignature, toLineMessage };
