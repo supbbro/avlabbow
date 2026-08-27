@@ -1,6 +1,7 @@
 # Local secrets and credentials
 /.env
 /*service-account*.json
+/boxwood-reach-*.json
 
 # Local development files
 .DS_Store

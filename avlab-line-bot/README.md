@@ -61,6 +61,7 @@ curl http://localhost:3000/health
    - `EXTERNAL_CLASS_SCHEDULE_ID=1oaEKt3JVxcdy8yPBGZAuRh3lkhnvRoIJ9rTNbj-Gh9I`
    - `ACADEMIC_TERM=1151`
    - `TZ=Asia/Taipei`
+   - `SHEETS_CACHE_TTL_MS=60000`（選用；預設快取 60 秒，降低 LINE 回覆延遲）
 5. Generate Domain。部署後確認 `https://你的網域/health` 回傳 `{"ok":true,...}`。
 
 `PORT` 由 Railway 自動提供，不要寫死。

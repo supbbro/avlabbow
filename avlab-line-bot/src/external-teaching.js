@@ -8,6 +8,7 @@ const SHEETS = {
 };
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
+const EXTERNAL_COMMAND = /^(綁定群組(?:\s|$)|解除群組$|今日任務$|對外任務$|近期任務$|查看任務\s|開始點名\s|點名狀態\s|考試登記\s|完成點名\s|同步對外排程$)/;
 let activeStudentsByTask = new Map();
 
 const qr = items => ({ items: items.slice(0, 13).map(item => ({
@@ -361,6 +362,14 @@ function handleCommand(text, context) {
   return null;
 }
 
+function isExternalCommand(text) {
+  return EXTERNAL_COMMAND.test(String(text || '').trim());
+}
+
+function requiresFreshData(text) {
+  return /^(同步對外排程$|開始點名\s)/.test(String(text || '').trim());
+}
+
 function parseTaskStart(task) {
   const date = task.date instanceof Date ? new Date(task.date) : new Date(task.date);
   if (Number.isNaN(date.getTime())) return null;
@@ -418,4 +427,4 @@ function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData };

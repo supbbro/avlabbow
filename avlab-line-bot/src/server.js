@@ -16,6 +16,7 @@ const bot = require('./legacy-bot');
 const externalTeaching = require('./external-teaching');
 const app = express();
 const port = Number(process.env.PORT || 3000);
+const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master];
 let serial = Promise.resolve();
 
 function enqueue(job) {
@@ -50,7 +51,6 @@ function toLineMessage(reply) {
 }
 
 async function handleLineEvent(event) {
-  await runtime.loadAll();
   let reply = null;
   const sourceType = event.source?.type || 'user';
   const context = {
@@ -63,17 +63,25 @@ async function handleLineEvent(event) {
   } else if (event.type === 'join') {
     reply = externalTeaching.joinReply();
   } else if (event.type === 'leave') {
+    await runtime.loadOnly(EXTERNAL_WORKBOOKS);
     externalTeaching.disableGroup(context.chatId);
   } else if (event.type === 'message') {
     const userId = context.userId;
     if (!userId) return;
     if (event.message?.id && runtime.cache.get(`message:${event.message.id}`)) return;
     if (event.message?.id) runtime.cache.put(`message:${event.message.id}`, '1', 60);
-    bot.recordUser(userId);
     if (event.message.type === 'text') {
       const text = event.message.text.trim();
+      if (externalTeaching.isExternalCommand(text)) {
+        await runtime.loadOnly(EXTERNAL_WORKBOOKS, { force: externalTeaching.requiresFreshData(text) });
+      } else {
+        await runtime.loadAll();
+      }
+      bot.recordUser(userId);
       reply = externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
     } else if (event.message.type === 'sticker') {
+      await runtime.loadOnly([ids.master]);
+      bot.recordUser(userId);
       reply = { text: '怎說', quickReply: { items: [
         { type: 'action', action: { type: 'message', label: '👨‍🎓 對外學生', text: '對外學生' } },
         { type: 'action', action: { type: 'message', label: '👩‍💼 中心助理', text: '中心助理' } }
@@ -142,12 +150,17 @@ async function schedulerTick() {
   const time = stamp.slice(11);
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: process.env.TZ || 'Asia/Taipei', weekday: 'short' }).format(new Date());
   const jobs = [];
-  jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders]);
-  if (time === '20:00') jobs.push([`daily:${date}`, bot.sendTomorrowTaskReminders]);
-  if (weekday === 'Mon' && time === '01:00') jobs.push([`weekly:${date}`, bot.calculateWeeklyGodOfGamblers]);
-  for (const [key, fn] of jobs) {
+  jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
+  if (time === '20:00') jobs.push([`daily:${date}`, bot.sendTomorrowTaskReminders, null]);
+  if (weekday === 'Mon' && time === '01:00') jobs.push([`weekly:${date}`, bot.calculateWeeklyGodOfGamblers, null]);
+  for (const [key, fn, workbookIds] of jobs) {
     if (completedSchedules.has(key)) continue;
-    await enqueue(async () => { await runtime.loadAll(); fn(); await runtime.flush(); });
+    await enqueue(async () => {
+      if (workbookIds) await runtime.loadOnly(workbookIds, { force: true });
+      else await runtime.loadAll({ force: true });
+      fn();
+      await runtime.flush();
+    });
     completedSchedules.add(key);
   }
   if (completedSchedules.size > 5000) completedSchedules.clear();

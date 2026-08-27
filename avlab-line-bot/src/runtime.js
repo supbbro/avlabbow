@@ -158,15 +158,38 @@ class GoogleSheetsRuntime {
     const auth = new google.auth.GoogleAuth({ credentials: credentialsFromEnv(), scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
     this.api = google.sheets({ version: 'v4', auth });
     this.sheets = new Map();
+    this.loadedAt = new Map();
+    this.loading = new Map();
+    const configuredTtl = Number(process.env.SHEETS_CACHE_TTL_MS || 60_000);
+    this.cacheTtlMs = Number.isFinite(configuredTtl) ? Math.max(0, configuredTtl) : 60_000;
     this.operations = [];
     this.httpOperations = [];
     this.properties = new Map();
     this.cache = new MemoryCache();
   }
 
-  async loadAll() {
-    this.sheets.clear(); this.operations = []; this.httpOperations = [];
-    await Promise.all(Object.entries(workbooks).map(([spreadsheetId, requested]) => this.loadWorkbook(spreadsheetId, requested)));
+  async loadAll(options = {}) {
+    return this.loadOnly(Object.keys(workbooks), options);
+  }
+
+  async loadOnly(spreadsheetIds, { force = false } = {}) {
+    this.operations = []; this.httpOperations = [];
+    const uniqueIds = [...new Set(spreadsheetIds)].filter(id => workbooks[id]);
+    const now = Date.now();
+    await Promise.all(uniqueIds.map(spreadsheetId => {
+      const isFresh = this.sheets.has(spreadsheetId) && now - (this.loadedAt.get(spreadsheetId) || 0) < this.cacheTtlMs;
+      if (!force && isFresh) return null;
+      if (!force && this.loading.has(spreadsheetId)) return this.loading.get(spreadsheetId);
+      const pending = this.loadWorkbook(spreadsheetId, workbooks[spreadsheetId])
+        .then(() => this.loadedAt.set(spreadsheetId, Date.now()))
+        .finally(() => this.loading.delete(spreadsheetId));
+      this.loading.set(spreadsheetId, pending);
+      return pending;
+    }));
+    if (uniqueIds.includes(ids.game)) this.loadProperties();
+  }
+
+  loadProperties() {
     const state = this.sheets.get(ids.game)?.get('系統狀態');
     this.properties.clear();
     for (const row of (state?.data || []).slice(1)) if (row[0]) this.properties.set(String(row[0]), String(row[1] ?? ''));

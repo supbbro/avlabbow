@@ -24,6 +24,29 @@ test('Taipei date formatter supports the patterns used by the bot', () => {
   assert.equal(formatDate(new Date('2026-08-27T12:34:00Z'), 'yyyy/MM/dd HH:mm'), '2026/08/27 20:34');
 });
 
+test('Google Sheets runtime caches each workbook and supports forced refresh', async () => {
+  const cached = new GoogleSheetsRuntime();
+  cached.cacheTtlMs = 60_000;
+  let loads = 0;
+  cached.loadWorkbook = async spreadsheetId => {
+    loads++;
+    cached.sheets.set(spreadsheetId, new Map());
+  };
+  await cached.loadOnly([ids.master]);
+  await cached.loadOnly([ids.master]);
+  assert.equal(loads, 1);
+  await cached.loadOnly([ids.master], { force: true });
+  assert.equal(loads, 2);
+});
+
+test('external commands are routed to the smaller workbook set', () => {
+  assert.equal(externalTeaching.isExternalCommand('近期任務'), true);
+  assert.equal(externalTeaching.isExternalCommand('開始點名 T1'), true);
+  assert.equal(externalTeaching.isExternalCommand('主選單'), false);
+  assert.equal(externalTeaching.requiresFreshData('開始點名 T1'), true);
+  assert.equal(externalTeaching.requiresFreshData('點名狀態 T1 S1 到場'), false);
+});
+
 test('group attendance writes a normalized record and completes the task', () => {
   const resultBook = runtime.openById(ids.externalResults);
   const tasks = resultBook.insertSheet('對外任務');
