@@ -370,6 +370,10 @@ function requiresFreshData(text) {
   return /^(同步對外排程$|開始點名\s)/.test(String(text || '').trim());
 }
 
+function isCombinedTaskQuery(text) {
+  return /^(?:查任務|任務查詢|我的任務|任務)\s+\S/.test(String(text || '').trim());
+}
+
 function parseTaskStart(task) {
   const date = task.date instanceof Date ? new Date(task.date) : new Date(task.date);
   if (Number.isNaN(date.getTime())) return null;
@@ -427,4 +431,4 @@ function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery };

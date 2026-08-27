@@ -1,6 +1,7 @@
 'use strict';
 var CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 var TASK_SHEET_ID='1QqMoUs-rQOOKXkXUHxvliRW-CuYMeSEWafNjEHURU9A',TASK_SHEET_NAME='1142 教學考官安排彙整',COL_TASK_DATE=0,COL_TASK_PHASE=1,COL_TASK_LEVEL=2,COL_TASK_ITEM=3,COL_TASK_NAME=4,COL_TASK_LOCATION=5;
+var EXTERNAL_RESULTS_SHEET_ID=process.env.EXTERNAL_RESULTS_SHEET_ID||'1WXeO6VF-emmoP_07tzsGk5z0WGSU7aFLbtbT0ImYACg',EXTERNAL_TASK_SHEET_NAME='對外任務';
 var MASTER_SHEET_ID='1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY';
 var ATTENDANCE_SHEET_NAME='教學考試點名和通過情況總表';
 var LEAVE_SHEET_ID='1A0wZWctAbihNzNi3Ji0CVW6at024QQQDnNzdQP1K2XI',LEAVE_SHEET_NAME='表單回覆 1',COL_LEAVE_TIMESTAMP=0,COL_LEAVE_NAME=1,COL_LEAVE_DATE=5,COL_LEAVE_SUBSTITUTE=7;
@@ -376,7 +377,7 @@ function getTasksFromSheet(n){
   var cache = CacheService.getScriptCache();
   var cacheKey = 'TASKS_' + nrm(n);
   var cached = cache.get(cacheKey);
-  if (cached) return JSON.parse(cached);
+  if (cached) return JSON.parse(cached).map(t=>Object.assign({},t,{start:new Date(t.start),end:new Date(t.end)}));
 
   try{
     var s=SpreadsheetApp.openById(TASK_SHEET_ID).getSheetByName(TASK_SHEET_NAME);
@@ -385,7 +386,7 @@ function getTasksFromSheet(n){
     var tasks = d.filter(r=>nrm(r[COL_TASK_NAME])===inp).map(r=>{
       var dt=r[COL_TASK_DATE]instanceof Date?r[COL_TASK_DATE]:new Date(r[COL_TASK_DATE]);
       var type = r[COL_TASK_PHASE] && r[COL_TASK_PHASE].toString().includes('教學') ? '📚 教學' : '📝 檢定';
-      var sum='📅 '+Utilities.formatDate(dt,Session.getScriptTimeZone(),'MM/dd')+' ' + type + ' - '+r[COL_TASK_LEVEL]+' / '+r[COL_TASK_ITEM]+' ('+r[COL_TASK_LOCATION]+')';
+      var sum='📅 '+Utilities.formatDate(dt,Session.getScriptTimeZone(),'MM/dd')+' [對內] ' + type + ' - '+r[COL_TASK_LEVEL]+' / '+r[COL_TASK_ITEM]+' ('+r[COL_TASK_LOCATION]+')';
       return{
         summary:sum,
         description:'級別：'+r[COL_TASK_LEVEL]+'\n項目：'+r[COL_TASK_ITEM]+'\n地點：'+r[COL_TASK_LOCATION],
@@ -398,26 +399,66 @@ function getTasksFromSheet(n){
   }catch(e){return[];}
 }
 
+function taskClockParts(value){
+  if(value instanceof Date)return{hour:value.getHours(),minute:value.getMinutes()};
+  var raw=String(value||''),m=raw.match(/(\d{1,2}):(\d{2})/);
+  if(!m)return null;
+  var hour=Number(m[1]);
+  if((raw.includes('下午')||/\bPM\b/i.test(raw))&&hour<12)hour+=12;
+  if((raw.includes('上午')||/\bAM\b/i.test(raw))&&hour===12)hour=0;
+  return{hour:hour,minute:Number(m[2])};
+}
+
+function taskDateTime(dateValue,timeValue,fallbackHour){
+  var date=dateValue instanceof Date?new Date(dateValue):new Date(dateValue);
+  if(isNaN(date.getTime()))return null;
+  var clock=taskClockParts(timeValue)||{hour:fallbackHour,minute:0};
+  date.setHours(clock.hour,clock.minute,0,0);
+  return date;
+}
+
+function getExternalTasksForName(n){
+  try{
+    var s=SpreadsheetApp.openById(EXTERNAL_RESULTS_SHEET_ID).getSheetByName(EXTERNAL_TASK_SHEET_NAME);
+    if(!s)return[];
+    var inp=nrm(n);
+    return s.getDataRange().getValues().slice(1).filter(r=>{
+      var taskId=String(r[0]||'');
+      return taskId&&!taskId.startsWith('_TEMPLATE')&&nrm(r[8])===inp&&String(r[11]||'')!=='已取消';
+    }).map(r=>{
+      var start=taskDateTime(r[3],r[4],18),end=taskDateTime(r[3],r[5],21);
+      if(!start)return null;
+      if(!end||end<=start)end=new Date(start.getTime()+60*60*1000);
+      var phase=String(r[2]||'任務'),icon=phase==='教學'?'📚':'📝';
+      var summary='📅 '+Utilities.formatDate(start,Session.getScriptTimeZone(),'MM/dd')+' [對外] '+icon+' '+phase+' - '+r[6]+' ('+(r[7]||'地點未填')+')';
+      return{
+        summary:summary,
+        description:'任務ID：'+r[0]+'\n階段：'+phase+'\n項目：'+r[6]+'\n地點：'+(r[7]||'未填'),
+        start:start,end:end,taskId:String(r[0]),source:'對外'
+      };
+    }).filter(Boolean);
+  }catch(e){return[];}
+}
+
 // ========== 顯示任務 ==========
 function showTasksForName(name) {
   var level = LEVEL_MAP[name];
-  if (level === '見習') {
-    var text = '【對內教學/檢定 - 重要時程表】\n\n' +
+  var apprenticeText='【對內教學/檢定 - 重要時程表】\n\n' +
                '📝 3/13 期初檢定\n\n' +
                '📚 4/10 期中教學\n\n' +
                '📝 4/24 期中檢定\n\n' +
                '📚 5/15 期末教學\n\n' +
                '📝 5/29 期末檢定\n\n' +
                '⚠️ 考官與考生請留意時間，無法出席請提早尋找代班或完成請假程序喔！';
-    return { text: text, quickReply: bA() };
-  }
-
-  var t = getTasksFromSheet(name);
+  var t = getTasksFromSheet(name).concat(getExternalTasksForName(name)).sort((a,b)=>a.start-b.start);
+  if(level==='見習'&&!t.length)return{text:apprenticeText,quickReply:bA()};
   if (!t.length) return { text: '找不到 ' + name + ' 的任務記錄', quickReply: bA() };
-  var txt = '【' + name + ' 的教學/考官任務】\n\n', q = [], td = new Date();
+  var txt=(level==='見習'?apprenticeText+'\n\n':'')+'【' + name + ' 的教學/考官任務】\n\n',q=[],td=new Date();
+  var today=new Date(td);today.setHours(0,0,0,0);
   t.forEach((tk, i) => {
     txt += tk.summary + '\n';
-    var df = Math.ceil((tk.start - td) / 86400000);
+    var taskDay=new Date(tk.start);taskDay.setHours(0,0,0,0);
+    var df=Math.round((taskDay-today)/86400000);
     txt += df > 0 ? '   ⏳ 距離任務還有 ' + df + ' 天\n' : df === 0 ? '   ⚠️ 就是今天！好強！\n' : '   ⌛ 任務已過期\n';
     q.push({ type: 'action', action: { type: 'uri', label: '📅 加入任務 ' + (i + 1), uri: gC(tk.summary, tk.start, tk.end, tk.description, '影音實驗室') } });
     txt += '\n';

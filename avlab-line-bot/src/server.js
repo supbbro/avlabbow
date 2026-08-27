@@ -72,7 +72,11 @@ async function handleLineEvent(event) {
     if (event.message?.id) runtime.cache.put(`message:${event.message.id}`, '1', 60);
     if (event.message.type === 'text') {
       const text = event.message.text.trim();
-      if (externalTeaching.isExternalCommand(text)) {
+      const combinedTaskQuery = externalTeaching.isCombinedTaskQuery(text);
+      if (combinedTaskQuery) {
+        await runtime.loadOnly([...EXTERNAL_WORKBOOKS, ids.task], { force: true });
+        externalTeaching.syncFromSchedule();
+      } else if (externalTeaching.isExternalCommand(text)) {
         await runtime.loadOnly(EXTERNAL_WORKBOOKS, { force: externalTeaching.requiresFreshData(text) });
       } else {
         await runtime.loadAll();

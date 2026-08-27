@@ -45,13 +45,31 @@ test('external commands are routed to the smaller workbook set', () => {
   assert.equal(externalTeaching.isExternalCommand('主選單'), false);
   assert.equal(externalTeaching.requiresFreshData('開始點名 T1'), true);
   assert.equal(externalTeaching.requiresFreshData('點名狀態 T1 S1 到場'), false);
+  assert.equal(externalTeaching.isCombinedTaskQuery('任務 黃忻妤'), true);
+  assert.equal(externalTeaching.isCombinedTaskQuery('近期任務'), false);
+});
+
+test('name task query includes assignments synchronized from the external schedule', () => {
+  const assistantBook = runtime.openById(ids.assistant);
+  const assistants = assistantBook.getSheetByName('助理名單') || assistantBook.insertSheet('助理名單');
+  if (!assistants.getLastRow()) assistants.appendRow(['姓名']);
+  assistants.appendRow(['黃忻妤']);
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務') || resultBook.insertSheet('對外任務');
+  if (!tasks.getLastRow()) tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','教學官／考官','考官LINE User ID','LINE群組ID','任務狀態']);
+  tasks.appendRow(['EXT-NAME-QUERY','1151','教學',new Date('2026-03-17'),'12:00','13:00','基礎配件課程','大勇401','黃忻妤','','','已排定']);
+  const response = bot.getReply('任務 黃忻妤', 'U-test');
+  assert.match(response.text, /黃忻妤 的教學\/考官任務/);
+  assert.match(response.text, /\[對外\].*基礎配件課程/);
+  assert.match(response.text, /任務已過期/);
 });
 
 test('group attendance writes a normalized record and completes the task', () => {
   const resultBook = runtime.openById(ids.externalResults);
-  const tasks = resultBook.insertSheet('對外任務');
-  tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','教學官／考官','考官LINE User ID','LINE群組ID','任務狀態','前一天提醒','兩小時前提醒','前一天提醒時間','兩小時前提醒時間','來源分頁','來源位置']);
+  const tasks = resultBook.getSheetByName('對外任務') || resultBook.insertSheet('對外任務');
+  if (!tasks.getLastRow()) tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','教學官／考官','考官LINE User ID','LINE群組ID','任務狀態','前一天提醒','兩小時前提醒','前一天提醒時間','兩小時前提醒時間','來源分頁','來源位置']);
   tasks.appendRow(['T1','1151','教學',new Date('2026-09-10'),'12:00','13:00','X160','401','測試者','','G1','已排定',true,true,'','','','']);
+  const taskRow = tasks.getLastRow();
   const students = resultBook.insertSheet('任務學生');
   students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間']);
   students.appendRow(['T1','S1','學生甲','123',1,'未點名','未記錄','']);
@@ -69,7 +87,7 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.match(externalTeaching.handleCommand('點名狀態 T1 S1 到場', context).text, /完成所有學生/);
   assert.equal(attendance.getRange(2, 10).getValue(), '到場');
   assert.match(externalTeaching.handleCommand('完成點名 T1', context).text, /任務已完成/);
-  assert.equal(tasks.getRange(2, 12).getValue(), '已完成');
+  assert.equal(tasks.getRange(taskRow, 12).getValue(), '已完成');
 });
 
 test('teaching assignments are parsed from date, time, examiner and student rows', () => {
