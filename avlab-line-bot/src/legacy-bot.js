@@ -452,7 +452,7 @@ function showTasksForName(name) {
                '⚠️ 考官與考生請留意時間，無法出席請提早尋找代班或完成請假程序喔！';
   var t = getTasksFromSheet(name).concat(getExternalTasksForName(name)).sort((a,b)=>a.start-b.start);
   if(level==='見習'&&!t.length)return{text:apprenticeText,quickReply:bA()};
-  if (!t.length) return { text: '找不到 ' + name + ' 的任務記錄', quickReply: bA() };
+  if (!t.length) return { text: '找不到 ' + name + ' 的任務記錄', quickReply: bA(), notFound: true };
   var txt=(level==='見習'?apprenticeText+'\n\n':'')+'【' + name + ' 的教學/考官任務】\n\n',q=[],td=new Date();
   var today=new Date(td);today.setHours(0,0,0,0);
   t.forEach((tk, i) => {
@@ -602,9 +602,14 @@ function matchPrefix(i,p){
 }
 function handleQuery(r,t){
   if(!r) return {text:'請輸入姓名', quickReply:bA()};
+  var directTask=null;
+  if(t==='task'){
+    directTask=showTasksForName(String(r).trim());
+    if(!directTask.notFound)return directTask;
+  }
   var all=getAssistantNames(), no=nrm(r), ex=all.find(n=>n===no);
   if(ex){
-    if(t==='task') return showTasksForName(ex);
+    if(t==='task') return directTask;
     if(t==='att') return showAttendanceStats(ex);
     if(t==='sub') return showSubstituteInfo(ex);
     if(t==='cert') return showCertificationProgress(ex);
@@ -621,6 +626,7 @@ function handleQuery(r,t){
     res.text='您輸入的是「'+r+'」，已為您查詢最接近的姓名「'+cls.name+'」。\n\n'+res.text;
     return res;
   }
+  if(t==='task')return directTask;
   return {text:'查無「'+r+'」在助理名單中', quickReply:bA()};
 }
 

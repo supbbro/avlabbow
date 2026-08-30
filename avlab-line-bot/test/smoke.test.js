@@ -90,6 +90,15 @@ test('name task query includes assignments synchronized from the external schedu
   assert.match(response.text, /任務已過期/);
 });
 
+test('task query can find an examiner who is not in the assistant roster', () => {
+  const tasks = runtime.openById(ids.externalResults).getSheetByName('對外任務');
+  tasks.appendRow(['EXT-TEMP-EXAMINER','1151','教學',new Date('2026-03-19'),'12:00','13:00','聲音工作區','聲音工作區','真假','','','已排定']);
+  const response = bot.getReply('任務 真假', 'U-test');
+  assert.match(response.text, /真假 的教學\/考官任務/);
+  assert.match(response.text, /\[對外\].*聲音工作區/);
+  assert.doesNotMatch(response.text, /助理名單/);
+});
+
 test('group attendance writes a normalized record and completes the task', () => {
   const resultBook = runtime.openById(ids.externalResults);
   const tasks = resultBook.getSheetByName('對外任務') || resultBook.insertSheet('對外任務');
