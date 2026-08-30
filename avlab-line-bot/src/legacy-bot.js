@@ -711,14 +711,13 @@ function getBoundName(userId) {
 // ========== 選單 ==========
 function getMainMenu(){return{text:'🤖 歡迎使用影音實驗室教學部機器人！\n\n請選擇您的身份：',quickReply:qr([{label:'👨‍🎓 對外學生',text:'對外學生'},{label:'👩‍💼 中心助理',text:'中心助理'}])};}
 function getExternalMainMenu(){return{text:'請選擇您想查詢的對外學生資訊：',quickReply:qr([{label:'📋 流程',text:'流程'},{label:'📅 時程',text:'對外時程'},{label:'📚 題庫/講義',text:'題庫講義'},{label:'💰 保證金',text:'保證金'},{label:'🚫 學生請假',text:'學生請假'},{label:'🔑 借器材',text:'借用規定'},{label:'🔧 器材練習',text:'器材練習'},{label:'🔍 更多',text:'對外更多'},{label:'🔙 回主選單',text:'主選單'}])};}
-function getExternalMoreMenu(){return{text:'更多對外學生資訊：',quickReply:qr([{label:'📝 考試項目',text:'考試項目'},{label:'📘 講義',text:'講義'},{label:'⏰ 營業時間',text:'營業時間'},{label:'🚫 額滿',text:'額滿'},{label:'🔙 回對外主選單',text:'對外學生'},{label:'🔙 回主選單',text:'主選單'}])};}
+function getExternalMoreMenu(){return{text:'更多對外學生資訊：',quickReply:qr([{label:'📘 講義',text:'講義'},{label:'⏰ 營業時間',text:'營業時間'},{label:'🚫 額滿',text:'額滿'},{label:'🔙 回對外主選單',text:'對外學生'},{label:'🔙 回主選單',text:'主選單'}])};}
 function getInternalMainMenu(){
   return {
     text:'請選擇您想查詢的助理資訊：',
     quickReply:qr([
       {label:'🔍 各項查詢', text:'查詢'},
       {label:'📝 請假', text:'請假選項'},
-      {label:'📋 點名', text:'點名表'},
       {label:'🔮 每日運勢', text:'每日運勢'},
       {label:'🍽️ 教學飽', text:'教學飽'},
       {label:'🔍 更多', text:'助理更多'},
@@ -749,9 +748,6 @@ function getInternalMoreMenu(){
       {label:'📅 時程', text:'對內時程'},
       {label:'👥 對外考官更動', text:'對外考官更動'},
       {label:'👨‍🏫 對內考官安排', text:'對內考官'},
-      {label:'📋 統整表', text:'對內統整'},
-      {label:'🎓 認證狀況', text:'認證狀況'},
-      {label:'📋 各級認證項目', text:'各級認證項目'},
       {label:'🔄 越級考', text:'越級考'},
       {label:'📁 常用連結', text:'常用連結'},
       {label:'📊 全體點名統計', text:'全體點名統計'},
@@ -762,7 +758,7 @@ function getInternalMoreMenu(){
   };
 }
 function getLeaveOptionsMenu(){return{text:'請選擇請假類型：',quickReply:qr([{label:'📝 對內請假',text:'對內請假'},{label:'👥 對外考官更動',text:'對外考官更動'},{label:'🔙 回助理主選單',text:'中心助理'},{label:'🔙 回主選單',text:'主選單'}])};}
-function getCommonLinks(){return{text:'【助理常用連結】\n\n📊 1151教學排程\nhttps://docs.google.com/spreadsheets/d/11SEPY8ugY1-l_EQ-J3qYdxmQoXHWARmgBY4wA-QFQzI/edit\n\n📝 對內點名表\nhttps://docs.google.com/spreadsheets/d/1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY/edit?usp=sharing\n\n👨‍🏫 1151 對內考官安排\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit\n\n🎓 助理認證狀況表\nhttps://docs.google.com/spreadsheets/d/1R-3NyQ24se2jWE-YunOGXKu2sc4bpBHzE7tmI4RCWD0/edit?usp=sharing\n\n📋 各級助理認證項目\nhttps://docs.google.com/document/d/1MHF7bs-q6YaK7ieVPFgJ7tkkwWe_xghU/edit?usp=sharing&ouid=108650055905957222325&rtpof=true&sd=true\n\n📋 對內統整表格\nhttps://docs.google.com/spreadsheets/d/1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY/edit?usp=sh',quickReply:bA()};}
+function getCommonLinks(){return{text:'【1151 助理常用連結】\n\n📊 1151 教學總排程\nhttps://docs.google.com/spreadsheets/d/11SEPY8ugY1-l_EQ-J3qYdxmQoXHWARmgBY4wA-QFQzI/edit\n\n👨‍🏫 1151 對內教學官／考官安排\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit',quickReply:bA()};}
 
 // ========== 統一回應 ==========
 var UNIFIED={
@@ -772,25 +768,20 @@ var UNIFIED={
   保證金:'【保證金制度說明】\nhttps://drive.google.com/file/d/1cSVpcW5allLz6_tImqg2KEd7A2Jfu101/view',
   學生請假:'【請假與更改時間規定 (對外學生)】\n\n⚠️ 對外考生「不可請假」，但可透過「對外考試時間異動表單」申請更改時間或取消報名。⚠️\n\n❗ 取消報名仍「不予退費」，請確定報名項目後再繳交保證金。\n\n若測驗當天未出席將視同放棄資格，且已繳交之保證金一律「不予退費」。\n\n（⚠️ 更改時間表單目前建置中，如有需要請先私訊粉專處理。待表單完成後會另行公告。）',
   借用規定:'【器材借用權限說明】\n器材借用有兩大前提：\n1. 必須先上過「基礎配件課程」並取得權限。\n2. 器材是以「組」為單位，整組的「所有組員」都必須通過該項認證，才能開放借用權限！請督促隊友。',
-  考試項目:'【對外教學考試項目時程表】\nhttps://docs.google.com/spreadsheets/d/1sk0MrNa81NmLj6u9iXnfxlXfYDR0vnavAaDGnvNDr5E/edit?usp=sharing',
   講義:'【對外教學工作坊 - 上課講義】\n上課前或複習時可以參考這裡的教學講義喔！\n\n👉 https://avlab.nccu.edu.tw/PageDoc/Detail?fid=10543&id=18228',
   營業時間:'【中心開放時間】\n週一至週四：12:00～18:00\n週五：10:00～18:00',
   額滿:'【報名額滿怎麼辦】\n選項消失代表該時段已額滿。基礎配件課程限額 10 名，其他項目限額 6-8 名，請選擇其他時段。若所有時段皆無法配合，請私訊粉專。',
   器材練習:'【器材練習借用說明】\n\n本實驗室開放同學於參加考試前，至影音實驗室現場借用器材練習。由於器材與場地數量有限，請務必遵守以下規定：\n\n📌 預約方式\n• 可預約未來兩週內的練習時段（最晚須於練習「前一天」完成預約，不接受當天預約）。\n• 每人每天「僅能預約一個時段」，每時段至多 2 小時。\n• 每個時段可練習 1～2 項器材。\n\n⏰ 預約限制\n• 為確保公平使用機會，若無提前預約，現場無法保證能使用到器材。\n• 練習時間以兩小時為上限，逾時將影響其他同學權益。\n\n📝 請至影音實驗室填寫紙本報名表',
   對內請假:'【對內請假規定與表單】\n\n⏳ 請假死線：\n正常請假死線為「星期三 23:59」。逾期緩衝死線為「星期四 18:00」，超過此時間皆視為曠職並扣考核分。\n\n📝 對內請假表單：\nhttps://docs.google.com/forms/d/e/1FAIpQLSfHCPloGR4rWQuYBamgp1Uz7L18YrzhhiubUny3-A49RMrffQ/viewform?usp=header\n\n⚠️ (若是對外學生要改考試時間，請輸入「學生請假」)',
-  點名表:'📝【對內教學/檢定 點名表】\n\n各位教學官與考官請注意，對內考試與教學的點名都在「對內統整」試算表中進行！\n\n👉 查點名與登記請直接點擊下方連結：\nhttps://docs.google.com/spreadsheets/d/1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY/edit?usp=sharing\n\n⚠️ 備註：進入後請查看裡面的「教學考試點名和通過情況總表」。請務必於教學或檢定結束後確實完成點名登記，以免影響助理考核與扣分！',
-  對內統整:'【對內統整表格 (含點名表)】\nhttps://docs.google.com/spreadsheets/d/1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY/edit?usp=sh',
-  認證狀況:'【助理認證狀況表】\nhttps://docs.google.com/spreadsheets/d/1R-3NyQ24se2jWE-YunOGXKu2sc4bpBHzE7tmI4RCWD0/edit?usp=sharing',
-  各級認證項目:'【各級助理需通過認證項目】\n\n可參考以下文件了解各級助理應通過的器材認證：\n👉 https://docs.google.com/document/d/1MHF7bs-q6YaK7ieVPFgJ7tkkwWe_xghU/edit?usp=sharing&ouid=108650055905957222325&rtpof=true&sd=true',
   越級考:'【越級考/補考說明】\n\n1️⃣ 若要申請越級考，請提前私訊對內教學組長「蔡季妍」，等候他協助安排考官。\n2️⃣ 由考生與考官自行約時間考試。\n3️⃣ 考試時由考官填寫認證表單，若登記為通過，兩個工作天內經理會開啟權限。\n\n【補考說明】\n若教學部已為同級助理開設統一考試時段，考試未過或未參與考試者，須於該年度完成補考：\n• 原開設時段考試未過：請找原考官補考。\n• 原開設時段未參與考試：請找原考官（若有兩位擇一即可）。\n• 若原考官已不在中心，請找對內教學組長「蔡季妍」安排，流程同越級考。\n\n【越級考/加開申請表單】\nhttps://docs.google.com/forms/d/e/1FAIpQLSfOrdq0UM02gi1F7eQjl1JA39Kp8Hli3DFVlWmUL958AfCCtw/viewform?usp=header',
   對外考官更動:'【對外教學考官更動表單 (中心助理專用)】\n當您擔任對外考官卻無法出席時，請務必找好代班人後再填寫此表單！\n\nhttps://docs.google.com/forms/d/e/1FAIpQLScZ-Xb5REWXs8cmW0b5u1txAcEJmV4Y_ZVKAEs-lYjUBpcr5w/viewform?usp=sharing&ouid=108650055905957222325\n\n⚠️ 備註：對外考官若無法出席，「一定要找代班」！請找好代班人後再填寫此表單。',
   對內考官:'【1151 對內考官安排】\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit\n\n⚠️ 備註：對內考官若需請假，請務必尋找「代班人」，並填寫對內請假表單：\nhttps://docs.google.com/forms/d/e/1FAIpQLSfHCPloGR4rWQuYBamgp1Uz7L18YrzhhiubUny3-A49RMrffQ/viewform?usp=header',
-  對內時程:'【未來教學/檢定活動】\n\n寒訓教學\n02/22 - 一級 / KOMODO 6K\n02/22  - 二級 / Vortex 4S/8S\n02/22  - 二級 / FS7\n02/22  - 見習 / H6\n02/22  - 見習 / 軟殼燈\n寒訓檢定\n03/13  - 一級 / KOMODO 6K\n03/13  - 二級 / Vortex 4S/8S\n03/13  - 二級 / FS7\n03/13  - 見習 / H6\n03/13  - 見習 / 軟殼燈\n期中教學\n04/10  - 一級 / 無線追焦器\n04/10  - 二級 / 舊圖傳：Dwarf\n04/10  - 二級 / 聲音工作區\n04/10  - 見習 / Atomos螢幕\n04/10  - 見習 / Lith LED\n期中檢定\n04/24  - 一級 / 無線追焦器\n04/24  - 二級 / 舊圖傳：Dwarf\n04/24  - 二級 / 聲音工作區\n04/24  - 見習 / Atomos螢幕\n04/24  - 見習 / Lith LED\n期末教學\n05/15  - 一級 / A7S3\n05/15  - 一級 / 633\n05/15  - 二級 / 新圖傳：Teradek\n05/15  - 二級 / f8n\n05/15  - 見習 / Zoom350\n05/15  - 見習 / X160\n期末檢定\n05/29  - 一級 / A7S3\n05/29  - 一級 / 633\n05/29  - 二級 / 新圖傳：Teradek\n05/29  - 二級 / f8n\n05/29  - 見習 / Zoom350\n05/29  - 見習 / X160'
+  對內時程:'【1151 對內教學／檢定時程】\n\n📚 9/6 暑訓教學\n📝 9/18 暑訓檢定\n📚 10/16 期中教學\n📝 10/30 期中檢定\n📚 11/6 期末教學\n📝 12/4 期末檢定\n\n完整器材與考官安排：\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit'
 };
 function getUnifiedReply(k){
   var t = UNIFIED[k];
   if (k === '流程' || k === '對外時程' || k === '題庫講義' || k === '保證金' || 
-      k === '學生請假' || k === '借用規定' || k === '考試項目' || k === '講義' || 
+      k === '學生請假' || k === '借用規定' || k === '講義' || 
       k === '營業時間' || k === '額滿' || k === '器材練習') {
     return t ? { text: t, quickReply: bE() } : null;
   }
@@ -3171,8 +3162,6 @@ function getReply(u, i) {
     if (!n.length) return { text: '⚠️ 目前無法讀取助理名單，請確認試算表設定或稍後再試。', quickReply: qr([{ label: '🔙 回助理主選單', text: '中心助理' }, { label: '🔙 回主選單', text: '主選單' }]) };
     return { text: '📋 查詢考試結果\n請輸入「考試結果 姓名」，例如：考試結果 林宇俊', quickReply: qr([{ label: '🔙 回助理主選單', text: '中心助理' }, { label: '🔙 回主選單', text: '主選單' }]) };
   }
-  if (u === '點名表') return getUnifiedReply('點名表');
-
   // ===== 前綴比對（實際查詢）=====
   var tp = ['查任務', '任務查詢', '我的任務', '任務'];
   var ap = ['點名統計', '個人點名', '點名'];

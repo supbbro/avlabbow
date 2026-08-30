@@ -21,6 +21,18 @@ test('main menu survives the Apps Script to Node compatibility layer', () => {
   assert.equal(reply.quickReply.items.length, 2);
 });
 
+test('menus omit retired links and common links only show current 1151 files', () => {
+  const common = bot.getReply('常用連結', 'U-test').text;
+  assert.match(common, /1151 教學總排程/);
+  assert.match(common, /1151 對內教學官／考官安排/);
+  assert.doesNotMatch(common, /對內點名表|助理認證狀況表|對內統整表格/);
+
+  const internalLabels = bot.getReply('助理更多', 'U-test').quickReply.items.map(item => item.action.label);
+  assert.equal(internalLabels.some(label => /統整表|認證狀況|各級認證項目/.test(label)), false);
+  const externalLabels = bot.getReply('對外更多', 'U-test').quickReply.items.map(item => item.action.label);
+  assert.equal(externalLabels.some(label => /考試項目/.test(label)), false);
+});
+
 test('Taipei date formatter supports the patterns used by the bot', () => {
   assert.equal(formatDate(new Date('2026-08-27T12:34:00Z'), 'yyyy/MM/dd HH:mm'), '2026/08/27 20:34');
 });
