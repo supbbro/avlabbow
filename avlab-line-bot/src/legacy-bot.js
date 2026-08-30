@@ -1,6 +1,6 @@
 'use strict';
 var CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-var TASK_SHEET_ID='1QqMoUs-rQOOKXkXUHxvliRW-CuYMeSEWafNjEHURU9A',TASK_SHEET_NAME='1142 教學考官安排彙整',COL_TASK_DATE=0,COL_TASK_PHASE=1,COL_TASK_LEVEL=2,COL_TASK_ITEM=3,COL_TASK_NAME=4,COL_TASK_LOCATION=5;
+var TASK_SHEET_ID=process.env.INTERNAL_TASK_FILE_ID||'1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z',TASK_SHEET_NAME='1151 對內教學官／考官安排',COL_TASK_DATE=0,COL_TASK_PHASE=1,COL_TASK_LEVEL=2,COL_TASK_ITEM=3,COL_TASK_NAME=4,COL_TASK_LOCATION=5;
 var EXTERNAL_RESULTS_SHEET_ID=process.env.EXTERNAL_RESULTS_SHEET_ID||'1WXeO6VF-emmoP_07tzsGk5z0WGSU7aFLbtbT0ImYACg',EXTERNAL_TASK_SHEET_NAME='對外任務';
 var MASTER_SHEET_ID='1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY';
 var ATTENDANCE_SHEET_NAME='教學考試點名和通過情況總表';
@@ -443,12 +443,13 @@ function getExternalTasksForName(n){
 // ========== 顯示任務 ==========
 function showTasksForName(name) {
   var level = LEVEL_MAP[name];
-  var apprenticeText='【對內教學/檢定 - 重要時程表】\n\n' +
-               '📝 3/13 期初檢定\n\n' +
-               '📚 4/10 期中教學\n\n' +
-               '📝 4/24 期中檢定\n\n' +
-               '📚 5/15 期末教學\n\n' +
-               '📝 5/29 期末檢定\n\n' +
+  var apprenticeText='【1151 對內教學/檢定 - 重要時程表】\n\n' +
+               '📚 9/6 暑訓教學\n\n' +
+               '📝 9/18 暑訓檢定\n\n' +
+               '📚 10/16 期中教學\n\n' +
+               '📝 10/30 期中檢定\n\n' +
+               '📚 11/6 期末教學\n\n' +
+               '📝 12/4 期末檢定\n\n' +
                '⚠️ 考官與考生請留意時間，無法出席請提早尋找代班或完成請假程序喔！';
   var t = getTasksFromSheet(name).concat(getExternalTasksForName(name)).sort((a,b)=>a.start-b.start);
   if(level==='見習'&&!t.length)return{text:apprenticeText,quickReply:bA()};
@@ -767,7 +768,7 @@ function getInternalMoreMenu(){
   };
 }
 function getLeaveOptionsMenu(){return{text:'請選擇請假類型：',quickReply:qr([{label:'📝 對內請假',text:'對內請假'},{label:'👥 對外考官更動',text:'對外考官更動'},{label:'🔙 回助理主選單',text:'中心助理'},{label:'🔙 回主選單',text:'主選單'}])};}
-function getCommonLinks(){return{text:'【助理常用連結】\n\n📊 1142教學排程\nhttps://docs.google.com/spreadsheets/d/1--4q0sE-flBoK1UprpYGp3DP5uI98ncv/edit?gid=345289696#gid=345289696\n\n📝 對內點名表\nhttps://docs.google.com/spreadsheets/d/1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY/edit?usp=sharing\n\n👨‍🏫 對內考官安排文件\nhttps://docs.google.com/document/d/1uHRAXf2WmIemvNGnFjHlyWOo5c9Tkljt/edit\n\n🎓 助理認證狀況表\nhttps://docs.google.com/spreadsheets/d/1R-3NyQ24se2jWE-YunOGXKu2sc4bpBHzE7tmI4RCWD0/edit?usp=sharing\n\n📋 各級助理認證項目\nhttps://docs.google.com/document/d/1MHF7bs-q6YaK7ieVPFgJ7tkkwWe_xghU/edit?usp=sharing&ouid=108650055905957222325&rtpof=true&sd=true\n\n📋 對內統整表格\nhttps://docs.google.com/spreadsheets/d/1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY/edit?usp=sh',quickReply:bA()};}
+function getCommonLinks(){return{text:'【助理常用連結】\n\n📊 1151教學排程\nhttps://docs.google.com/spreadsheets/d/11SEPY8ugY1-l_EQ-J3qYdxmQoXHWARmgBY4wA-QFQzI/edit\n\n📝 對內點名表\nhttps://docs.google.com/spreadsheets/d/1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY/edit?usp=sharing\n\n👨‍🏫 1151 對內考官安排\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit\n\n🎓 助理認證狀況表\nhttps://docs.google.com/spreadsheets/d/1R-3NyQ24se2jWE-YunOGXKu2sc4bpBHzE7tmI4RCWD0/edit?usp=sharing\n\n📋 各級助理認證項目\nhttps://docs.google.com/document/d/1MHF7bs-q6YaK7ieVPFgJ7tkkwWe_xghU/edit?usp=sharing&ouid=108650055905957222325&rtpof=true&sd=true\n\n📋 對內統整表格\nhttps://docs.google.com/spreadsheets/d/1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY/edit?usp=sh',quickReply:bA()};}
 
 // ========== 統一回應 ==========
 var UNIFIED={
@@ -789,7 +790,7 @@ var UNIFIED={
   各級認證項目:'【各級助理需通過認證項目】\n\n可參考以下文件了解各級助理應通過的器材認證：\n👉 https://docs.google.com/document/d/1MHF7bs-q6YaK7ieVPFgJ7tkkwWe_xghU/edit?usp=sharing&ouid=108650055905957222325&rtpof=true&sd=true',
   越級考:'【越級考/補考說明】\n\n1️⃣ 若要申請越級考，請提前私訊對內教學組長「蔡季妍」，等候他協助安排考官。\n2️⃣ 由考生與考官自行約時間考試。\n3️⃣ 考試時由考官填寫認證表單，若登記為通過，兩個工作天內經理會開啟權限。\n\n【補考說明】\n若教學部已為同級助理開設統一考試時段，考試未過或未參與考試者，須於該年度完成補考：\n• 原開設時段考試未過：請找原考官補考。\n• 原開設時段未參與考試：請找原考官（若有兩位擇一即可）。\n• 若原考官已不在中心，請找對內教學組長「蔡季妍」安排，流程同越級考。\n\n【越級考/加開申請表單】\nhttps://docs.google.com/forms/d/e/1FAIpQLSfOrdq0UM02gi1F7eQjl1JA39Kp8Hli3DFVlWmUL958AfCCtw/viewform?usp=header',
   對外考官更動:'【對外教學考官更動表單 (中心助理專用)】\n當您擔任對外考官卻無法出席時，請務必找好代班人後再填寫此表單！\n\nhttps://docs.google.com/forms/d/e/1FAIpQLScZ-Xb5REWXs8cmW0b5u1txAcEJmV4Y_ZVKAEs-lYjUBpcr5w/viewform?usp=sharing&ouid=108650055905957222325\n\n⚠️ 備註：對外考官若無法出席，「一定要找代班」！請找好代班人後再填寫此表單。',
-  對內考官:'【對內考官安排文件】\nhttps://docs.google.com/document/d/1uHRAXf2WmIemvNGnFjHlyWOo5c9Tkljt/edit\n\n⚠️ 備註：對內考官若需請假，請務必尋找「代班人」，並填寫對內請假表單：\nhttps://docs.google.com/forms/d/e/1FAIpQLSfHCPloGR4rWQuYBamgp1Uz7L18YrzhhiubUny3-A49RMrffQ/viewform?usp=header',
+  對內考官:'【1151 對內考官安排】\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit\n\n⚠️ 備註：對內考官若需請假，請務必尋找「代班人」，並填寫對內請假表單：\nhttps://docs.google.com/forms/d/e/1FAIpQLSfHCPloGR4rWQuYBamgp1Uz7L18YrzhhiubUny3-A49RMrffQ/viewform?usp=header',
   對內時程:'【未來教學/檢定活動】\n\n寒訓教學\n02/22 - 一級 / KOMODO 6K\n02/22  - 二級 / Vortex 4S/8S\n02/22  - 二級 / FS7\n02/22  - 見習 / H6\n02/22  - 見習 / 軟殼燈\n寒訓檢定\n03/13  - 一級 / KOMODO 6K\n03/13  - 二級 / Vortex 4S/8S\n03/13  - 二級 / FS7\n03/13  - 見習 / H6\n03/13  - 見習 / 軟殼燈\n期中教學\n04/10  - 一級 / 無線追焦器\n04/10  - 二級 / 舊圖傳：Dwarf\n04/10  - 二級 / 聲音工作區\n04/10  - 見習 / Atomos螢幕\n04/10  - 見習 / Lith LED\n期中檢定\n04/24  - 一級 / 無線追焦器\n04/24  - 二級 / 舊圖傳：Dwarf\n04/24  - 二級 / 聲音工作區\n04/24  - 見習 / Atomos螢幕\n04/24  - 見習 / Lith LED\n期末教學\n05/15  - 一級 / A7S3\n05/15  - 一級 / 633\n05/15  - 二級 / 新圖傳：Teradek\n05/15  - 二級 / f8n\n05/15  - 見習 / Zoom350\n05/15  - 見習 / X160\n期末檢定\n05/29  - 一級 / A7S3\n05/29  - 一級 / 633\n05/29  - 二級 / 新圖傳：Teradek\n05/29  - 二級 / f8n\n05/29  - 見習 / Zoom350\n05/29  - 見習 / X160'
 };
 function getUnifiedReply(k){

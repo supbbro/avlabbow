@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/runtime.js && node --check src/external-schedule-parser.js && node --check src/external-teaching.js && node --check src/legacy-bot.js",
+    "check": "node --check src/server.js && node --check src/runtime.js && node --check src/internal-task-parser.js && node --check src/external-schedule-parser.js && node --check src/external-teaching.js && node --check src/legacy-bot.js",
     "test": "node --test"
   },
   "keywords": [],
@@ -18,6 +18,7 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "googleapis": "^176.0.0"
+    "googleapis": "^176.0.0",
+    "xlsx": "^0.18.5"
   }
 }

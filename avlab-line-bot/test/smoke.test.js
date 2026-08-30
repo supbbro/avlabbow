@@ -13,6 +13,7 @@ installGlobals(runtime);
 const bot = require('../src/legacy-bot');
 const externalTeaching = require('../src/external-teaching');
 const { parseTeachingSheet, parseExamSheet } = require('../src/external-schedule-parser');
+const { parseInternalTaskWorkbook } = require('../src/internal-task-parser');
 
 test('main menu survives the Apps Script to Node compatibility layer', () => {
   const reply = bot.getReply('主選單', 'U-test');
@@ -149,4 +150,20 @@ test('exam assignments propagate merged date headers and choose the correct exam
   assert.equal(tasks[1].start, '12:05');
   assert.deepEqual(tasks[1].students.map(student => student.name), ['學生乙', '學生丙']);
   assert.equal(tasks[0].date.getFullYear(), 2027);
+});
+
+test('1151 Excel examiner table is normalized and multi-examiner cells are searchable', () => {
+  const normalized = parseInternalTaskWorkbook({
+    '考官安排': [
+      ['1151 對內教學官／考官安排', '', '', ''],
+      ['時程', '級別', '項目', '教學官／考官＆考試地點'],
+      ['9/6\n暑訓教學\n5人', '一級', 'Flo Box', '王鈺慈（出機區）'],
+      ['', '見習', '棚內機(CX350)', '吳青璇、詹詠丞（新棚）']
+    ]
+  }, '1151');
+  assert.equal(normalized.length, 4);
+  assert.deepEqual(normalized.slice(1).map(row => row[4]), ['王鈺慈', '吳青璇', '詹詠丞']);
+  assert.equal(normalized[3][5], '新棚');
+  assert.equal(normalized[1][0].getFullYear(), 2026);
+  assert.equal(normalized[2][1], '暑訓教學');
 });

@@ -1,7 +1,9 @@
 'use strict';
 
 const { google } = require('googleapis');
-const { workbooks, ids, timezone } = require('./config');
+const XLSX = require('xlsx');
+const { workbooks, ids, excelWorkbookIds, timezone } = require('./config');
+const { parseInternalTaskWorkbook } = require('./internal-task-parser');
 
 const a1 = name => `'${String(name).replaceAll("'", "''")}'`;
 const colName = number => {
@@ -44,7 +46,7 @@ function formatDate(value, pattern) {
 function maybeDate(value, spreadsheetId, sheetName, column) {
   if (typeof value !== 'string' || !value.trim()) return value;
   const dateColumns = {
-    [`${ids.task}|1142 教學考官安排彙整`]: [0],
+    [`${ids.task}|1151 對內教學官／考官安排`]: [0],
     [`${ids.leave}|表單回覆 1`]: [0, 5],
     [`${ids.external}|表單回覆 1`]: [0, 2],
     [`${ids.retest}|表單回覆 1`]: [0, 6],
@@ -155,8 +157,12 @@ class SpreadsheetFacade {
 
 class GoogleSheetsRuntime {
   constructor() {
-    const auth = new google.auth.GoogleAuth({ credentials: credentialsFromEnv(), scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
+    const auth = new google.auth.GoogleAuth({ credentials: credentialsFromEnv(), scopes: [
+      'https://www.googleapis.com/auth/spreadsheets',
+      'https://www.googleapis.com/auth/drive.readonly'
+    ] });
     this.api = google.sheets({ version: 'v4', auth });
+    this.driveApi = google.drive({ version: 'v3', auth });
     this.sheets = new Map();
     this.loadedAt = new Map();
     this.loading = new Map();
@@ -212,6 +218,7 @@ class GoogleSheetsRuntime {
   }
 
   async loadWorkbook(spreadsheetId, requested, { forceMetadata = false } = {}) {
+    if (excelWorkbookIds.has(spreadsheetId)) return this.loadExcelWorkbook(spreadsheetId, requested);
     const metadata = await this.getWorkbookMetadata(spreadsheetId, { force: forceMetadata });
     const names = requested.filter(name => metadata.has(name));
     const response = names.length ? await this.api.spreadsheets.values.batchGet({
@@ -224,6 +231,18 @@ class GoogleSheetsRuntime {
         values.map(row => row.map((value, column) => maybeDate(value, spreadsheetId, name, column))), metadata.get(name)));
     });
     this.sheets.set(spreadsheetId, book);
+  }
+
+  async loadExcelWorkbook(fileId, requested) {
+    const response = await this.driveApi.files.get({ fileId, alt: 'media' }, { responseType: 'arraybuffer' });
+    const workbook = XLSX.read(Buffer.from(response.data), { type: 'buffer', cellDates: true });
+    const rawSheets = Object.fromEntries(workbook.SheetNames.map(name => [
+      name,
+      XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '', raw: false, dateNF: 'm/d/yyyy' })
+    ]));
+    const normalized = parseInternalTaskWorkbook(rawSheets, process.env.ACADEMIC_TERM || '1151');
+    const alias = requested[0];
+    this.sheets.set(fileId, new Map([[alias, new SheetFacade(this, fileId, alias, normalized)]]));
   }
 
   openById(id) { return new SpreadsheetFacade(this, id); }

@@ -1,7 +1,7 @@
 'use strict';
 
 const ids = {
-  task: '1QqMoUs-rQOOKXkXUHxvliRW-CuYMeSEWafNjEHURU9A',
+  task: process.env.INTERNAL_TASK_FILE_ID || '1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z',
   master: '1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY',
   leave: '1A0wZWctAbihNzNi3Ji0CVW6at024QQQDnNzdQP1K2XI',
   external: '1UGoTWRq59rNatZn5ZUYRu-reiYiRquI2GREeWDsf5sU',
@@ -15,7 +15,7 @@ const ids = {
 };
 
 const workbooks = {
-  [ids.task]: ['1142 教學考官安排彙整'],
+  [ids.task]: ['1151 對內教學官／考官安排'],
   [ids.master]: ['教學考試點名和通過情況總表', '用戶綁定', '最終排班結果'],
   [ids.leave]: ['表單回覆 1'],
   [ids.external]: ['表單回覆 1'],
@@ -28,4 +28,6 @@ const workbooks = {
   [ids.externalResults]: ['對外任務', '任務學生', 'LINE點名紀錄', 'LINE群組設定']
 };
 
-module.exports = { ids, workbooks, timezone: process.env.TZ || 'Asia/Taipei' };
+const excelWorkbookIds = new Set([ids.task]);
+
+module.exports = { ids, workbooks, excelWorkbookIds, timezone: process.env.TZ || 'Asia/Taipei' };

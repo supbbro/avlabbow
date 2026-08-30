@@ -24,7 +24,7 @@ Google Sheets 編輯/表單提交 ──Apps Script relay──> POST /automatio
 
 ## 2. 建立 Google 服務帳號
 
-1. 在 Google Cloud 建立專案並啟用 **Google Sheets API**。
+1. 在 Google Cloud 建立專案並啟用 **Google Sheets API** 與 **Google Drive API**。
 2. 建立 Service Account，下載 JSON key。
 3. 找出 JSON 的 `client_email`。
 4. 把 `src/config.js` 內列出的每一份試算表分享給該 email，權限設為「編輯者」。
@@ -59,6 +59,7 @@ curl http://localhost:3000/health
    - `AUTOMATION_SECRET`（長隨機字串）
    - `EXTERNAL_RESULTS_SHEET_ID=1WXeO6VF-emmoP_07tzsGk5z0WGSU7aFLbtbT0ImYACg`
    - `EXTERNAL_CLASS_SCHEDULE_ID=1oaEKt3JVxcdy8yPBGZAuRh3lkhnvRoIJ9rTNbj-Gh9I`
+   - `INTERNAL_TASK_FILE_ID=1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z`
    - `ACADEMIC_TERM=1151`
    - `TZ=Asia/Taipei`
    - `SHEETS_CACHE_TTL_MS=60000`（選用；預設快取 60 秒，降低 LINE 回覆延遲）
@@ -89,7 +90,6 @@ Railway 可取代 Apps Script 的 LINE webhook 和時間排程，但 Google Shee
    - `onRetestFormSubmit`：補考回覆表，提交表單時
    - `onAvailabilityFormSubmit`：可用時間回覆表，提交表單時
    - `onMasterSheetEdit`：點名總表，編輯時
-   - `onTaskSheetEdit`：任務表，編輯時
 
 不要再把舊的 Apps Script `doPost` 部署為 LINE webhook，否則可能重複處理。
 
@@ -116,6 +116,7 @@ Railway 常駐程序會以台北時間執行：
 ## 常見錯誤
 
 - `The caller does not have permission`：某份試算表尚未分享給 Service Account。
+- `Google Drive API ... is disabled`：到 Google Cloud 專案啟用 Google Drive API；對內考官表是 Excel，必須透過 Drive API 下載後解析。
 - `Invalid signature`：Railway 的 `LINE_CHANNEL_SECRET` 不是該 Messaging API channel 的 secret。
 - LINE Verify 成功但無回覆：查看 Railway logs；最常見是 Google key 的換行或 Sheets 權限問題。
 - automation 回傳 401：Apps Script 與 Railway 的 `AUTOMATION_SECRET` 不一致。
