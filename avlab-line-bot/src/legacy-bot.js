@@ -372,13 +372,8 @@ function showSubstituteInfo(n){
   return{text:t, quickReply:bA()};
 }
 
-// ========== 任務查詢（含快取，30秒） ==========
+// ========== 任務查詢（資料由 webhook 進入點即時重新載入） ==========
 function getTasksFromSheet(n){
-  var cache = CacheService.getScriptCache();
-  var cacheKey = 'TASKS_' + nrm(n);
-  var cached = cache.get(cacheKey);
-  if (cached) return JSON.parse(cached).map(t=>Object.assign({},t,{start:new Date(t.start),end:new Date(t.end)}));
-
   try{
     var s=SpreadsheetApp.openById(TASK_SHEET_ID).getSheetByName(TASK_SHEET_NAME);
     if(!s) return[];
@@ -394,7 +389,6 @@ function getTasksFromSheet(n){
         end:new Date(dt.setHours(21,0,0,0))
       };
     });
-    cache.put(cacheKey, JSON.stringify(tasks), 30);
     return tasks;
   }catch(e){return[];}
 }
