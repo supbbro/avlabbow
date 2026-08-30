@@ -48,6 +48,7 @@ async function lineRequest(path, body) {
 
 function toLineMessage(reply) {
   const normalized = typeof reply === 'string' ? { text: reply } : reply;
+  if (normalized?.lineMessage) return normalized.lineMessage;
   if (!normalized?.text) return null;
   const message = { type: 'text', text: String(normalized.text).slice(0, 5000) };
   if (normalized.quickReply?.items?.length) message.quickReply = { items: normalized.quickReply.items.slice(0, 13) };

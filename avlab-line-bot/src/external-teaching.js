@@ -259,6 +259,47 @@ function updateStudent(student, attendance, result) {
   student.attendance = attendance; student.result = result;
 }
 
+function attendanceBubble(task, student, position, total) {
+  const actionButton = (label, status, color) => ({
+    type: 'button', style: 'primary', height: 'sm', color,
+    action: { type: 'message', label, text: `點名狀態 ${task.id} ${student.id} ${status}` }
+  });
+  return {
+    type: 'bubble', size: 'kilo',
+    header: { type: 'box', layout: 'vertical', backgroundColor: '#F3F6FA', paddingAll: '16px', contents: [
+      { type: 'text', text: `${task.equipment} 點名`, weight: 'bold', size: 'md', color: '#1F2937' },
+      { type: 'text', text: `${position}/${total}`, size: 'xs', color: '#6B7280', margin: 'sm' }
+    ] },
+    body: { type: 'box', layout: 'vertical', paddingAll: '16px', contents: [
+      { type: 'text', text: String(student.name || '未填姓名'), weight: 'bold', size: 'xl', wrap: true },
+      ...(student.number ? [{ type: 'text', text: String(student.number), size: 'sm', color: '#6B7280', margin: 'sm' }] : []),
+      { type: 'text', text: '請選擇點名結果', size: 'sm', color: '#6B7280', margin: 'lg' }
+    ] },
+    footer: { type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '12px', contents: [
+      actionButton('準時', '到場', '#06C755'),
+      actionButton('遲到', '遲到', '#F59E0B'),
+      actionButton('缺席', '缺席', '#DC2626')
+    ] }
+  };
+}
+
+function attendanceBoard(task, students) {
+  const visible = students.slice(0, 12);
+  const textFallback = `【${task.equipment} 聊天室點名】\n尚有 ${students.length} 人未點名：\n${students.map(student => `• ${student.name}`).join('\n')}\n\n請使用下方點名卡選擇準時、遲到或缺席。`;
+  return {
+    text: textFallback,
+    lineMessage: {
+      type: 'flex',
+      altText: `${task.equipment} 聊天室點名（${students.length} 人）`,
+      contents: { type: 'carousel', contents: visible.map((student, index) => attendanceBubble(task, student, index + 1, students.length)) },
+      quickReply: qr([
+        { label: '查看任務統計', text: `查看任務 ${task.id}` },
+        { label: '重新整理點名', text: `開始點名 ${task.id}` }
+      ])
+    }
+  };
+}
+
 function resultParts(result) {
   return {
     '全部通過': ['通過', '通過'], '僅簡答通過': ['通過', '未通過'],
@@ -284,22 +325,15 @@ function nextPrompt(task, context) {
   const students = studentsFor(task.id);
   const pendingResult = students.find(student => isExam(task) && ['到場', '遲到'].includes(student.attendance) && student.result === '未記錄');
   if (pendingResult) return resultPrompt(task, pendingResult);
-  const next = students.find(student => student.attendance === '未點名');
-  if (!next) {
+  const pending = students.filter(student => student.attendance === '未點名');
+  if (!pending.length) {
     return reply(`✅ ${task.equipment} 已完成所有學生的點名與結果登記。`, [
       { label: '完成點名', text: `完成點名 ${task.id}` },
       { label: '查看認證狀態', uri: certificationStatusUrl() },
       { label: '查看統計', text: `查看任務 ${task.id}` }
     ]);
   }
-  const current = students.indexOf(next) + 1;
-  return reply(`【${task.equipment} 點名】${current}/${students.length}\n學生：${next.name}${next.number ? `（${next.number}）` : ''}\n請選擇出席狀態：`, [
-    { label: '✅ 到場', text: `點名狀態 ${task.id} ${next.id} 到場` },
-    { label: '⏰ 遲到', text: `點名狀態 ${task.id} ${next.id} 遲到` },
-    { label: '📝 請假', text: `點名狀態 ${task.id} ${next.id} 請假` },
-    { label: '❌ 缺席', text: `點名狀態 ${task.id} ${next.id} 缺席` },
-    { label: '查看統計', text: `查看任務 ${task.id}` }
-  ]);
+  return attendanceBoard(task, pending);
 }
 
 function resultPrompt(task, student) {

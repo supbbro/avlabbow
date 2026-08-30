@@ -131,7 +131,11 @@ test('group attendance writes a normalized record and completes the task', () =>
   binds.appendRow(['U1','測試者','']);
   const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
 
-  assert.match(externalTeaching.handleCommand('開始點名 T1', context).text, /學生甲/);
+  const attendanceStart = externalTeaching.handleCommand('開始點名 T1', context);
+  assert.match(attendanceStart.text, /學生甲/);
+  assert.equal(attendanceStart.lineMessage.type, 'flex');
+  assert.equal(attendanceStart.lineMessage.contents.type, 'carousel');
+  assert.deepEqual(attendanceStart.lineMessage.contents.contents[0].footer.contents.map(button => button.action.label), ['準時', '遲到', '缺席']);
   assert.match(externalTeaching.handleCommand('點名狀態 T1 S1 到場', context).text, /完成所有學生/);
   assert.equal(attendance.getRange(2, 10).getValue(), '到場');
   const finished = externalTeaching.handleCommand('完成點名 T1', context);
