@@ -43,6 +43,14 @@ function formatDate(value, pattern) {
     .replace(/HH/g, parts.hour).replace(/mm/g, parts.minute).replace(/ss/g, parts.second);
 }
 
+function sheetApiValue(value) {
+  return value instanceof Date ? formatDate(value, 'yyyy/MM/dd HH:mm:ss') : value;
+}
+
+function sheetApiValues(values) {
+  return values.map(row => row.map(sheetApiValue));
+}
+
 function maybeDate(value, spreadsheetId, sheetName, column) {
   if (typeof value !== 'string' || !value.trim()) return value;
   const dateColumns = {
@@ -264,6 +272,7 @@ class GoogleSheetsRuntime {
   }
 
   async flush() {
+    const batchUpdates = new Map();
     for (const op of this.operations) {
       const spreadsheetId = op.sheet.spreadsheetId;
       if (op.kind === 'addSheet') {
@@ -272,15 +281,19 @@ class GoogleSheetsRuntime {
       } else if (op.kind === 'clear') {
         await this.api.spreadsheets.values.clear({ spreadsheetId, range: a1(op.sheet.name) });
       } else if (op.kind === 'append') {
-        await this.api.spreadsheets.values.append({ spreadsheetId, range: `${a1(op.sheet.name)}!A1`, valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', requestBody: { values: op.values } });
+        await this.api.spreadsheets.values.append({ spreadsheetId, range: `${a1(op.sheet.name)}!A1`, valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', requestBody: { values: sheetApiValues(op.values) } });
       } else if (op.kind === 'update') {
         const endRow = op.row + op.values.length - 1;
         const width = Math.max(...op.values.map(row => row.length));
         const endColumn = op.column + width - 1;
         const range = `${a1(op.sheet.name)}!${colName(op.column)}${op.row}:${colName(endColumn)}${endRow}`;
-        await this.api.spreadsheets.values.update({ spreadsheetId, range, valueInputOption: 'USER_ENTERED', requestBody: { values: op.values } });
+        if (!batchUpdates.has(spreadsheetId)) batchUpdates.set(spreadsheetId, []);
+        batchUpdates.get(spreadsheetId).push({ range, values: sheetApiValues(op.values) });
       }
     }
+    await Promise.all([...batchUpdates].map(([spreadsheetId, data]) => this.api.spreadsheets.values.batchUpdate({
+      spreadsheetId, requestBody: { valueInputOption: 'USER_ENTERED', data }
+    })));
     this.operations = [];
     const calls = this.httpOperations.splice(0).map(({ url, options }) => {
       const headers = { ...(options.headers || {}) };
@@ -311,4 +324,4 @@ function installGlobals(runtime) {
   global.ContentService = { createTextOutput: text => text };
 }
 
-module.exports = { GoogleSheetsRuntime, installGlobals, formatDate };
+module.exports = { GoogleSheetsRuntime, installGlobals, formatDate, sheetApiValue };

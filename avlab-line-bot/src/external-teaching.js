@@ -76,9 +76,12 @@ function studentsFor(taskId) {
 
 function findStudent(taskId, studentId) { return studentsFor(taskId).find(student => student.id === studentId) || null; }
 
-function comparable(value) {
+function comparable(value, columnIndex = -1) {
   if (typeof value === 'boolean') return `B:${value}`;
-  if (value instanceof Date) return `${value.getFullYear()}-${value.getMonth() + 1}-${value.getDate()} ${value.getHours()}:${value.getMinutes()}`;
+  if (value instanceof Date) {
+    const pattern = columnIndex === 3 ? 'yyyy-MM-dd' : 'yyyy-MM-dd HH:mm:ss';
+    return `D:${Utilities.formatDate(value, Session.getScriptTimeZone(), pattern)}`;
+  }
   const raw = String(value ?? '').trim();
   if (/^(TRUE|FALSE)$/i.test(raw)) return `B:${raw.toUpperCase() === 'TRUE'}`;
   if (raw.includes(':') && !raw.includes('/')) {
@@ -88,7 +91,7 @@ function comparable(value) {
   return raw;
 }
 function rowChanged(current, desired) {
-  return desired.some((value, index) => comparable(current[index]) !== comparable(value));
+  return desired.some((value, index) => comparable(current[index], index) !== comparable(value, index));
 }
 
 function syncFromSchedule() {
@@ -479,4 +482,4 @@ function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged } };

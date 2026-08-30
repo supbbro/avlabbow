@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 process.env.LINE_CHANNEL_ACCESS_TOKEN ||= 'test-token';
 process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||= JSON.stringify({ client_email: 'test@example.com', private_key: 'test-key' });
 
-const { GoogleSheetsRuntime, installGlobals, formatDate } = require('../src/runtime');
+const { GoogleSheetsRuntime, installGlobals, formatDate, sheetApiValue } = require('../src/runtime');
 const { ids } = require('../src/config');
 const runtime = new GoogleSheetsRuntime();
 installGlobals(runtime);
@@ -35,6 +35,7 @@ test('menus omit retired links and common links only show current 1151 files', (
 
 test('Taipei date formatter supports the patterns used by the bot', () => {
   assert.equal(formatDate(new Date('2026-08-27T12:34:00Z'), 'yyyy/MM/dd HH:mm'), '2026/08/27 20:34');
+  assert.equal(sheetApiValue(new Date('2026-08-29T16:00:00Z')), '2026/08/30 00:00:00');
 });
 
 test('Google Sheets runtime caches each workbook and supports forced refresh', async () => {
@@ -76,6 +77,14 @@ test('selected workbook refresh leaves the other cached workbooks untouched', as
   await cached.loadOnly([ids.task, ids.master], { forceIds: [ids.task] });
   assert.equal(loads.get(ids.task), 2);
   assert.equal(loads.get(ids.master), 1);
+});
+
+test('schedule sync treats timestamps on the same Taipei calendar day as the same task date', () => {
+  const current = Array(18).fill('');
+  const desired = Array(18).fill('');
+  current[3] = new Date('2026-08-29T16:00:00.000Z');
+  desired[3] = new Date('2026-08-30T00:00:00.000Z');
+  assert.equal(externalTeaching._test.rowChanged(current, desired), false);
 });
 
 test('external commands are routed to the smaller workbook set', () => {
