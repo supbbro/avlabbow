@@ -39,6 +39,32 @@ test('Google Sheets runtime caches each workbook and supports forced refresh', a
   assert.equal(loads, 2);
 });
 
+test('forced value refresh reuses cached spreadsheet metadata', async () => {
+  const cached = new GoogleSheetsRuntime();
+  let metadataLoads = 0, valueLoads = 0;
+  cached.api = { spreadsheets: {
+    get: async () => { metadataLoads++; return { data: { sheets: [{ properties: { title: '測試分頁', sheetId: 1 } }] } }; },
+    values: { batchGet: async () => { valueLoads++; return { data: { valueRanges: [{ values: [['欄位'], ['內容']] }] } }; } }
+  } };
+  await cached.loadWorkbook('TEST', ['測試分頁']);
+  await cached.loadWorkbook('TEST', ['測試分頁']);
+  assert.equal(metadataLoads, 1);
+  assert.equal(valueLoads, 2);
+});
+
+test('selected workbook refresh leaves the other cached workbooks untouched', async () => {
+  const cached = new GoogleSheetsRuntime();
+  const loads = new Map();
+  cached.loadWorkbook = async spreadsheetId => {
+    loads.set(spreadsheetId, (loads.get(spreadsheetId) || 0) + 1);
+    cached.sheets.set(spreadsheetId, new Map());
+  };
+  await cached.loadOnly([ids.task, ids.master]);
+  await cached.loadOnly([ids.task, ids.master], { forceIds: [ids.task] });
+  assert.equal(loads.get(ids.task), 2);
+  assert.equal(loads.get(ids.master), 1);
+});
+
 test('external commands are routed to the smaller workbook set', () => {
   assert.equal(externalTeaching.isExternalCommand('近期任務'), true);
   assert.equal(externalTeaching.isExternalCommand('開始點名 T1'), true);

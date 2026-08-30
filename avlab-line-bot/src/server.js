@@ -17,7 +17,8 @@ const externalTeaching = require('./external-teaching');
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master];
-const TASK_QUERY_WORKBOOKS = [ids.task, ids.externalResults, ids.assistant, ids.master];
+const TASK_QUERY_WORKBOOKS = [ids.task, ids.externalClassSchedule, ids.externalResults, ids.assistant, ids.master];
+const LIVE_TASK_WORKBOOKS = [ids.task, ids.externalClassSchedule, ids.externalResults];
 const LIGHTWEIGHT_COMMANDS = new Set(['主選單', '對外學生', '對外更多', '中心助理', '助理更多', '請假選項', '請假', '查詢', '常用連結']);
 const ASSISTANT_PROMPT_COMMANDS = new Set(['查任務', '個人點名統計', '代班查詢', '認證', '認證進度', '考試結果']);
 let serial = Promise.resolve();
@@ -77,7 +78,8 @@ async function handleLineEvent(event) {
       const text = event.message.text.trim();
       const combinedTaskQuery = externalTeaching.isCombinedTaskQuery(text);
       if (combinedTaskQuery) {
-        await runtime.loadOnly(TASK_QUERY_WORKBOOKS);
+        await runtime.loadOnly(TASK_QUERY_WORKBOOKS, { forceIds: LIVE_TASK_WORKBOOKS });
+        externalTeaching.syncFromSchedule();
       } else if (externalTeaching.isExternalCommand(text)) {
         await runtime.loadOnly(EXTERNAL_WORKBOOKS, { force: externalTeaching.requiresFreshData(text) });
       } else if (LIGHTWEIGHT_COMMANDS.has(text)) {

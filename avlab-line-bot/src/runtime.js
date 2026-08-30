@@ -160,8 +160,12 @@ class GoogleSheetsRuntime {
     this.sheets = new Map();
     this.loadedAt = new Map();
     this.loading = new Map();
+    this.metadata = new Map();
+    this.metadataLoadedAt = new Map();
     const configuredTtl = Number(process.env.SHEETS_CACHE_TTL_MS || 60_000);
     this.cacheTtlMs = Number.isFinite(configuredTtl) ? Math.max(0, configuredTtl) : 60_000;
+    const configuredMetadataTtl = Number(process.env.SHEETS_METADATA_CACHE_TTL_MS || 600_000);
+    this.metadataCacheTtlMs = Number.isFinite(configuredMetadataTtl) ? Math.max(0, configuredMetadataTtl) : 600_000;
     this.operations = [];
     this.httpOperations = [];
     this.properties = new Map();
@@ -172,15 +176,17 @@ class GoogleSheetsRuntime {
     return this.loadOnly(Object.keys(workbooks), options);
   }
 
-  async loadOnly(spreadsheetIds, { force = false } = {}) {
+  async loadOnly(spreadsheetIds, { force = false, forceIds = [], forceMetadata = false } = {}) {
     this.operations = []; this.httpOperations = [];
     const uniqueIds = [...new Set(spreadsheetIds)].filter(id => workbooks[id]);
+    const forcedIds = new Set(forceIds);
     const now = Date.now();
     await Promise.all(uniqueIds.map(spreadsheetId => {
+      const shouldForce = force || forcedIds.has(spreadsheetId);
       const isFresh = this.sheets.has(spreadsheetId) && now - (this.loadedAt.get(spreadsheetId) || 0) < this.cacheTtlMs;
-      if (!force && isFresh) return null;
-      if (!force && this.loading.has(spreadsheetId)) return this.loading.get(spreadsheetId);
-      const pending = this.loadWorkbook(spreadsheetId, workbooks[spreadsheetId])
+      if (!shouldForce && isFresh) return null;
+      if (!shouldForce && this.loading.has(spreadsheetId)) return this.loading.get(spreadsheetId);
+      const pending = this.loadWorkbook(spreadsheetId, workbooks[spreadsheetId], { forceMetadata })
         .then(() => this.loadedAt.set(spreadsheetId, Date.now()))
         .finally(() => this.loading.delete(spreadsheetId));
       this.loading.set(spreadsheetId, pending);
@@ -195,9 +201,18 @@ class GoogleSheetsRuntime {
     for (const row of (state?.data || []).slice(1)) if (row[0]) this.properties.set(String(row[0]), String(row[1] ?? ''));
   }
 
-  async loadWorkbook(spreadsheetId, requested) {
+  async getWorkbookMetadata(spreadsheetId, { force = false } = {}) {
+    const isFresh = this.metadata.has(spreadsheetId) && Date.now() - (this.metadataLoadedAt.get(spreadsheetId) || 0) < this.metadataCacheTtlMs;
+    if (!force && isFresh) return this.metadata.get(spreadsheetId);
     const meta = await this.api.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId,title))' });
     const metadata = new Map((meta.data.sheets || []).map(s => [s.properties.title, s.properties.sheetId]));
+    this.metadata.set(spreadsheetId, metadata);
+    this.metadataLoadedAt.set(spreadsheetId, Date.now());
+    return metadata;
+  }
+
+  async loadWorkbook(spreadsheetId, requested, { forceMetadata = false } = {}) {
+    const metadata = await this.getWorkbookMetadata(spreadsheetId, { force: forceMetadata });
     const names = requested.filter(name => metadata.has(name));
     const response = names.length ? await this.api.spreadsheets.values.batchGet({
       spreadsheetId, ranges: names.map(a1), valueRenderOption: 'FORMATTED_VALUE', dateTimeRenderOption: 'FORMATTED_STRING'
