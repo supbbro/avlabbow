@@ -134,8 +134,30 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.match(externalTeaching.handleCommand('開始點名 T1', context).text, /學生甲/);
   assert.match(externalTeaching.handleCommand('點名狀態 T1 S1 到場', context).text, /完成所有學生/);
   assert.equal(attendance.getRange(2, 10).getValue(), '到場');
-  assert.match(externalTeaching.handleCommand('完成點名 T1', context).text, /任務已完成/);
+  const finished = externalTeaching.handleCommand('完成點名 T1', context);
+  assert.match(finished.text, /任務已完成/);
+  assert.equal(finished.quickReply.items[0].action.type, 'uri');
+  assert.match(finished.quickReply.items[0].action.uri, new RegExp(ids.externalResults));
   assert.equal(tasks.getRange(taskRow, 12).getValue(), '已完成');
+});
+
+test('one-hour reminder pushes the roster to the examiner and assigned group', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務');
+  const students = resultBook.getSheetByName('任務學生');
+  tasks.appendRow(['T-REMIND','1151','考試',new Date(2026, 8, 11),'12:00','13:00','X160','401','測試者','U1','G1','已排定',true,true,'','','','']);
+  students.appendRow(['T-REMIND','S2','學生乙','456',1,'未點名','未記錄','']);
+  runtime.httpOperations = [];
+
+  const sent = externalTeaching.sendExternalReminders(new Date(2026, 8, 11, 11, 0));
+  assert.equal(sent, 2);
+  const pushes = runtime.httpOperations.map(operation => JSON.parse(operation.options.payload));
+  assert.deepEqual(new Set(pushes.map(push => push.to)), new Set(['U1', 'G1']));
+  for (const push of pushes) {
+    assert.match(push.messages[0].text, /1 小時後/);
+    assert.match(push.messages[0].text, /學生乙/);
+    assert.equal(push.messages[0].quickReply.items[0].action.text, '開始點名 T-REMIND');
+  }
 });
 
 test('teaching assignments are parsed from date, time, examiner and student rows', () => {

@@ -8,11 +8,14 @@ const SHEETS = {
 };
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
+const REMINDER_LEAD_MINUTES = 60;
 const EXTERNAL_COMMAND = /^(綁定群組(?:\s|$)|解除群組$|今日任務$|對外任務$|近期任務$|查看任務\s|開始點名\s|點名狀態\s|考試登記\s|完成點名\s|同步對外排程$)/;
 let activeStudentsByTask = new Map();
 
 const qr = items => ({ items: items.slice(0, 13).map(item => ({
-  type: 'action', action: { type: 'message', label: item.label.slice(0, 20), text: item.text }
+  type: 'action', action: item.uri
+    ? { type: 'uri', label: item.label.slice(0, 20), uri: item.uri }
+    : { type: 'message', label: item.label.slice(0, 20), text: item.text }
 })) });
 const reply = (text, items = []) => ({ text, ...(items.length ? { quickReply: qr(items) } : {}) });
 const norm = value => String(value ?? '').replace(/[（(][^）)]*[）)]/g, '').replace(/\s+/g, '');
@@ -215,17 +218,28 @@ function taskText(task) {
 }
 
 function listTasks(context, todayOnly) {
+  const personalName = context.sourceType === 'user' ? boundName(context.userId) : '';
+  if (context.sourceType === 'user' && !personalName) return reply('請先輸入「我是 姓名」完成綁定，才能查看個人的近期對外任務。');
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const end = new Date(today); end.setDate(end.getDate() + (todayOnly ? 1 : 8));
   const tasks = allTasks().filter(task => {
     const date = task.date instanceof Date ? new Date(task.date) : new Date(task.date);
     if (Number.isNaN(date.getTime()) || ['已完成', '已取消'].includes(task.status)) return false;
     date.setHours(0, 0, 0, 0);
-    return date >= today && date < end && (!task.groupId || task.groupId === context.chatId);
+    const belongsToContext = context.sourceType === 'user'
+      ? norm(task.examiner) === norm(personalName)
+      : (!task.groupId || task.groupId === context.chatId);
+    return date >= today && date < end && belongsToContext;
   }).sort((a, b) => new Date(a.date) - new Date(b.date));
   if (!tasks.length) return reply(todayOnly ? '今天沒有待執行的對外任務。' : '未來七天沒有待執行的對外任務。');
   const body = tasks.map(task => `【${task.id}】\n${taskText(task)}`).join('\n\n');
-  return reply(`【${todayOnly ? '今日' : '近期'}對外任務】\n\n${body}`, tasks.map(task => ({ label: `點名 ${String(task.equipment).slice(0, 12)}`, text: `開始點名 ${task.id}` })));
+  return reply(`【${context.sourceType === 'user' ? '我的' : ''}${todayOnly ? '今日' : '近期'}對外任務】\n\n${body}`, tasks.map(task => ({ label: `點名 ${String(task.equipment).slice(0, 12)}`, text: `開始點名 ${task.id}` })));
+}
+
+function certificationStatusUrl() {
+  const target = sheet(SHEETS.attendance);
+  const gid = target ? target.getSheetId() : 0;
+  return `https://docs.google.com/spreadsheets/d/${ids.externalResults}/edit#gid=${gid}`;
 }
 
 function showTask(taskId) {
@@ -273,7 +287,9 @@ function nextPrompt(task, context) {
   const next = students.find(student => student.attendance === '未點名');
   if (!next) {
     return reply(`✅ ${task.equipment} 已完成所有學生的點名與結果登記。`, [
-      { label: '完成點名', text: `完成點名 ${task.id}` }, { label: '查看統計', text: `查看任務 ${task.id}` }
+      { label: '完成點名', text: `完成點名 ${task.id}` },
+      { label: '查看認證狀態', uri: certificationStatusUrl() },
+      { label: '查看統計', text: `查看任務 ${task.id}` }
     ]);
   }
   const current = students.indexOf(next) + 1;
@@ -334,7 +350,9 @@ function finishAttendance(taskId, context) {
   if (pending.length) return reply(`尚有 ${pending.length} 位學生未完成登記。`, [{ label: '繼續點名', text: `開始點名 ${task.id}` }]);
   updateTaskStatus(task, '已完成');
   const counts = status => students.filter(student => student.attendance === status).length;
-  return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜請假 ${counts('請假')}｜缺席 ${counts('缺席')}`);
+  return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜請假 ${counts('請假')}｜缺席 ${counts('缺席')}\n\n點擊下方可查看考生認證狀態。`, [
+    { label: '查看考生認證狀態', uri: certificationStatusUrl() }
+  ]);
 }
 
 function handleCommand(text, context) {
@@ -342,7 +360,7 @@ function handleCommand(text, context) {
   let match;
   if ((match = command.match(/^綁定群組(?:\s+(.+))?$/))) {
     if (!['group', 'room'].includes(context.sourceType)) return reply('請在要接收提醒的 LINE 群組中輸入這個指令。');
-    return reply(`✅ 已綁定「${upsertGroup(context, match[1])}」\n預設提醒：前一天 20:00 與任務前 2 小時。`);
+    return reply(`✅ 已綁定「${upsertGroup(context, match[1])}」\n將於對外任務開始前 1 小時推播考生名單與點名入口。`);
   }
   if (command === '解除群組') { disableGroup(context.chatId); return reply('已停止此群組的對外任務提醒。'); }
   const scheduleCommand = /^(今日任務|對外任務|近期任務|查看任務\s|開始點名\s|點名狀態\s|考試登記\s|完成點名\s|同步對外排程)/.test(command);
@@ -394,35 +412,40 @@ function queuePush(chatId, content) {
   });
 }
 
+function studentRosterText(task) {
+  const students = studentsFor(task.id);
+  if (!students.length) return '考生：尚未安排';
+  return `考生（${students.length} 人）：${students.map(student => student.name).join('、')}`;
+}
+
 function sendExternalReminders(now = new Date()) {
   syncFromSchedule();
   const activeGroups = groups().filter(group => group.enabled === '是');
-  if (!activeGroups.length) return 0;
   let sent = 0;
   for (const task of allTasks()) {
     if (!['已排定', '點名中'].includes(task.status)) continue;
     const start = parseTaskStart(task); if (!start || start <= now) continue;
-    const targets = task.groupId ? activeGroups.filter(group => group.id === task.groupId) : activeGroups;
-    for (const group of targets) {
-      const twoHourDue = new Date(start.getTime() - group.hoursBefore * 3600000);
-      const dayBeforeDue = new Date(start); dayBeforeDue.setDate(dayBeforeDue.getDate() - 1);
-      const reminder = clockParts(group.dayBeforeTime) || { hour: 20, minute: 0 };
-      dayBeforeDue.setHours(reminder.hour, reminder.minute, 0, 0);
-      let kind = null;
-      if (enabledFlag(task.twoHours) && !task.twoHoursSentAt && now >= twoHourDue) kind = 'twoHours';
-      else if (enabledFlag(task.dayBefore) && !task.dayBeforeSentAt && now >= dayBeforeDue) kind = 'dayBefore';
-      if (!kind) continue;
-      const heading = kind === 'twoHours' ? `⏰ 任務將於 ${group.hoursBefore} 小時後開始` : '📣 明日對外任務提醒';
-      queuePush(group.id, reply(`${heading}\n\n${taskText(task)}`, [
-        { label: '開始點名', text: `開始點名 ${task.id}` }, { label: '查看任務', text: `查看任務 ${task.id}` }
-      ]));
-      const taskSheet = sheet(SHEETS.tasks);
-      if (kind === 'twoHours') {
-        taskSheet.getRange(task.row, 16).setValue(now);
-        if (!task.dayBeforeSentAt) taskSheet.getRange(task.row, 15).setValue(now);
-      } else taskSheet.getRange(task.row, 15).setValue(now);
-      sent++;
+    const reminderDue = new Date(start.getTime() - REMINDER_LEAD_MINUTES * 60000);
+    if (!enabledFlag(task.twoHours) || task.twoHoursSentAt || now < reminderDue) continue;
+
+    const buttons = [
+      { label: '開始聊天室點名', text: `開始點名 ${task.id}` },
+      { label: '查看任務', text: `查看任務 ${task.id}` }
+    ];
+    const roster = studentRosterText(task);
+    const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
+    const targetGroups = task.groupId ? activeGroups.filter(group => group.id === task.groupId) : activeGroups;
+    let taskSent = false;
+
+    if (examinerUserId) {
+      queuePush(examinerUserId, reply(`⏰ 你的對外任務將於 1 小時後開始\n\n${taskText(task)}\n\n${roster}`, buttons));
+      sent++; taskSent = true;
     }
+    for (const group of targetGroups) {
+      queuePush(group.id, reply(`📣 對外工作坊將於 1 小時後開始\n\n${taskText(task)}\n\n${roster}\n\n請考生準時到場；考官可由下方按鈕開始點名。`, buttons));
+      sent++; taskSent = true;
+    }
+    if (taskSent) sheet(SHEETS.tasks).getRange(task.row, 16).setValue(now);
   }
   return sent;
 }
