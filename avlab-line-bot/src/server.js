@@ -55,6 +55,13 @@ function toLineMessage(reply) {
   return message;
 }
 
+function toFallbackLineMessage(reply) {
+  if (!reply?.lineMessage || !reply?.text) return null;
+  const message = { type: 'text', text: String(reply.text).slice(0, 5000) };
+  if (reply.fallbackQuickReply?.items?.length) message.quickReply = { items: reply.fallbackQuickReply.items.slice(0, 13) };
+  return message;
+}
+
 async function handleLineEvent(event) {
   let reply = null;
   const sourceType = event.source?.type || 'user';
@@ -103,7 +110,16 @@ async function handleLineEvent(event) {
   }
   await runtime.flush();
   const message = toLineMessage(reply);
-  if (message && event.replyToken) await lineRequest('/message/reply', { replyToken: event.replyToken, messages: [message] });
+  if (message && event.replyToken) {
+    try {
+      await lineRequest('/message/reply', { replyToken: event.replyToken, messages: [message] });
+    } catch (error) {
+      const fallback = toFallbackLineMessage(reply);
+      if (!fallback) throw error;
+      console.error('Rich attendance message rejected; retrying text fallback:', error.message);
+      await lineRequest('/message/reply', { replyToken: event.replyToken, messages: [fallback] });
+    }
+  }
 }
 
 app.get('/', (_req, res) => res.type('text').send('AV Lab LINE Bot is running'));
@@ -188,4 +204,4 @@ app.listen(port, '0.0.0.0', error => {
   console.log(`Listening on port ${port}`);
 });
 
-module.exports = { app, validLineSignature, toLineMessage };
+module.exports = { app, validLineSignature, toLineMessage, toFallbackLineMessage };

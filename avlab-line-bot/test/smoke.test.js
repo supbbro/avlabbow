@@ -133,9 +133,10 @@ test('group attendance writes a normalized record and completes the task', () =>
 
   const attendanceStart = externalTeaching.handleCommand('開始點名 T1', context);
   assert.match(attendanceStart.text, /學生甲/);
-  assert.equal(attendanceStart.lineMessage.type, 'flex');
-  assert.equal(attendanceStart.lineMessage.contents.type, 'carousel');
-  assert.deepEqual(attendanceStart.lineMessage.contents.contents[0].footer.contents.map(button => button.action.label), ['準時', '遲到', '缺席']);
+  assert.equal(attendanceStart.lineMessage.type, 'template');
+  assert.equal(attendanceStart.lineMessage.template.type, 'carousel');
+  assert.deepEqual(attendanceStart.lineMessage.template.columns[0].actions.map(action => action.label), ['準時', '遲到', '缺席']);
+  assert.deepEqual(attendanceStart.fallbackQuickReply.items.map(item => item.action.label), ['學生甲 準時', '學生甲 遲到', '學生甲 缺席']);
   assert.match(externalTeaching.handleCommand('點名狀態 T1 S1 到場', context).text, /完成所有學生/);
   assert.equal(attendance.getRange(2, 10).getValue(), '到場');
   const finished = externalTeaching.handleCommand('完成點名 T1', context);

@@ -259,39 +259,30 @@ function updateStudent(student, attendance, result) {
   student.attendance = attendance; student.result = result;
 }
 
-function attendanceBubble(task, student, position, total) {
-  const actionButton = (label, status, color) => ({
-    type: 'button', style: 'primary', height: 'sm', color,
-    action: { type: 'message', label, text: `點名狀態 ${task.id} ${student.id} ${status}` }
-  });
+function attendanceColumn(task, student, position, total) {
+  const action = (label, status) => ({ type: 'message', label, text: `點名狀態 ${task.id} ${student.id} ${status}` });
   return {
-    type: 'bubble', size: 'kilo',
-    header: { type: 'box', layout: 'vertical', backgroundColor: '#F3F6FA', paddingAll: '16px', contents: [
-      { type: 'text', text: `${task.equipment} 點名`, weight: 'bold', size: 'md', color: '#1F2937' },
-      { type: 'text', text: `${position}/${total}`, size: 'xs', color: '#6B7280', margin: 'sm' }
-    ] },
-    body: { type: 'box', layout: 'vertical', paddingAll: '16px', contents: [
-      { type: 'text', text: String(student.name || '未填姓名'), weight: 'bold', size: 'xl', wrap: true },
-      ...(student.number ? [{ type: 'text', text: String(student.number), size: 'sm', color: '#6B7280', margin: 'sm' }] : []),
-      { type: 'text', text: '請選擇點名結果', size: 'sm', color: '#6B7280', margin: 'lg' }
-    ] },
-    footer: { type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '12px', contents: [
-      actionButton('準時', '到場', '#06C755'),
-      actionButton('遲到', '遲到', '#F59E0B'),
-      actionButton('缺席', '缺席', '#DC2626')
-    ] }
+    title: String(student.name || '未填姓名').slice(0, 40),
+    text: `${position}/${total}｜${student.number ? `學號 ${student.number}` : task.equipment}`.slice(0, 60),
+    actions: [action('準時', '到場'), action('遲到', '遲到'), action('缺席', '缺席')]
   };
 }
 
 function attendanceBoard(task, students) {
-  const visible = students.slice(0, 12);
+  const visible = students.slice(0, 10);
+  const first = visible[0];
   const textFallback = `【${task.equipment} 聊天室點名】\n尚有 ${students.length} 人未點名：\n${students.map(student => `• ${student.name}`).join('\n')}\n\n請使用下方點名卡選擇準時、遲到或缺席。`;
   return {
     text: textFallback,
+    fallbackQuickReply: qr(first ? [
+      { label: `${first.name} 準時`, text: `點名狀態 ${task.id} ${first.id} 到場` },
+      { label: `${first.name} 遲到`, text: `點名狀態 ${task.id} ${first.id} 遲到` },
+      { label: `${first.name} 缺席`, text: `點名狀態 ${task.id} ${first.id} 缺席` }
+    ] : []),
     lineMessage: {
-      type: 'flex',
+      type: 'template',
       altText: `${task.equipment} 聊天室點名（${students.length} 人）`,
-      contents: { type: 'carousel', contents: visible.map((student, index) => attendanceBubble(task, student, index + 1, students.length)) },
+      template: { type: 'carousel', columns: visible.map((student, index) => attendanceColumn(task, student, index + 1, students.length)) },
       quickReply: qr([
         { label: '查看任務統計', text: `查看任務 ${task.id}` },
         { label: '重新整理點名', text: `開始點名 ${task.id}` }
