@@ -272,6 +272,9 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   const tasks = resultBook.getSheetByName('對外任務');
   const students = resultBook.getSheetByName('任務學生');
   students.appendRow(['EXT-BIND-TEST', 'STU-BIND-TEST', '外部測試生', 'TEST', 1, '未點名', '未記錄', '', '13:00', '13:15', '']);
+  const typoResponse = bot.getReply('我是 外部測試身', 'U-external-student-typo-test');
+  assert.match(typoResponse.text, /姓名必須與分班表完全一致/);
+  assert.doesNotMatch(typoResponse.text, /綁定成功/);
   const response = bot.getReply('我是 外部測試生', 'U-external-student-test');
   assert.match(response.text, /綁定成功/);
   assert.match(response.text, /外部測試生/);

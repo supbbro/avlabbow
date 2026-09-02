@@ -93,7 +93,10 @@ async function handleLineEvent(event) {
     if (event.message.type === 'text') {
       const text = event.message.text.trim();
       const combinedTaskQuery = externalTeaching.isCombinedTaskQuery(text);
-      if (combinedTaskQuery) {
+      const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
+      if (bindingCommand) {
+        await runtime.loadOnly([ids.master, ids.assistant, ids.externalResults], { force: true });
+      } else if (combinedTaskQuery) {
         await runtime.loadOnly(TASK_QUERY_WORKBOOKS, { forceIds: LIVE_TASK_WORKBOOKS });
         externalTeaching.syncFromSchedule();
       } else if (externalTeaching.isExternalCommand(text)) {

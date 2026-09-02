@@ -658,17 +658,13 @@ function handleBindName(rest, userId) {
   var normalizedName = nrm(name);
   
   var allNames = [...new Set(getAssistantNames().concat(getExternalStudentNames()))];
-  var exactMatch = allNames.includes(normalizedName);
-  var closest = null;
-  if (!exactMatch) {
-    closest = findClosestName(normalizedName, allNames);
+  var exactName = allNames.find(function(candidate){ return candidate === normalizedName; });
+  
+  if (!exactName) {
+    return { text: '查無「' + name + '」在助理／對外學生名單中。為避免綁定成別人，姓名必須與分班表完全一致，請確認後再試。', quickReply: bA() };
   }
   
-  if (!exactMatch && (!closest || closest.dist > 2)) {
-    return { text: '查無「' + name + '」或近似姓名在助理／對外考生名單中，請確認後再試', quickReply: bA() };
-  }
-  
-  var finalName = exactMatch ? name : closest.name;
+  var finalName = exactName;
   
   var sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
   if (!sheet) {
@@ -689,9 +685,7 @@ function handleBindName(rest, userId) {
     sheet.getRange(rowIndex, BIND_COL_NAME + 1).setValue(finalName);
     sheet.getRange(rowIndex, BIND_COL_TIME + 1).setValue(new Date());
   }
-  var msg = exactMatch ? '✅ 綁定成功！您已綁定為：' + finalName : 
-    '✅ 綁定成功！您輸入的是「' + name + '」，已為您綁定最接近的姓名「' + finalName + '」。';
-  return { text: msg, quickReply: bA() };
+  return { text: '✅ 綁定成功！您已綁定為：' + finalName, quickReply: bA() };
 }
 
 function isUserBound(userId) {
