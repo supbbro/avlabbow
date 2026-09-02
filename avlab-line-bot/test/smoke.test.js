@@ -244,7 +244,7 @@ test('arrival grace rules are five minutes for exams and fifteen minutes for tea
     { phase: '教學', date, start: '12:00', end: '13:00', equipment: 'X160', location: '401' },
     { name: '虛擬學生', scheduledStart: '12:10', scheduledEnd: '13:00' }
   );
-  assert.match(teachingReminder, /對外教學將於 1 小時後開始/);
+  assert.match(teachingReminder, /對外教學將於 1 小時內開始/);
   assert.match(teachingReminder, /超過 15 分鐘.*遲到/);
   assert.doesNotMatch(teachingReminder, /取消本次考試資格/);
 });
@@ -262,7 +262,7 @@ test('one-hour reminder pushes the roster to the examiner and assigned group', (
   const pushes = runtime.httpOperations.map(operation => JSON.parse(operation.options.payload));
   assert.deepEqual(new Set(pushes.map(push => push.to)), new Set(['U1', 'G1']));
   for (const push of pushes) {
-    assert.match(push.messages[0].text, /1 小時後/);
+    assert.match(push.messages[0].text, /1 小時內/);
     assert.match(push.messages[0].text, /學生乙/);
     assert.equal(push.messages[0].quickReply.items[0].action.text, '開始點名 T-REMIND');
   }
@@ -317,7 +317,7 @@ test('a bound student receives the teaching reminder with the fifteen-minute rul
   const pushes = runtime.httpOperations.map(operation => JSON.parse(operation.options.payload));
   const studentPush = pushes.find(push => push.to === 'U-external-student-test');
   assert.ok(studentPush);
-  assert.match(studentPush.messages[0].text, /對外教學將於 1 小時後開始/);
+  assert.match(studentPush.messages[0].text, /對外教學將於 1 小時內開始/);
   assert.match(studentPush.messages[0].text, /超過 15 分鐘.*遲到/);
 });
 

@@ -742,7 +742,7 @@ function studentReminderText(task, student) {
   const attendanceRule = isExam(task)
     ? '⚠️ 請依個別時間準時到場；超過 5 分鐘將取消本次考試資格。'
     : '⚠️ 請依個別時間準時到場；開始後超過 15 分鐘完成點名將記為遲到。';
-  return `⏰ 你的對外${task.phase}將於 1 小時後開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n${attendanceRule}`;
+  return `⏰ 你的對外${task.phase}將於 1 小時內開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n${attendanceRule}`;
 }
 
 function expireExamQualifications(now = new Date()) {
@@ -783,11 +783,11 @@ function sendExternalReminders(now = new Date()) {
 
     if (!task.twoHoursSentAt && start > now && now >= reminderDue) {
       if (examinerUserId) {
-        queuePush(examinerUserId, reply(`⏰ 你的對外任務將於 1 小時後開始\n\n${taskText(task)}\n\n${roster}`, buttons));
+        queuePush(examinerUserId, reply(`⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}`, buttons));
         sent++; taskSent = true;
       }
       for (const group of targetGroups) {
-        queuePush(group.id, reply(`📣 對外工作坊將於 1 小時後開始\n\n${taskText(task)}\n\n${roster}\n\n請考生準時到場；考官可由下方按鈕開始點名。`, buttons));
+        queuePush(group.id, reply(`📣 對外工作坊將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n請考生準時到場；考官可由下方按鈕開始點名。`, buttons));
         sent++; taskSent = true;
       }
       if (taskSent) sheet(SHEETS.tasks).getRange(task.row, 16).setValue(now);
