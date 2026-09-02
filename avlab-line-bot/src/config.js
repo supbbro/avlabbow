@@ -26,7 +26,7 @@ const workbooks = {
   [ids.game]: ['玩家資料', '交易紀錄', '池底紀錄', '稱號紀錄', '系統狀態'],
   [ids.schedule]: ['對外考試排程', '表單回覆 1'],
   [ids.externalClassSchedule]: ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'],
-  [ids.externalResults]: ['1151修課名單', '對外任務', '任務學生', 'LINE點名紀錄', 'LINE群組設定', '保證金提醒紀錄'],
+  [ids.externalResults]: ['1151修課名單', '對外任務', '任務學生', 'LINE點名紀錄', 'LINE群組設定', '保證金登記', '保證金提醒紀錄'],
   [ids.deposit]: ['保證金對帳']
 };
 

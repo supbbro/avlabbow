@@ -6,7 +6,7 @@ const { parseWorkbook } = require('./external-schedule-parser');
 
 const SHEETS = {
   tasks: '對外任務', students: '任務學生', attendance: 'LINE點名紀錄', groups: 'LINE群組設定',
-  depositReminders: '保證金提醒紀錄'
+  depositRegistration: '保證金登記', depositReminders: '保證金提醒紀錄'
 };
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
@@ -130,6 +130,76 @@ function enrichStudentsFromRoster(tasks, roster) {
   }
 }
 
+function legacyDepositRows() {
+  const target = SpreadsheetApp.openById(ids.deposit).getSheetByName('保證金對帳');
+  if (!target) return [];
+  return target.getDataRange().getValues().slice(1).map(row => ({
+    phase: String(row[0] || '').trim(), name: String(row[1] || '').trim(), number: String(row[2] || '').trim(),
+    paid: paidFlag(row[3]), requiredAmount: row[4], paidAmount: row[5], items: row[6]
+  })).filter(row => row.name && row.number);
+}
+
+const DEPOSIT_REGISTRATION_HEADERS = ['階段','姓名','學號','已繳交','應繳金額','實繳金額','報名考試項目','來源分班表','更新時間','備註'];
+
+function nativeDepositRows() {
+  const target = sheet(SHEETS.depositRegistration);
+  if (!target) return [];
+  return target.getDataRange().getValues().slice(1).map(row => ({
+    phase: String(row[0] || '').trim(), name: String(row[1] || '').trim(), number: String(row[2] || '').trim(),
+    paid: paidFlag(row[3]), paidRaw: row[3], requiredAmount: row[4], paidAmount: row[5], items: row[6],
+    source: row[7], updatedAt: row[8], note: row[9]
+  })).filter(row => row.name);
+}
+
+function buildDepositRegistrationRows(tasks, legacyRows = [], existingRows = [], now = new Date()) {
+  const people = new Map();
+  for (const task of tasks.filter(task => task.phase === '考試')) {
+    for (const student of task.students || []) {
+      const key = norm(student.number) || `NAME:${norm(student.name)}`;
+      if (!people.has(key)) people.set(key, { name: student.name, number: student.number, equipment: new Set(), sources: new Set() });
+      const person = people.get(key);
+      if (!person.number && student.number) person.number = student.number;
+      if (task.equipment) person.equipment.add(String(task.equipment).trim());
+      if (task.sourceSheet) person.sources.add(task.sourceSheet);
+    }
+  }
+  const existingFor = student => {
+    const number = norm(student.number);
+    if (number) return existingRows.find(row => norm(row.number) === number) || null;
+    const matches = existingRows.filter(row => norm(row.name) === norm(student.name));
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const rows = [];
+  for (const person of people.values()) {
+    const legacy = depositRecordFor(person, '考試', legacyRows);
+    if (!person.number && legacy?.number) person.number = legacy.number;
+    const existing = existingFor(person);
+    const equipment = [...person.equipment].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    const stable = ['考試', person.name, person.number || '', existing ? existing.paidRaw : legacy?.paid || false,
+      equipment.length * 50, existing?.paidAmount ?? legacy?.paidAmount ?? '', equipment.join('、'), [...person.sources].sort().join('、')];
+    const previousStable = existing ? [existing.phase, existing.name, existing.number, existing.paidRaw, existing.requiredAmount,
+      existing.paidAmount, existing.items, existing.source] : [];
+    const updatedAt = existing && !rowChanged(previousStable, stable) ? existing.updatedAt : now;
+    rows.push([...stable, updatedAt, existing?.note || '']);
+  }
+  return rows.sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh-Hant'));
+}
+
+function syncDepositRegistration(tasks, legacyRows, now = new Date()) {
+  const book = SpreadsheetApp.openById(ids.externalResults);
+  let target = book.getSheetByName(SHEETS.depositRegistration);
+  if (!target) target = book.insertSheet(SHEETS.depositRegistration);
+  const existing = nativeDepositRows();
+  const desired = [DEPOSIT_REGISTRATION_HEADERS, ...buildDepositRegistrationRows(tasks, legacyRows, existing, now)];
+  const current = target.getDataRange().getValues();
+  const same = current.length === desired.length && desired.every((row, index) => !rowChanged(current[index] || [], row));
+  if (!same) {
+    target.clear();
+    target.getRange(1, 1, desired.length, DEPOSIT_REGISTRATION_HEADERS.length).setValues(desired);
+  }
+  return { rows: desired.length - 1, updated: !same };
+}
+
 function rosterStudentId(student) {
   return `STU-R-${crypto.createHash('sha1').update(`${norm(student.name)}|${norm(student.number)}`).digest('hex').slice(0, 10).toUpperCase()}`;
 }
@@ -196,8 +266,10 @@ function syncFromSchedule() {
   const parsed = parseWorkbook(source, process.env.ACADEMIC_TERM || '1151');
   const rosterSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName(ROSTER_SHEET);
   const roster = rosterStudents(rosterSheet ? rosterSheet.getDataRange().getValues() : []);
-  enrichStudentsFromRoster(parsed, roster);
-  const bindingsBackfilled = backfillBindingNumbers(roster);
+  const legacyDeposits = legacyDepositRows();
+  const depositIdentities = legacyDeposits.filter(row => row.phase === '考試').map(row => ({ name: row.name, number: row.number }));
+  enrichStudentsFromRoster(parsed, [...roster, ...depositIdentities]);
+  const bindingsBackfilled = backfillBindingNumbers([...roster, ...depositIdentities]);
   const taskSheet = sheet(SHEETS.tasks), studentSheet = sheet(SHEETS.students);
   if (!taskSheet || !studentSheet) throw new Error('找不到對外任務或任務學生工作表');
 
@@ -205,7 +277,7 @@ function syncFromSchedule() {
   const existingTasks = new Map();
   for (let i = 1; i < taskRows.length; i++) if (taskRows[i][0] && !isTemplate(taskRows[i][0])) existingTasks.set(String(taskRows[i][0]), { row: i + 1, values: taskRows[i], task: taskFromRow(taskRows[i], i + 1) });
   const parsedIds = new Set();
-  let tasksAdded = 0, tasksUpdated = 0, studentsAdded = 0, studentsUpdated = 0, duplicateStudentsCleared = 0, rosterStudentsAdded = 0;
+  let tasksAdded = 0, tasksUpdated = 0, studentsAdded = 0, studentsUpdated = 0, duplicateStudentsCleared = 0, staleStudentsCleared = 0, rosterStudentsAdded = 0;
 
   for (const incoming of parsed) {
     parsedIds.add(incoming.id);
@@ -227,8 +299,8 @@ function syncFromSchedule() {
     else if (rowChanged(existing.values, desired)) { taskSheet.getRange(existing.row, 1, 1, desired.length).setValues([desired]); tasksUpdated++; }
   }
   for (const existing of existingTasks.values()) {
-    if (SOURCE_TABS.includes(String(existing.task.sourceSheet)) && !parsedIds.has(existing.task.id) && !['已完成', '已取消'].includes(existing.task.status)) {
-      taskSheet.getRange(existing.row, 12).setValue('已取消'); tasksUpdated++;
+    if (SOURCE_TABS.includes(String(existing.task.sourceSheet)) && !parsedIds.has(existing.task.id)) {
+      taskSheet.getRange(existing.row, 1, 1, 18).setValues([Array(18).fill('')]); tasksUpdated++;
     }
   }
 
@@ -309,6 +381,13 @@ function syncFromSchedule() {
       }
     }
   }
+  for (const candidate of studentCandidates) {
+    const taskId = candidate.student.taskId;
+    const scheduleManaged = parsedIds.has(taskId) || SOURCE_TABS.includes(String(existingTasks.get(taskId)?.task.sourceSheet || ''));
+    if (!scheduleManaged || desiredStudentIds.has(`${taskId}|${candidate.student.id}`) || duplicateStudentRows.includes(candidate.student.row)) continue;
+    studentSheet.getRange(candidate.student.row, 1, 1, studentHeaders.length).setValues([Array(studentHeaders.length).fill('')]);
+    staleStudentsCleared++;
+  }
   const scheduledPeople = new Set(parsed.flatMap(task => task.students.map(student => `${norm(student.name)}|${norm(student.number)}`)));
   const rosterRows = new Map();
   for (const existing of existingStudents.values()) {
@@ -320,7 +399,16 @@ function syncFromSchedule() {
     studentSheet.appendRow([ROSTER_TASK_ID, rosterStudentId(student), student.name, student.number, 0, '名冊', '不適用', '', '', '', '']);
     rosterStudentsAdded++; studentsAdded++;
   }
-  return { tasks: parsed.length, tasksAdded, tasksUpdated, students: [...activeStudentsByTask.values()].reduce((sum, set) => sum + set.size, 0), studentsAdded, studentsUpdated, duplicateStudentsCleared, rosterStudentsAdded, bindingsBackfilled };
+  const desiredRosterOnly = new Set(roster.filter(student => !scheduledPeople.has(`${norm(student.name)}|${norm(student.number)}`))
+    .map(student => `${norm(student.name)}|${norm(student.number)}`));
+  for (const existing of rosterRows.values()) {
+    const key = `${norm(existing.student.name)}|${norm(existing.student.number)}`;
+    if (desiredRosterOnly.has(key) || duplicateStudentRows.includes(existing.student.row)) continue;
+    studentSheet.getRange(existing.student.row, 1, 1, studentHeaders.length).setValues([Array(studentHeaders.length).fill('')]);
+    staleStudentsCleared++;
+  }
+  const depositRegistration = syncDepositRegistration(parsed, legacyDeposits);
+  return { tasks: parsed.length, tasksAdded, tasksUpdated, students: [...activeStudentsByTask.values()].reduce((sum, set) => sum + set.size, 0), studentsAdded, studentsUpdated, duplicateStudentsCleared, staleStudentsCleared, rosterStudentsAdded, bindingsBackfilled, depositRegistration };
 }
 
 function groups() {
@@ -910,12 +998,8 @@ function paidFlag(value) {
 }
 
 function depositRows() {
-  const target = SpreadsheetApp.openById(ids.deposit).getSheetByName('保證金對帳');
-  if (!target) return [];
-  return target.getDataRange().getValues().slice(1).map(row => ({
-    phase: String(row[0] || '').trim(), name: String(row[1] || '').trim(), number: String(row[2] || '').trim(),
-    paid: paidFlag(row[3]), requiredAmount: row[4], paidAmount: row[5], items: row[6]
-  })).filter(row => row.name && row.number);
+  const native = nativeDepositRows();
+  return native.length ? native : legacyDepositRows();
 }
 
 function depositRecordFor(student, phase = '考試', rows = depositRows()) {
@@ -981,6 +1065,27 @@ function depositReminderText(kind, task, student, deadline) {
   return `【考試前保證金提醒】\n${student.name}你好，目前對帳表仍顯示尚未繳交考試保證金。\n\n你的最早考試：${formatDate(task.date)} ${formatTime(student.scheduledStart || task.start)}｜${task.equipment}\n請最遲於考試前一天完成繳費；若考試開始前仍未繳交，將取消考試資格。`;
 }
 
+function restorePaidDepositCancellations(records, logSheet, logged, now) {
+  const attendanceSheet = sheet(SHEETS.attendance);
+  if (!attendanceSheet) return 0;
+  const attendanceRows = attendanceSheet.getDataRange().getValues();
+  const operatorByRecord = new Map(attendanceRows.slice(1).map(row => [String(row[0] || ''), String(row[13] || '')]));
+  let restored = 0;
+  for (const task of allTasks().filter(task => task.phase === '考試')) {
+    for (const student of studentsFor(task.id)) {
+      if (student.attendance !== '取消資格' || operatorByRecord.get(`${task.id}:${student.id}`) !== '保證金未繳') continue;
+      if (!depositRecordFor(student, '考試', records)?.paid) continue;
+      const key = `DEPOSIT-RESTORE:${task.id}:${student.id}`;
+      if (logged.has(key)) continue;
+      updateStudent(student, '未點名', '未記錄');
+      upsertAttendance(task, student, '保證金已確認', 'SYSTEM');
+      logDepositAction(logSheet, key, '恢復資格', student, task, now, '已繳交');
+      logged.add(key); restored++;
+    }
+  }
+  return restored;
+}
+
 function processDepositRequirements(now = new Date()) {
   const deadline = dateAtTaipeiMidnight(process.env.EXTERNAL_DEPOSIT_DEADLINE || '2026-10-09');
   if (!deadline) return { reminders: 0, canceled: 0 };
@@ -989,6 +1094,7 @@ function processDepositRequirements(now = new Date()) {
   const logSheet = depositLogSheet();
   const logged = depositLogKeys(logSheet);
   let reminders = 0, canceled = 0;
+  const restored = restorePaidDepositCancellations(records, logSheet, logged, now);
 
   for (const entry of earliestInitialExams()) {
     const { task, student, start } = entry;
@@ -1011,7 +1117,7 @@ function processDepositRequirements(now = new Date()) {
     }
   }
 
-  if (now < deadline) return { reminders, canceled };
+  if (now < deadline) return { reminders, canceled, restored };
   for (const task of allTasks().filter(task => task.phase === '考試' && ['已排定', '點名中'].includes(task.status))) {
     for (const student of studentsFor(task.id)) {
       const start = studentTaskStart(task, student);
@@ -1030,7 +1136,7 @@ function processDepositRequirements(now = new Date()) {
       logged.add(key); canceled++;
     }
   }
-  return { reminders, canceled };
+  return { reminders, canceled, restored };
 }
 
 function expireExamQualifications(now = new Date()) {
@@ -1099,4 +1205,4 @@ function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, dayBeforeDate, processDepositRequirements } };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, buildDepositRegistrationRows, dayBeforeDate, processDepositRequirements } };

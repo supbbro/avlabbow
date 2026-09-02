@@ -377,6 +377,24 @@ test('deposit workbook parser normalizes initial and retest payment rows', () =>
   assert.equal(externalTeaching._test.dayBeforeDate(new Date('2026-10-09T00:00:00+08:00')), '2026-10-08');
 });
 
+test('deposit registration follows scheduled equipment, charges fifty each, and fills missing student numbers', () => {
+  const tasks = [
+    { phase: '考試', equipment: 'H6', sourceSheet: '考試週分班表I', students: [{ name: '梁璟莘', number: '' }] },
+    { phase: '考試', equipment: 'CX350', sourceSheet: '考試週分班表II', students: [{ name: '梁璟莘', number: '' }] },
+    { phase: '考試', equipment: 'H6', sourceSheet: '考試週分班表II', students: [{ name: '梁璟莘', number: '' }] },
+    { phase: '教學', equipment: '基礎配件', sourceSheet: '教學週分班表I', students: [{ name: '梁璟莘', number: '' }] }
+  ];
+  const legacy = [{ phase: '考試', name: '梁璟莘', number: '111101017', paid: true, paidAmount: 100 }];
+  externalTeaching._test.enrichStudentsFromRoster(tasks, legacy);
+  const rows = externalTeaching._test.buildDepositRegistrationRows(tasks, legacy, [], new Date('2026-09-03T00:00:00+08:00'));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0][1], '梁璟莘');
+  assert.equal(rows[0][2], '111101017');
+  assert.equal(rows[0][3], true);
+  assert.equal(rows[0][4], 100);
+  assert.equal(rows[0][6], 'CX350、H6');
+});
+
 test('group matrix sync derives green and retest colors from cumulative LINE records', () => {
   const roster = [
     ['音響學'],
@@ -521,12 +539,17 @@ test('unpaid students are canceled at exam start and both student and examiner a
   bindings.appendRow(['U-STUDENT','學生甲','','1001']);
 
   const result = externalTeaching._test.processDepositRequirements(new Date('2026-10-10T12:00:00+08:00'));
-  assert.deepEqual(result, { reminders: 0, canceled: 1 });
+  assert.deepEqual(result, { reminders: 0, canceled: 1, restored: 0 });
   assert.equal(students.getRange(2, 6).getValue(), '取消資格');
   assert.equal(resultBook.getSheetByName('LINE點名紀錄').getRange(2, 14).getValue(), '保證金未繳');
   assert.equal(resultBook.getSheetByName('保證金提醒紀錄').getRange(2, 2).getValue(), '取消資格');
   const pushes = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload));
   assert.deepEqual(new Set(pushes.map(push => push.to)), new Set(['U-STUDENT', 'U-EXAM']));
+  deposits.getRange(2, 4).setValue(true);
+  const restored = externalTeaching._test.processDepositRequirements(new Date('2026-10-10T12:01:00+08:00'));
+  assert.deepEqual(restored, { reminders: 0, canceled: 0, restored: 1 });
+  assert.equal(students.getRange(2, 6).getValue(), '未點名');
+  assert.equal(resultBook.getSheetByName('LINE點名紀錄').getRange(2, 14).getValue(), '保證金已確認');
   installGlobals(runtime);
 });
 
