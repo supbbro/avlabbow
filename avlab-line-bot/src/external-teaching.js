@@ -213,12 +213,40 @@ function syncFromSchedule() {
   else if (studentHeaders.some((header, index) => studentRows[0][index] !== header)) studentSheet.getRange(1, 1, 1, studentHeaders.length).setValues([studentHeaders]);
   const existingStudents = new Map();
   const duplicateStudentRows = [];
+  const desiredStudentIds = new Set(parsed.flatMap(task => task.students.map(student => `${task.id}|${student.id}`)));
+  const studentCandidates = [];
   for (let i = 1; i < studentRows.length; i++) {
     const student = studentFromRow(studentRows[i], i + 1);
     if (!student.taskId || !student.id || isTemplate(student.id)) continue;
-    const key = `${student.taskId}|${student.id}`;
-    if (existingStudents.has(key)) duplicateStudentRows.push(student.row);
-    else existingStudents.set(key, { student, values: studentRows[i] });
+    studentCandidates.push({ student, values: studentRows[i] });
+  }
+  const candidatesByPerson = new Map();
+  for (const candidate of studentCandidates) {
+    const key = `${candidate.student.taskId}|${norm(candidate.student.name)}`;
+    if (!candidatesByPerson.has(key)) candidatesByPerson.set(key, []);
+    candidatesByPerson.get(key).push(candidate);
+  }
+  for (const candidates of candidatesByPerson.values()) {
+    const nonblankNumbers = new Set(candidates.map(candidate => norm(candidate.student.number)).filter(Boolean));
+    const buckets = new Map();
+    for (const candidate of candidates) {
+      const number = norm(candidate.student.number);
+      const bucketKey = nonblankNumbers.size <= 1 ? 'same-person' : number || `missing:${candidate.student.id}`;
+      if (!buckets.has(bucketKey)) buckets.set(bucketKey, []);
+      buckets.get(bucketKey).push(candidate);
+    }
+    for (const bucket of buckets.values()) {
+      bucket.sort((a, b) => {
+        const score = candidate => (desiredStudentIds.has(`${candidate.student.taskId}|${candidate.student.id}`) ? 100 : 0)
+          + (candidate.student.attendance !== '未點名' ? 10 : 0)
+          + (candidate.student.result !== '未記錄' ? 5 : 0)
+          + (candidate.student.number ? 1 : 0);
+        return score(b) - score(a) || a.student.row - b.student.row;
+      });
+      const canonical = bucket[0];
+      existingStudents.set(`${canonical.student.taskId}|${canonical.student.id}`, canonical);
+      duplicateStudentRows.push(...bucket.slice(1).map(candidate => candidate.student.row));
+    }
   }
   for (const row of duplicateStudentRows) {
     studentSheet.getRange(row, 1, 1, studentHeaders.length).setValues([Array(studentHeaders.length).fill('')]);
