@@ -69,7 +69,7 @@ function allTasks() {
 function findTask(taskId) { return allTasks().find(task => task.id === taskId) || null; }
 
 function studentFromRow(row, rowNumber) {
-  return { row: rowNumber, taskId: String(row[0] || '').trim(), id: String(row[1] || '').trim(), name: row[2], number: row[3], order: Number(row[4] || 0), attendance: String(row[5] || '未點名'), result: String(row[6] || '未記錄'), scheduledStart: row[8] || '', scheduledEnd: row[9] || '' };
+  return { row: rowNumber, taskId: String(row[0] || '').trim(), id: String(row[1] || '').trim(), name: row[2], number: row[3], order: Number(row[4] || 0), attendance: String(row[5] || '未點名'), result: String(row[6] || '未記錄'), scheduledStart: row[8] || '', scheduledEnd: row[9] || '', reminderSentAt: row[10] || '' };
 }
 
 function studentsFor(taskId) {
@@ -153,7 +153,7 @@ function syncFromSchedule() {
   }
 
   const studentRows = studentSheet.getDataRange().getValues();
-  const studentHeaders = ['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間','個別開始時間','個別結束時間'];
+  const studentHeaders = ['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間','個別開始時間','個別結束時間','考生提醒時間'];
   if (!studentRows.length) studentSheet.appendRow(studentHeaders);
   else if (studentHeaders.some((header, index) => studentRows[0][index] !== header)) studentSheet.getRange(1, 1, 1, studentHeaders.length).setValues([studentHeaders]);
   const existingStudents = new Map();
@@ -168,14 +168,14 @@ function syncFromSchedule() {
       active.add(student.id);
       const key = `${incoming.id}|${student.id}`, existing = existingStudents.get(key);
       if (!existing) {
-        studentSheet.appendRow([incoming.id, student.id, student.name, student.number, student.order, '未點名', '未記錄', '', student.scheduledStart || incoming.start, student.scheduledEnd || incoming.end]); studentsAdded++;
+        studentSheet.appendRow([incoming.id, student.id, student.name, student.number, student.order, '未點名', '未記錄', '', student.scheduledStart || incoming.start, student.scheduledEnd || incoming.end, '']); studentsAdded++;
       } else {
         const desiredIdentity = [incoming.id, student.id, student.name, existing.student.number || student.number, student.order];
         const identityChanged = rowChanged(existing.values.slice(0, 5), desiredIdentity);
         const desiredTimes = [student.scheduledStart || incoming.start, student.scheduledEnd || incoming.end];
         const timesChanged = rowChanged(existing.values.slice(8, 10), desiredTimes);
         if (identityChanged) studentSheet.getRange(existing.student.row, 1, 1, 5).setValues([desiredIdentity]);
-        if (timesChanged) studentSheet.getRange(existing.student.row, 9, 1, 2).setValues([desiredTimes]);
+        if (timesChanged) studentSheet.getRange(existing.student.row, 9, 1, 3).setValues([[...desiredTimes, '']]);
         if (identityChanged || timesChanged) studentsUpdated++;
       }
     }
@@ -762,9 +762,9 @@ function sendExternalReminders(now = new Date()) {
   let sent = 0;
   for (const task of allTasks()) {
     if (!['已排定', '點名中'].includes(task.status)) continue;
-    const start = parseTaskStart(task); if (!start || start <= now) continue;
+    const start = parseTaskStart(task); if (!start) continue;
+    if (!enabledFlag(task.twoHours)) continue;
     const reminderDue = new Date(start.getTime() - REMINDER_LEAD_MINUTES * 60000);
-    if (!enabledFlag(task.twoHours) || task.twoHoursSentAt || now < reminderDue) continue;
 
     const buttons = [
       { label: '開始聊天室點名', text: `開始點名 ${task.id}` },
@@ -775,15 +775,30 @@ function sendExternalReminders(now = new Date()) {
     const targetGroups = task.groupId ? activeGroups.filter(group => group.id === task.groupId) : activeGroups;
     let taskSent = false;
 
-    if (examinerUserId) {
-      queuePush(examinerUserId, reply(`⏰ 你的對外任務將於 1 小時後開始\n\n${taskText(task)}\n\n${roster}`, buttons));
-      sent++; taskSent = true;
+    if (!task.twoHoursSentAt && start > now && now >= reminderDue) {
+      if (examinerUserId) {
+        queuePush(examinerUserId, reply(`⏰ 你的對外任務將於 1 小時後開始\n\n${taskText(task)}\n\n${roster}`, buttons));
+        sent++; taskSent = true;
+      }
+      for (const group of targetGroups) {
+        queuePush(group.id, reply(`📣 對外工作坊將於 1 小時後開始\n\n${taskText(task)}\n\n${roster}\n\n請考生準時到場；考官可由下方按鈕開始點名。`, buttons));
+        sent++; taskSent = true;
+      }
+      if (taskSent) sheet(SHEETS.tasks).getRange(task.row, 16).setValue(now);
     }
-    for (const group of targetGroups) {
-      queuePush(group.id, reply(`📣 對外工作坊將於 1 小時後開始\n\n${taskText(task)}\n\n${roster}\n\n請考生準時到場；考官可由下方按鈕開始點名。`, buttons));
-      sent++; taskSent = true;
+
+    if (isExam(task)) {
+      for (const student of studentsFor(task.id)) {
+        const studentStart = studentTaskStart(task, student);
+        if (!studentStart || studentStart <= now || student.reminderSentAt || now < new Date(studentStart.getTime() - REMINDER_LEAD_MINUTES * 60000)) continue;
+        const studentUserId = userIdForName(student.name);
+        if (!studentUserId) continue;
+        const time = `${formatTime(student.scheduledStart || task.start)}-${formatTime(student.scheduledEnd || task.end)}`;
+        queuePush(studentUserId, reply(`⏰ 你的對外${task.phase}將於 1 小時後開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n⚠️ 請依個別時間準時到場；超過 5 分鐘將取消本次考試資格。`));
+        sheet(SHEETS.students).getRange(student.row, 11).setValue(now);
+        sent++;
+      }
     }
-    if (taskSent) sheet(SHEETS.tasks).getRange(task.row, 16).setValue(now);
   }
   return sent;
 }

@@ -261,12 +261,20 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   const resultBook = runtime.openById(ids.externalResults);
   const tasks = resultBook.getSheetByName('對外任務');
   const students = resultBook.getSheetByName('任務學生');
-  students.appendRow(['EXT-BIND-TEST', 'STU-BIND-TEST', '外部測試生', 'TEST', 1, '未點名', '未記錄', '']);
+  students.appendRow(['EXT-BIND-TEST', 'STU-BIND-TEST', '外部測試生', 'TEST', 1, '未點名', '未記錄', '', '13:00', '13:15', '']);
   const response = bot.getReply('我是 外部測試生', 'U-external-student-test');
   assert.match(response.text, /綁定成功/);
   assert.match(response.text, /外部測試生/);
 
   tasks.appendRow(['EXT-BIND-TEST','1151','考試',new Date('2026-09-20'),'12:00','13:00','H6','401','測試者','','G1','已排定',true,true,'','','','']);
+  runtime.httpOperations = [];
+  const reminderCount = externalTeaching.sendExternalReminders(new Date('2026-09-20T12:00:00+08:00'));
+  assert.equal(reminderCount, 1);
+  const reminderPush = JSON.parse(runtime.httpOperations[0].options.payload);
+  assert.equal(reminderPush.to, 'U-external-student-test');
+  assert.match(reminderPush.messages[0].text, /13:00-13:15/);
+  assert.match(reminderPush.messages[0].text, /超過 5 分鐘/);
+
   const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
   externalTeaching.handleCommand('開始點名 EXT-BIND-TEST', context);
   externalTeaching.handleCommand('點名狀態 EXT-BIND-TEST STU-BIND-TEST 到場', context);
