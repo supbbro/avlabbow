@@ -797,7 +797,7 @@ var UNIFIED={
   對內請假:'【對內請假規定與表單】\n\n⏳ 請假死線：\n正常請假死線為「星期三 23:59」。逾期緩衝死線為「星期四 18:00」，超過此時間皆視為曠職並扣考核分。\n\n📝 對內請假表單：\nhttps://forms.gle/BoZnX4fnerBNbf4T7\n\n⚠️ (若是對外學生要改考試時間，請輸入「學生請假」)',
   越級考:'【越級考/補考說明】\n\n1️⃣ 若要申請越級考，請提前私訊對內教學組長「蔡季妍」，等候他協助安排考官。\n2️⃣ 由考生與考官自行約時間考試。\n3️⃣ 考試時由考官填寫認證表單，若登記為通過，兩個工作天內經理會開啟權限。\n\n【補考說明】\n若教學部已為同級助理開設統一考試時段，考試未過或未參與考試者，須於該年度完成補考：\n• 原開設時段考試未過：請找原考官補考。\n• 原開設時段未參與考試：請找原考官（若有兩位擇一即可）。\n• 若原考官已不在中心，請找對內教學組長「李慈恩」安排，流程同越級考。\n\n【越級考/加開申請表單】\nhttps://forms.gle/MgWKkzpQWheo8GMv9',
   對外考官更動:'【對外教學考官更動表單 (中心助理專用)】\n當您擔任對外考官卻無法出席時，請務必找好代班人後再填寫此表單！\n\nhttps://forms.gle/RRdeUaH43QYFYwaPA\n\n⚠️ 備註：對外考官若無法出席，「一定要找代班」！請找好代班人後再填寫此表單。',
-  對內考官:'【1151 對內考官安排】\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit\n\n⚠️ 備註：對內考官若需請假，請務必尋找「代班人」，並填寫對內請假表單：\nhttps://docs.google.com/forms/d/e/1FAIpQLSfHCPloGR4rWQuYBamgp1Uz7L18YrzhhiubUny3-A49RMrffQ/viewform?usp=header',
+  對內考官:'【1151 對內考官安排】\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit\n\n⚠️ 備註：對內考官若需請假，請務必尋找「代班人」，並填寫對內請假表單：\nhttps://forms.gle/KbXjTfp4EYh3SJGc8',
   對內時程:'【1151 對內教學／檢定時程】\n\n📚 9/6 暑訓教學\n📝 9/18 暑訓檢定\n📚 10/16 期中教學\n📝 10/30 期中檢定\n📚 11/6 期末教學\n📝 12/4 期末檢定\n\n完整器材與考官安排：\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit'
 };
 function getUnifiedReply(k){
