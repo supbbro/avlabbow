@@ -236,6 +236,13 @@ test('arrival grace rules are five minutes for exams and fifteen minutes for tea
   assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '考試', date, start: '12:00' }, student, new Date('2026-09-02T12:05:00+08:00')), '到場');
   assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '考試', date, start: '12:00' }, student, new Date('2026-09-02T12:05:01+08:00')), '取消資格');
   assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '教學', date, start: '12:00' }, student, new Date('2026-09-02T12:15:01+08:00')), '遲到');
+  const teachingReminder = externalTeaching._test.studentReminderText(
+    { phase: '教學', date, start: '12:00', end: '13:00', equipment: 'X160', location: '401' },
+    { name: '虛擬學生', scheduledStart: '12:10', scheduledEnd: '13:00' }
+  );
+  assert.match(teachingReminder, /對外教學將於 1 小時後開始/);
+  assert.match(teachingReminder, /超過 15 分鐘.*遲到/);
+  assert.doesNotMatch(teachingReminder, /取消本次考試資格/);
 });
 
 test('one-hour reminder pushes the roster to the examiner and assigned group', () => {
@@ -290,6 +297,21 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   assert.equal(push.to, 'U-external-student-test');
   assert.match(push.messages[0].text, /上機/);
   assert.equal(push.messages[0].quickReply.items[0].action.uri, 'https://docs.google.com/forms/d/FAKE/viewform');
+});
+
+test('a bound student receives the teaching reminder with the fifteen-minute rule', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務');
+  const students = resultBook.getSheetByName('任務學生');
+  tasks.appendRow(['EXT-TEACH-REMIND','1151','教學',new Date('2026-09-21'),'14:00','15:00','X160','401','測試者','','G1','已排定',true,true,'','','','']);
+  students.appendRow(['EXT-TEACH-REMIND','STU-TEACH-REMIND','外部測試生','TEST',1,'未點名','未記錄','','14:00','15:00','']);
+  runtime.httpOperations = [];
+  assert.equal(externalTeaching.sendExternalReminders(new Date('2026-09-21T13:00:00+08:00')), 3);
+  const pushes = runtime.httpOperations.map(operation => JSON.parse(operation.options.payload));
+  const studentPush = pushes.find(push => push.to === 'U-external-student-test');
+  assert.ok(studentPush);
+  assert.match(studentPush.messages[0].text, /對外教學將於 1 小時後開始/);
+  assert.match(studentPush.messages[0].text, /超過 15 分鐘.*遲到/);
 });
 
 test('failed exam stages select the next retest form and stop after the second retest', () => {

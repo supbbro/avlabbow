@@ -739,6 +739,14 @@ function studentRosterText(task) {
   return `考生（${students.length} 人）：${students.map(student => student.name).join('、')}`;
 }
 
+function studentReminderText(task, student) {
+  const time = `${formatTime(student.scheduledStart || task.start)}-${formatTime(student.scheduledEnd || task.end)}`;
+  const attendanceRule = isExam(task)
+    ? '⚠️ 請依個別時間準時到場；超過 5 分鐘將取消本次考試資格。'
+    : '⚠️ 請依個別時間準時到場；開始後超過 15 分鐘完成點名將記為遲到。';
+  return `⏰ 你的對外${task.phase}將於 1 小時後開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n${attendanceRule}`;
+}
+
 function expireExamQualifications(now = new Date()) {
   const timezone = Session.getScriptTimeZone();
   const today = Utilities.formatDate(now, timezone, 'yyyy-MM-dd');
@@ -787,17 +795,14 @@ function sendExternalReminders(now = new Date()) {
       if (taskSent) sheet(SHEETS.tasks).getRange(task.row, 16).setValue(now);
     }
 
-    if (isExam(task)) {
-      for (const student of studentsFor(task.id)) {
-        const studentStart = studentTaskStart(task, student);
-        if (!studentStart || studentStart <= now || student.reminderSentAt || now < new Date(studentStart.getTime() - REMINDER_LEAD_MINUTES * 60000)) continue;
-        const studentUserId = userIdForName(student.name);
-        if (!studentUserId) continue;
-        const time = `${formatTime(student.scheduledStart || task.start)}-${formatTime(student.scheduledEnd || task.end)}`;
-        queuePush(studentUserId, reply(`⏰ 你的對外${task.phase}將於 1 小時後開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n⚠️ 請依個別時間準時到場；超過 5 分鐘將取消本次考試資格。`));
-        sheet(SHEETS.students).getRange(student.row, 11).setValue(now);
-        sent++;
-      }
+    for (const student of studentsFor(task.id)) {
+      const studentStart = studentTaskStart(task, student);
+      if (!studentStart || studentStart <= now || student.reminderSentAt || now < new Date(studentStart.getTime() - REMINDER_LEAD_MINUTES * 60000)) continue;
+      const studentUserId = userIdForName(student.name);
+      if (!studentUserId) continue;
+      queuePush(studentUserId, reply(studentReminderText(task, student)));
+      sheet(SHEETS.students).getRange(student.row, 11).setValue(now);
+      sent++;
     }
   }
   return sent;
@@ -807,4 +812,4 @@ function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm } };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, studentReminderText } };
