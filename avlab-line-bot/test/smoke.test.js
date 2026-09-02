@@ -366,6 +366,31 @@ test('group matrix sync derives green and retest colors from cumulative LINE rec
   assert.equal(status('學生乙', 'X160'), '要補考');
 });
 
+test('group matrix sync refreshes an existing student name without resetting result cells', () => {
+  const roster = [['音響學'], ['第一組'], ['新姓名', '1001']];
+  const matrix = [
+    ['姓名', '系級', '學號', '課程', '', 'H6考試'],
+    ['說明'],
+    ['舊姓名', '廣電系', '1001', '一D56 侯志欽老師 音響學', '', '既有結果']
+  ];
+  const plan = externalGroupSync._test.planMatrix(roster, matrix, [['紀錄ID']]);
+  assert.deepEqual(plan.fieldUpdates, [{ rowIndex: 2, column: 0, value: '新姓名' }]);
+  assert.equal(plan.missing.length, 0);
+});
+
+test('group matrix sync reuses a single-course student row when the course changes', () => {
+  const roster = [['影像製作'], ['第二組'], ['學生甲', '1001']];
+  const matrix = [
+    ['姓名', '系級', '學號', '課程'],
+    ['說明'],
+    ['影像課同學', '', '2000', '５．二EFG 李志文老師 影像製作'],
+    ['學生甲', '', '1001', '一D56 侯志欽老師 音響學']
+  ];
+  const plan = externalGroupSync._test.planMatrix(roster, matrix, [['紀錄ID']]);
+  assert.equal(plan.missing.length, 0);
+  assert.deepEqual(plan.fieldUpdates, [{ rowIndex: 3, column: 3, value: '５．二EFG 李志文老師 影像製作' }]);
+});
+
 test('roster parsing uses a subsection title that appears before its group labels', () => {
   const rows = Array.from({ length: 4 }, () => Array(12).fill(''));
   rows[0][10] = '非劇情片理論與創作';

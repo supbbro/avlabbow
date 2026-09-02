@@ -111,17 +111,43 @@ function planMatrix(rosterRows, matrixRows, logRows) {
 
   const augmentedRows = matrixRows.map(row => row.slice());
   const missing = [];
+  const fieldUpdates = [];
   const rowForMembership = new Map();
+  const claimedRows = new Set();
+  const coursesByStudent = new Map();
   for (const member of memberships) {
-    let rowIndex = augmentedRows.findIndex((row, index) => index >= 2 && compact(row[2]) === compact(member.studentId) && courseMatches(row[3], member.course));
+    const studentKey = compact(member.studentId);
+    if (!coursesByStudent.has(studentKey)) coursesByStudent.set(studentKey, []);
+    coursesByStudent.get(studentKey).push(member.course);
+  }
+  for (const member of memberships) {
+    const studentKey = compact(member.studentId);
+    let rowIndex = augmentedRows.findIndex((row, index) => index >= 2 && !claimedRows.has(index) && compact(row[2]) === studentKey && courseMatches(row[3], member.course));
     if (rowIndex < 0) {
       const exemplar = augmentedRows.findIndex((row, index) => index >= 2 && courseMatches(row[3], member.course));
-      rowIndex = augmentedRows.length;
       const selectedCourse = exemplar >= 0 ? text(augmentedRows[exemplar][3]) : member.course;
-      const newRow = [member.name, '', member.studentId, selectedCourse, ''];
-      augmentedRows.push(newRow);
-      missing.push({ member, rowIndex, exemplar, values: newRow });
+      const currentCourses = coursesByStudent.get(studentKey) || [];
+      const reusableRow = currentCourses.length === 1
+        ? augmentedRows.findIndex((row, index) => index >= 2 && !claimedRows.has(index) && compact(row[2]) === studentKey && !currentCourses.some(course => courseMatches(row[3], course)))
+        : -1;
+      if (reusableRow >= 0) {
+        rowIndex = reusableRow;
+        for (const [column, value] of [[0, member.name], [2, member.studentId], [3, selectedCourse]]) {
+          if (text(augmentedRows[rowIndex][column]) === text(value)) continue;
+          augmentedRows[rowIndex][column] = value;
+          fieldUpdates.push({ rowIndex, column, value });
+        }
+      } else {
+        rowIndex = augmentedRows.length;
+        const newRow = [member.name, '', member.studentId, selectedCourse, ''];
+        augmentedRows.push(newRow);
+        missing.push({ member, rowIndex, exemplar, values: newRow });
+      }
+    } else if (text(augmentedRows[rowIndex][0]) !== member.name) {
+      augmentedRows[rowIndex][0] = member.name;
+      fieldUpdates.push({ rowIndex, column: 0, value: member.name });
     }
+    claimedRows.add(rowIndex);
     rowForMembership.set(`${compact(member.studentId)}|${compact(member.course)}`, rowIndex);
   }
 
@@ -136,7 +162,7 @@ function planMatrix(rosterRows, matrixRows, logRows) {
       if (status) updates.push({ rowIndex, column, status, name: member.name, course: member.course, group: member.group, equipment });
     }
   }
-  return { groups, memberships, outcomes, updates, missing };
+  return { groups, memberships, outcomes, updates, missing, fieldUpdates };
 }
 
 function quoted(name) { return `'${String(name).replaceAll("'", "''")}'`; }
@@ -167,6 +193,12 @@ async function syncExternalCertificationMatrix(api, spreadsheetId) {
     } });
   }
 
+  for (const update of plan.fieldUpdates) requests.push({ updateCells: {
+    range: { sheetId: matrixSheetId, startRowIndex: update.rowIndex, endRowIndex: update.rowIndex + 1, startColumnIndex: update.column, endColumnIndex: update.column + 1 },
+    rows: [{ values: [{ userEnteredValue: { stringValue: text(update.value) } }] }],
+    fields: 'userEnteredValue'
+  } });
+
   let updated = 0;
   for (const update of plan.updates) {
     const cacheKey = `${spreadsheetId}|${update.rowIndex}|${update.column}`;
@@ -181,7 +213,7 @@ async function syncExternalCertificationMatrix(api, spreadsheetId) {
   }
   if (requests.length) await api.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } });
   for (const [cacheKey, status] of appliedAfterSuccess) lastApplied.set(cacheKey, status);
-  return { updated, added: plan.missing.length, groups: plan.groups.length, memberships: plan.memberships.length };
+  return { updated, added: plan.missing.length, refreshed: plan.fieldUpdates.length, groups: plan.groups.length, memberships: plan.memberships.length };
 }
 
 module.exports = { syncExternalCertificationMatrix, _test: { canonicalEquipment, logEquipmentKey, headerEquipmentKey, parseRosterGroups, outcomeMap, planMatrix } };
