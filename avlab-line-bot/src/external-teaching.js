@@ -133,6 +133,29 @@ function rosterStudentId(student) {
   return `STU-R-${crypto.createHash('sha1').update(`${norm(student.name)}|${norm(student.number)}`).digest('hex').slice(0, 10).toUpperCase()}`;
 }
 
+function backfillBindingNumbers(roster) {
+  const target = SpreadsheetApp.openById(ids.master).getSheetByName('用戶綁定');
+  if (!target) return 0;
+  const rows = target.getDataRange().getValues();
+  if (!rows.length) return 0;
+  if (rows[0][3] !== '學號') target.getRange(1, 4).setValue('學號');
+  const numbersByName = new Map();
+  for (const student of roster) {
+    const key = norm(student.name);
+    if (!numbersByName.has(key)) numbersByName.set(key, new Set());
+    numbersByName.get(key).add(student.number);
+  }
+  let updated = 0;
+  for (let index = 1; index < rows.length; index++) {
+    if (!rows[index][1] || rows[index][3]) continue;
+    const numbers = numbersByName.get(norm(rows[index][1]));
+    if (numbers?.size !== 1) continue;
+    target.getRange(index + 1, 4).setValue([...numbers][0]);
+    updated++;
+  }
+  return updated;
+}
+
 function findStudent(taskId, studentId) { return studentsFor(taskId).find(student => student.id === studentId) || null; }
 
 function comparable(value, columnIndex = -1) {
@@ -173,6 +196,7 @@ function syncFromSchedule() {
   const rosterSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName(ROSTER_SHEET);
   const roster = rosterStudents(rosterSheet ? rosterSheet.getDataRange().getValues() : []);
   enrichStudentsFromRoster(parsed, roster);
+  const bindingsBackfilled = backfillBindingNumbers(roster);
   const taskSheet = sheet(SHEETS.tasks), studentSheet = sheet(SHEETS.students);
   if (!taskSheet || !studentSheet) throw new Error('找不到對外任務或任務學生工作表');
 
@@ -295,7 +319,7 @@ function syncFromSchedule() {
     studentSheet.appendRow([ROSTER_TASK_ID, rosterStudentId(student), student.name, student.number, 0, '名冊', '不適用', '', '', '', '']);
     rosterStudentsAdded++; studentsAdded++;
   }
-  return { tasks: parsed.length, tasksAdded, tasksUpdated, students: [...activeStudentsByTask.values()].reduce((sum, set) => sum + set.size, 0), studentsAdded, studentsUpdated, duplicateStudentsCleared, rosterStudentsAdded };
+  return { tasks: parsed.length, tasksAdded, tasksUpdated, students: [...activeStudentsByTask.values()].reduce((sum, set) => sum + set.size, 0), studentsAdded, studentsUpdated, duplicateStudentsCleared, rosterStudentsAdded, bindingsBackfilled };
 }
 
 function groups() {
