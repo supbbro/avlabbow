@@ -169,7 +169,11 @@ test('group attendance writes a normalized record and completes the task', () =>
   const attendanceStart = externalTeaching.handleCommand('開始點名 T1', context);
   assert.match(attendanceStart.text, /學生甲/);
   assert.match(attendanceStart.text, /考生名單/);
-  assert.equal(attendanceStart.quickReply.items[0].action.type, 'postback');
+  assert.equal(attendanceStart.lineMessage.type, 'template');
+  assert.equal(attendanceStart.lineMessage.template.type, 'carousel');
+  assert.equal(attendanceStart.lineMessage.template.columns[0].title, '學生甲');
+  assert.deepEqual(attendanceStart.lineMessage.template.columns[0].actions.map(action => action.label), ['學生已到（自動判定）', '請假', '缺席']);
+  assert.equal(attendanceStart.lineMessage.template.columns[0].actions[0].type, 'postback');
   const studentPrompt = externalTeaching.handleCommand('查看考生 T1 S1', context);
   assert.match(studentPrompt.text, /15 分鐘後點名為遲到/);
   assert.deepEqual(studentPrompt.quickReply.items.slice(0, 3).map(item => item.action.label), ['✅ 學生已到', '📝 請假', '❌ 缺席']);
@@ -193,12 +197,12 @@ test('retest preserves the passed written result and only asks for the practical
   students.appendRow(['T-EXAM-CUM','S-EXAM-CUM','補考學生','999',1,'未點名','未記錄','']);
   externalTeaching.handleCommand('開始點名 T-EXAM-CUM', context);
   const firstPrompt = externalTeaching.handleCommand('點名狀態 T-EXAM-CUM S-EXAM-CUM 到場', context);
-  assert.match(firstPrompt.text, /口頭問答：⏳ 尚未評分/);
+  assert.match(firstPrompt.text, /簡答題：⏳ 尚未評分/);
   assert.match(firstPrompt.text, /上機：⏳ 尚未評分/);
   assert.doesNotMatch(firstPrompt.text, /保證金：/);
   assert.equal(firstPrompt.quickReply.items[0].action.type, 'postback');
   const practicalPrompt = externalTeaching.handleCommand('簡答登記 T-EXAM-CUM S-EXAM-CUM 通過', context);
-  assert.match(practicalPrompt.text, /口頭問答：✅ 通過/);
+  assert.match(practicalPrompt.text, /簡答題：✅ 通過/);
   assert.match(practicalPrompt.text, /上機：⏳ 尚未評分/);
   assert.doesNotMatch(practicalPrompt.text, /保證金：/);
   externalTeaching.handleCommand('上機登記 T-EXAM-CUM S-EXAM-CUM 未通過', context);
@@ -208,11 +212,11 @@ test('retest preserves the passed written result and only asks for the practical
   externalTeaching.handleCommand('開始點名 T-RETEST-CUM', context);
   const retestPrompt = externalTeaching.handleCommand('點名狀態 T-RETEST-CUM S-RETEST-CUM 到場', context);
   const resultLabels = retestPrompt.quickReply.items.map(item => item.action.label);
-  assert.match(retestPrompt.text, /口頭問答：✅ 通過/);
+  assert.match(retestPrompt.text, /簡答題：✅ 通過/);
   assert.match(retestPrompt.text, /上機：⏳ 尚未評分/);
   assert.equal(resultLabels.some(label => label === '上機 ✅'), true);
   assert.equal(resultLabels.some(label => label === '上機 ❌'), true);
-  assert.equal(resultLabels.some(label => label.includes('口頭問答')), false);
+  assert.equal(resultLabels.some(label => label.includes('簡答題')), false);
 
   const completed = externalTeaching.handleCommand('上機登記 T-RETEST-CUM S-RETEST-CUM 通過', context);
   assert.match(completed.text, /可退保證金/);

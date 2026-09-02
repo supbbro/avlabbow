@@ -330,19 +330,42 @@ function attendancePrompt(task, student) {
 
 function candidateMenu(task, page = 1, notice = '') {
   const students = studentsFor(task.id);
-  const pageSize = 9, totalPages = Math.max(1, Math.ceil(students.length / pageSize));
+  const pageSize = 10, totalPages = Math.max(1, Math.ceil(students.length / pageSize));
   const currentPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
   const visible = students.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const icon = student => student.attendance === '未點名' ? '▫️' : student.attendance === '取消資格' ? '🚫' : '✅';
-  const actions = visible.map(student => ({
-    label: `${icon(student)} ${String(student.name).slice(0, 14)}`,
-    postback: `查看考生 ${task.id} ${student.id}`
+  const postbackAction = (label, data) => ({ type: 'postback', label, data });
+  const columns = visible.map((student, index) => ({
+    title: String(student.name || '未填姓名').slice(0, 40),
+    text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}`.slice(0, 60),
+    actions: isExam(task) ? [
+      postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
+      postbackAction('取消資格', `點名狀態 ${task.id} ${student.id} 取消資格`),
+      postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
+    ] : [
+      postbackAction('學生已到（自動判定）', `到場判定 ${task.id} ${student.id}`),
+      postbackAction('請假', `點名狀態 ${task.id} ${student.id} 請假`),
+      postbackAction('缺席', `點名狀態 ${task.id} ${student.id} 缺席`)
+    ]
   }));
-  if (currentPage > 1) actions.push({ label: '⬅️ 上一頁名單', postback: `考生名單 ${task.id} ${currentPage - 1}` });
-  if (currentPage < totalPages) actions.push({ label: '下一頁名單 ➡️', postback: `考生名單 ${task.id} ${currentPage + 1}` });
+  const navActions = [];
+  if (currentPage > 1) navActions.push({ label: '⬅️ 上一頁名單', postback: `考生名單 ${task.id} ${currentPage - 1}` });
+  if (currentPage < totalPages) navActions.push({ label: '下一頁名單 ➡️', postback: `考生名單 ${task.id} ${currentPage + 1}` });
   const rows = visible.map((student, index) => `${(currentPage - 1) * pageSize + index + 1}. ${student.name}｜${student.attendance}`).join('\n');
-  return reply(`${notice ? `${notice}\n\n` : ''}【${task.equipment} 考生名單｜${currentPage}/${totalPages}】\n${rows}\n\n請直接點選要登記的考生。`,
-    externalNav(actions, `查看任務 ${task.id}`, '回任務'));
+  const fallbackText = `${notice ? `${notice}\n\n` : ''}【${task.equipment} 考生名單｜${currentPage}/${totalPages}】\n${rows}\n\n請左右滑動卡片並直接點選考生。`;
+  const fallbackItems = visible.slice(0, 9).map(student => ({ label: `查看 ${String(student.name).slice(0, 12)}`, postback: `查看考生 ${task.id} ${student.id}` }));
+  return {
+    text: fallbackText,
+    fallbackQuickReply: qr(externalNav(fallbackItems, `查看任務 ${task.id}`, '回任務')),
+    lineMessage: {
+      type: 'template',
+      altText: `${task.equipment} 考生卡片名單（${students.length} 人）`,
+      template: { type: 'carousel', columns },
+      quickReply: qr(externalNav([
+        ...navActions,
+        { label: '查看點名結果', postback: `查看點名結果 ${task.id}` }
+      ], `查看任務 ${task.id}`, '回任務'))
+    }
+  };
 }
 
 function attendanceBoard(task) {
@@ -352,16 +375,17 @@ function attendanceBoard(task) {
 function resultParts(result) {
   return {
     '全部通過': ['通過', '通過'], '僅簡答通過': ['通過', '未通過'],
-    '僅口頭問答通過': ['通過', '未通過'],
+    '僅簡答題通過': ['通過', '未通過'], '僅口頭問答通過': ['通過', '未通過'],
     '僅上機通過': ['未通過', '通過'], '未通過': ['未通過', '未通過'],
     '簡答通過': ['通過', '未記錄'], '簡答未通過': ['未通過', '未記錄'],
+    '簡答題通過': ['通過', '未記錄'], '簡答題未通過': ['未通過', '未記錄'],
     '口頭問答通過': ['通過', '未記錄'], '口頭問答未通過': ['未通過', '未記錄'],
     '上機通過': ['未記錄', '通過'], '上機未通過': ['未記錄', '未通過'],
     '不適用': ['不適用', '不適用']
   }[result] || ['未記錄', '未記錄'];
 }
 
-const ATTENDANCE_HEADERS = ['紀錄ID','任務ID','日期','開始時間','階段','器材','學生ID','學生姓名','學號','出席狀態','口頭問答結果','上機結果','總結果','操作考官','考官LINE User ID','記錄時間','累計口頭問答結果','累計上機結果','保證金狀態'];
+const ATTENDANCE_HEADERS = ['紀錄ID','任務ID','日期','開始時間','階段','器材','學生ID','學生姓名','學號','出席狀態','簡答題結果','上機結果','總結果','操作考官','考官LINE User ID','記錄時間','累計簡答題結果','累計上機結果','保證金狀態'];
 
 function ensureAttendanceHeaders(target, rows) {
   if (!rows.length) target.appendRow(ATTENDANCE_HEADERS);
@@ -391,7 +415,7 @@ function certificationForStudent(task, student, excludeRecordId = '') {
 }
 
 function certificationText(certification, showDeposit = true) {
-  const result = `累計結果：口頭問答 ${certification.shortAnswer ? '✅ 通過' : '❌ 未通過'}｜上機 ${certification.practical ? '✅ 通過' : '❌ 未通過'}`;
+  const result = `累計結果：簡答題 ${certification.shortAnswer ? '✅ 通過' : '❌ 未通過'}｜上機 ${certification.practical ? '✅ 通過' : '❌ 未通過'}`;
   if (!showDeposit) return result;
   return `${result}\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}`;
 }
@@ -416,10 +440,10 @@ function mergeExamPart(currentResult, part, passed) {
   if (part === 'short') shortAnswer = passed ? '通過' : '未通過';
   else practical = passed ? '通過' : '未通過';
   if (shortAnswer === '通過' && practical === '通過') return '全部通過';
-  if (shortAnswer === '通過' && practical === '未通過') return '僅口頭問答通過';
+  if (shortAnswer === '通過' && practical === '未通過') return '僅簡答題通過';
   if (shortAnswer === '未通過' && practical === '通過') return '僅上機通過';
   if (shortAnswer === '未通過' && practical === '未通過') return '未通過';
-  if (shortAnswer !== '未記錄') return shortAnswer === '通過' ? '口頭問答通過' : '口頭問答未通過';
+  if (shortAnswer !== '未記錄') return shortAnswer === '通過' ? '簡答題通過' : '簡答題未通過';
   return practical === '通過' ? '上機通過' : '上機未通過';
 }
 
@@ -470,8 +494,8 @@ function resultPrompt(task, student) {
   const { position, total } = studentPosition(task, student);
   const actions = [];
   if (!progress.shortRecorded) actions.push(
-    { label: '口頭問答 ✅', postback: `簡答登記 ${task.id} ${student.id} 通過` },
-    { label: '口頭問答 ❌', postback: `簡答登記 ${task.id} ${student.id} 未通過` }
+    { label: '簡答題 ✅', postback: `簡答登記 ${task.id} ${student.id} 通過` },
+    { label: '簡答題 ❌', postback: `簡答登記 ${task.id} ${student.id} 未通過` }
   );
   if (!progress.practicalRecorded) actions.push(
     { label: '上機 ✅', postback: `上機登記 ${task.id} ${student.id} 通過` },
@@ -484,7 +508,7 @@ function resultPrompt(task, student) {
   const stateText = (recorded, passed) => !recorded ? '⏳ 尚未評分' : passed ? '✅ 通過' : '❌ 未通過';
   const depositText = progress.shortRecorded && progress.practicalRecorded
     ? `\n保證金：${progress.shortPassed && progress.practicalPassed ? '✅ 可退保證金' : '❌ 不可退保證金'}` : '';
-  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n出席：${student.attendance}\n\n口頭問答：${stateText(progress.shortRecorded, progress.shortPassed)}\n上機：${stateText(progress.practicalRecorded, progress.practicalPassed)}${depositText}\n\n${progress.step === 'done' ? '兩項評分已完成。' : '請直接選擇口頭問答或上機結果。'}`,
+  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n出席：${student.attendance}\n\n簡答題：${stateText(progress.shortRecorded, progress.shortPassed)}\n上機：${stateText(progress.practicalRecorded, progress.practicalPassed)}${depositText}\n\n${progress.step === 'done' ? '兩項評分已完成。' : '請直接選擇簡答題或上機結果。'}`,
     externalNav(actions, `查看任務 ${task.id}`, '回任務'));
 }
 
@@ -561,10 +585,13 @@ function recordExamPart(taskId, studentId, part, value, context) {
   const certification = upsertAttendance(task, student, permission.name, context.userId);
   const progress = examProgress(task, student);
   if (progress.step === 'done') {
-    return candidateMenu(task, 1, `✅ ${student.name}兩項評分完成\n口頭問答：${progress.shortPassed ? '通過' : '未通過'}｜上機：${progress.practicalPassed ? '通過' : '未通過'}\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}`);
+    return reply(`✅ ${student.name}兩項評分完成\n\n簡答題：${progress.shortPassed ? '✅ 通過' : '❌ 未通過'}\n上機：${progress.practicalPassed ? '✅ 通過' : '❌ 未通過'}\n\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}`, externalNav([
+      { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
+      { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` }
+    ], `查看任務 ${task.id}`, '回任務'));
   }
   const next = resultPrompt(task, student);
-  next.text = `✅ ${student.name}的${part === 'short' ? '口頭問答' : '上機'}已登記：${value}\n\n${next.text}`;
+  next.text = `✅ ${student.name}的${part === 'short' ? '簡答題' : '上機'}已登記：${value}\n\n${next.text}`;
   return next;
 }
 
