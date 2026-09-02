@@ -588,10 +588,11 @@ function recordExamPart(taskId, studentId, part, value, context) {
   if (progress.step === 'done') {
     const failedParts = [!progress.shortPassed ? '簡答題' : '', !progress.practicalPassed ? '上機' : ''].filter(Boolean);
     const needsRetest = failedParts.length > 0;
-    const notification = needsRetest && previousProgress.step !== 'done' ? notifyStudentForRetest(task, student, failedParts) : { sent: false, configured: Boolean(retestFormUrl()) };
+    const retest = retestForm(task);
+    const notification = needsRetest && previousProgress.step !== 'done' ? notifyStudentForRetest(task, student, failedParts) : { sent: false, configured: Boolean(retest.url), finalAttempt: retest.finalAttempt };
     const examinerReminder = needsRetest
-      ? `\n\n⚠️ 請考官務必提醒考生填寫補考表單。\n未通過項目：${failedParts.join('、')}\n${notification.sent ? '✅ 已私訊已綁定的考生。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定補考表單網址，暫時無法傳送表單。'}` : '';
-    const formActions = needsRetest && retestFormUrl() ? [{ label: '開啟補考表單', uri: retestFormUrl() }] : [];
+      ? `\n\n⚠️ 請考官務必提醒考生${retest.finalAttempt ? '本次為第二次補考，請依規定處理' : `填寫${retest.label}表單`}。\n未通過項目：${failedParts.join('、')}\n${notification.sent ? '✅ 已私訊已綁定的考生。' : notification.finalAttempt ? 'ℹ️ 已是第二次補考，不再傳送補考表單。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定補考表單網址，暫時無法傳送表單。'}` : '';
+    const formActions = needsRetest && retest.url ? [{ label: `開啟${retest.label}表單`, uri: retest.url }] : [];
     return reply(`✅ ${student.name}兩項評分完成\n\n簡答題：${progress.shortPassed ? '✅ 通過' : '❌ 未通過'}\n上機：${progress.practicalPassed ? '✅ 通過' : '❌ 未通過'}\n\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}${examinerReminder}`, externalNav([
       ...formActions,
       { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
@@ -705,22 +706,31 @@ function queuePush(chatId, content) {
   });
 }
 
-function retestFormUrl() {
-  const url = String(process.env.EXTERNAL_RETEST_FORM_URL || '').trim();
-  return /^https:\/\/docs\.google\.com\/forms\//.test(url) ? url : '';
+function validFormUrl(value) {
+  const url = String(value || '').trim();
+  return /^https:\/\/(?:forms\.gle\/|docs\.google\.com\/forms\/)/.test(url) ? url : '';
 }
 
-function retestMessage(task, student, failedParts) {
-  return `【補考提醒】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n請填寫補考表單並留意後續分班通知。`;
+function retestForm(task) {
+  const phase = String(task?.phase || '');
+  if (phase.includes('第二次補考')) return { url: '', label: '', finalAttempt: true };
+  if (phase.includes('第一次補考')) {
+    return { url: validFormUrl(process.env.EXTERNAL_SECOND_RETEST_FORM_URL || 'https://forms.gle/t1vrm4U43xMhoWxD9'), label: '第二次補考', finalAttempt: false };
+  }
+  return { url: validFormUrl(process.env.EXTERNAL_FIRST_RETEST_FORM_URL || process.env.EXTERNAL_RETEST_FORM_URL || 'https://forms.gle/3be87wRzRBKvdkFb6'), label: '第一次補考', finalAttempt: false };
+}
+
+function retestMessage(task, student, failedParts, label) {
+  return `【${label}提醒】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n請填寫${label}表單並留意後續分班通知。`;
 }
 
 function notifyStudentForRetest(task, student, failedParts) {
-  const url = retestFormUrl();
-  if (!url) return { sent: false, configured: false };
+  const form = retestForm(task);
+  if (!form.url) return { sent: false, configured: false, finalAttempt: form.finalAttempt };
   const studentUserId = userIdForName(student.name);
-  if (!studentUserId) return { sent: false, configured: true };
-  queuePush(studentUserId, reply(retestMessage(task, student, failedParts), [{ label: '填寫補考表單', uri: url }]));
-  return { sent: true, configured: true };
+  if (!studentUserId) return { sent: false, configured: true, finalAttempt: false };
+  queuePush(studentUserId, reply(retestMessage(task, student, failedParts, form.label), [{ label: `填寫${form.label}表單`, uri: form.url }]));
+  return { sent: true, configured: true, finalAttempt: false };
 }
 
 function studentRosterText(task) {
@@ -782,4 +792,4 @@ function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus } };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm } };
