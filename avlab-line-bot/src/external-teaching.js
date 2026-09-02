@@ -215,9 +215,22 @@ function syncFromSchedule() {
   const duplicateStudentRows = [];
   const desiredStudentIds = new Set(parsed.flatMap(task => task.students.map(student => `${task.id}|${student.id}`)));
   const studentCandidates = [];
+  const rosterNumbersByName = new Map();
+  for (const rosterStudent of roster) {
+    const key = norm(rosterStudent.name);
+    if (!rosterNumbersByName.has(key)) rosterNumbersByName.set(key, new Set());
+    rosterNumbersByName.get(key).add(rosterStudent.number);
+  }
   for (let i = 1; i < studentRows.length; i++) {
     const student = studentFromRow(studentRows[i], i + 1);
     if (!student.taskId || !student.id || isTemplate(student.id)) continue;
+    const rosterNumbers = rosterNumbersByName.get(norm(student.name));
+    if (!student.number && rosterNumbers?.size === 1) {
+      student.number = [...rosterNumbers][0];
+      studentRows[i][3] = student.number;
+      studentSheet.getRange(student.row, 4).setValue(student.number);
+      studentsUpdated++;
+    }
     studentCandidates.push({ student, values: studentRows[i] });
   }
   const candidatesByPerson = new Map();
