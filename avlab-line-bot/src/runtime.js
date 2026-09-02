@@ -4,7 +4,6 @@ const { google } = require('googleapis');
 const XLSX = require('xlsx');
 const { workbooks, ids, excelWorkbookIds, timezone } = require('./config');
 const { parseInternalTaskWorkbook } = require('./internal-task-parser');
-const { parseDepositWorkbook } = require('./deposit-parser');
 
 const a1 = name => `'${String(name).replaceAll("'", "''")}'`;
 const colName = number => {
@@ -119,6 +118,10 @@ class RangeFacade {
     return this;
   }
   setNumberFormat() { return this; }
+  setFontLine(value) {
+    this.sheet.runtime.operations.push({ kind: 'fontLine', sheet: this.sheet, row: this.row, column: this.column, rows: this.rows, columns: this.columns, value });
+    return this;
+  }
 }
 
 class SheetFacade {
@@ -188,9 +191,8 @@ class GoogleSheetsRuntime {
   }
 
   async loadAll(options = {}) {
-    // The deposit workbook is an Excel file and is comparatively expensive to
-    // download/parse. Only the external reminder job needs it.
-    return this.loadOnly(Object.keys(workbooks).filter(id => id !== ids.deposit), options);
+    // Registration/deposit data is only needed by the external scheduling job.
+    return this.loadOnly(Object.keys(workbooks).filter(id => ![ids.deposit, ids.externalRegistration].includes(id)), options);
   }
 
   async loadOnly(spreadsheetIds, { force = false, forceIds = [], forceMetadata = false } = {}) {
@@ -251,9 +253,7 @@ class GoogleSheetsRuntime {
       name,
       XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '', raw: false, dateNF: 'm/d/yyyy' })
     ]));
-    const normalized = fileId === ids.deposit
-      ? parseDepositWorkbook(rawSheets)
-      : parseInternalTaskWorkbook(rawSheets, process.env.ACADEMIC_TERM || '1151');
+    const normalized = parseInternalTaskWorkbook(rawSheets, process.env.ACADEMIC_TERM || '1151');
     const alias = requested[0];
     this.sheets.set(fileId, new Map([[alias, new SheetFacade(this, fileId, alias, normalized)]]));
   }
@@ -278,6 +278,7 @@ class GoogleSheetsRuntime {
 
   async flush() {
     const batchUpdates = new Map();
+    const formatUpdates = new Map();
     for (const op of this.operations) {
       const spreadsheetId = op.sheet.spreadsheetId;
       if (op.kind === 'addSheet') {
@@ -294,10 +295,27 @@ class GoogleSheetsRuntime {
         const range = `${a1(op.sheet.name)}!${colName(op.column)}${op.row}:${colName(endColumn)}${endRow}`;
         if (!batchUpdates.has(spreadsheetId)) batchUpdates.set(spreadsheetId, []);
         batchUpdates.get(spreadsheetId).push({ range, values: sheetApiValues(op.values) });
+      } else if (op.kind === 'fontLine') {
+        if (op.sheet.sheetId == null) throw new Error(`Missing sheet ID for formatting: ${op.sheet.name}`);
+        if (!formatUpdates.has(spreadsheetId)) formatUpdates.set(spreadsheetId, []);
+        formatUpdates.get(spreadsheetId).push({ repeatCell: {
+          range: {
+            sheetId: op.sheet.sheetId,
+            startRowIndex: op.row - 1,
+            endRowIndex: op.row - 1 + op.rows,
+            startColumnIndex: op.column - 1,
+            endColumnIndex: op.column - 1 + op.columns
+          },
+          cell: { userEnteredFormat: { textFormat: { strikethrough: op.value === 'line-through' } } },
+          fields: 'userEnteredFormat.textFormat.strikethrough'
+        } });
       }
     }
     await Promise.all([...batchUpdates].map(([spreadsheetId, data]) => this.api.spreadsheets.values.batchUpdate({
       spreadsheetId, requestBody: { valueInputOption: 'USER_ENTERED', data }
+    })));
+    await Promise.all([...formatUpdates].map(([spreadsheetId, requests]) => this.api.spreadsheets.batchUpdate({
+      spreadsheetId, requestBody: { requests }
     })));
     this.operations = [];
     const calls = this.httpOperations.splice(0).map(({ url, options }) => {

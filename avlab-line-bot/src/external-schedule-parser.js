@@ -61,7 +61,8 @@ function makeTask({ term, sheetName, itemRow, column, phase, date, time, equipme
       return {
         id: `STU-${shortHash(`${id}|${identity}`)}`, name: text(name), number, order: index + 1,
         scheduledStart: typeof student === 'object' ? student.start : time.start,
-        scheduledEnd: typeof student === 'object' ? student.end : time.end
+        scheduledEnd: typeof student === 'object' ? student.end : time.end,
+        sourceCell: typeof student === 'object' ? text(student.sourceCell) : ''
       };
     })
   };
@@ -135,7 +136,7 @@ function parseExamSheet(data, sheetName, term) {
       for (let row = studentStart; row < endRow; row++) {
         if (!usableName(data[row]?.[column])) continue;
         const studentTime = parseTimeRange(data[row]?.[timeColumn]) || time;
-        students.push({ name: data[row][column], start: studentTime.start, end: studentTime.end });
+        students.push({ name: data[row][column], start: studentTime.start, end: studentTime.end, sourceCell: `${columnName(column)}${row + 1}` });
       }
       tasks.push(makeTask({ term, sheetName, itemRow, column, phase: phaseForSheet(sheetName), date, time, equipment, location: data[itemRow + 1]?.[column], examiner, students }));
     }

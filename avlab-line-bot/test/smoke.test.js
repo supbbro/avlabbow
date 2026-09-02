@@ -16,6 +16,7 @@ const externalGroupSync = require('../src/external-group-sync');
 const { parseTeachingSheet, parseExamSheet } = require('../src/external-schedule-parser');
 const { parseInternalTaskWorkbook } = require('../src/internal-task-parser');
 const { parseDepositWorkbook } = require('../src/deposit-parser');
+const { parseRegistrationRows } = require('../src/external-registration-parser');
 
 test('main menu survives the Apps Script to Node compatibility layer', () => {
   const reply = bot.getReply('主選單', 'U-test');
@@ -377,22 +378,14 @@ test('deposit workbook parser normalizes initial and retest payment rows', () =>
   assert.equal(externalTeaching._test.dayBeforeDate(new Date('2026-10-09T00:00:00+08:00')), '2026-10-08');
 });
 
-test('deposit registration follows scheduled equipment, charges fifty each, and fills missing student numbers', () => {
-  const tasks = [
-    { phase: '考試', equipment: 'H6', sourceSheet: '考試週分班表I', students: [{ name: '梁璟莘', number: '' }] },
-    { phase: '考試', equipment: 'CX350', sourceSheet: '考試週分班表II', students: [{ name: '梁璟莘', number: '' }] },
-    { phase: '考試', equipment: 'H6', sourceSheet: '考試週分班表II', students: [{ name: '梁璟莘', number: '' }] },
-    { phase: '教學', equipment: '基礎配件', sourceSheet: '教學週分班表I', students: [{ name: '梁璟莘', number: '' }] }
-  ];
-  const legacy = [{ phase: '考試', name: '梁璟莘', number: '111101017', paid: true, paidAmount: 100 }];
-  externalTeaching._test.enrichStudentsFromRoster(tasks, legacy);
-  const rows = externalTeaching._test.buildDepositRegistrationRows(tasks, legacy, [], new Date('2026-09-03T00:00:00+08:00'));
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0][1], '梁璟莘');
-  assert.equal(rows[0][2], '111101017');
-  assert.equal(rows[0][3], true);
-  assert.equal(rows[0][4], 100);
-  assert.equal(rows[0][6], 'CX350、H6');
+test('registration response is the deposit authority and counts each exam equipment at fifty dollars', () => {
+  const headers = Array(34).fill('');
+  Object.assign(headers, { 0: '時間戳記', 4: '姓名', 5: '系級', 6: '學號', 9: '基礎配件課程', 10: 'X160考試', 20: 'H6考試', 31: '聲音工作區教學', 32: '聲音工作區考試' });
+  const row = Array(34).fill('');
+  Object.assign(row, { 4: '梁璟莘', 5: '廣電三', 6: '111101017', 9: '我要上課', 10: true, 20: '報名', 31: true, 32: false });
+  const registrations = parseRegistrationRows([headers, row]);
+  assert.deepEqual(registrations[0].equipment, ['X160', 'H6']);
+  assert.equal(registrations[0].number, '111101017');
 });
 
 test('group matrix sync derives green and retest colors from cumulative LINE records', () => {
@@ -519,21 +512,31 @@ test('exam assignments propagate merged date headers and choose the correct exam
   assert.equal(tasks[0].date.getFullYear(), 2027);
 });
 
-test('unpaid students are canceled at exam start and both student and examiner are notified', () => {
+test('unpaid registered students are canceled at the deadline, struck from schedule, and hidden from attendance', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);
   const resultBook = isolated.openById(ids.externalResults);
   const tasks = resultBook.insertSheet('對外任務');
   tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','考官','考官LINE User ID','群組ID','狀態']);
-  tasks.appendRow(['DEPOSIT-TASK','1151','考試',new Date('2026-10-10'),'12:00','12:15','H6','401','考官甲','U-EXAM','','已排定']);
+  tasks.appendRow(['DEPOSIT-TASK','1151','考試',new Date('2026-10-10'),'12:00','12:15','H6','401','考官甲','U-EXAM','','已排定',true,true,'','','考試週分班表I','C3']);
   const students = resultBook.insertSheet('任務學生');
-  students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間','個別開始時間','個別結束時間','提醒時間']);
-  students.appendRow(['DEPOSIT-TASK','DEPOSIT-STUDENT','學生甲','1001',1,'未點名','未記錄','','12:00','12:15','']);
+  students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間','個別開始時間','個別結束時間','提醒時間','來源儲存格']);
+  students.appendRow(['DEPOSIT-TASK','DEPOSIT-STUDENT','學生甲','1001',1,'未點名','未記錄','','12:00','12:15','','C3']);
   resultBook.insertSheet('LINE點名紀錄');
   resultBook.insertSheet('LINE群組設定');
-  const deposits = isolated.openById(ids.deposit).insertSheet('保證金對帳');
-  deposits.appendRow(['階段','姓名','學號','已繳交']);
-  deposits.appendRow(['考試','學生甲','1001','FALSE']);
+  const deposits = isolated.openById(ids.deposit).insertSheet('考試週保證金');
+  deposits.appendRow(['姓名','系級','學號','報名考試項目','總共項數','保證金總額','已繳交','繳交金額','處理日期／助理','班長註記','教學部註記']);
+  deposits.appendRow(['值班班長請注意']);
+  deposits.appendRow(['範例','','111405XXX','H6',1,50,'FALSE','','','','']);
+  deposits.appendRow(['學生甲','','1001','H6',1,50,'FALSE','','','','']);
+  const registration = isolated.openById(ids.externalRegistration).insertSheet('表單回覆 1');
+  const registrationHeader = Array(21).fill('');
+  Object.assign(registrationHeader, { 4: '姓名', 5: '系級', 6: '學號', 20: 'H6考試' });
+  const registrationRow = Array(21).fill('');
+  Object.assign(registrationRow, { 4: '學生甲', 6: '1001', 20: true });
+  registration.appendRow(registrationHeader); registration.appendRow(registrationRow);
+  const schedule = isolated.openById(ids.externalClassSchedule).insertSheet('考試週分班表I');
+  schedule.getRange(3, 3).setValue('學生甲');
   const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
   bindings.appendRow(['LINE User ID','姓名','綁定時間','學號']);
   bindings.appendRow(['U-STUDENT','學生甲','','1001']);
@@ -545,7 +548,9 @@ test('unpaid students are canceled at exam start and both student and examiner a
   assert.equal(resultBook.getSheetByName('保證金提醒紀錄').getRange(2, 2).getValue(), '取消資格');
   const pushes = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload));
   assert.deepEqual(new Set(pushes.map(push => push.to)), new Set(['U-STUDENT', 'U-EXAM']));
-  deposits.getRange(2, 4).setValue(true);
+  assert.equal(isolated.operations.some(operation => operation.kind === 'fontLine' && operation.value === 'line-through'), true);
+  assert.equal(externalTeaching._test.studentsFor('DEPOSIT-TASK').length, 0);
+  deposits.getRange(4, 7).setValue(true);
   const restored = externalTeaching._test.processDepositRequirements(new Date('2026-10-10T12:01:00+08:00'));
   assert.deepEqual(restored, { reminders: 0, canceled: 0, restored: 1 });
   assert.equal(students.getRange(2, 6).getValue(), '未點名');
