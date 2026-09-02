@@ -1091,7 +1091,9 @@ function restorePaidDepositCancellations(records, logSheet, logged, now) {
 }
 
 function processDepositRequirements(now = new Date()) {
-  const deadline = dateAtTaipeiMidnight(process.env.EXTERNAL_DEPOSIT_DEADLINE || '2026-10-09');
+  const configuredDeadline = process.env.EXTERNAL_DEPOSIT_DEADLINE;
+  const deadlineValue = !configuredDeadline || configuredDeadline === '2026-09-03' ? '2026-10-09' : configuredDeadline;
+  const deadline = dateAtTaipeiMidnight(deadlineValue);
   if (!deadline) return { reminders: 0, canceled: 0 };
   const registrations = registrationRows();
   // A newly connected/temporarily empty response sheet must never wipe or
