@@ -195,7 +195,10 @@ test('retest preserves the passed written result and only asks for the practical
 
   tasks.appendRow(['T-EXAM-CUM','1151','考試',new Date('2026-09-12'),'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
   students.appendRow(['T-EXAM-CUM','S-EXAM-CUM','補考學生','999',1,'未點名','未記錄','']);
-  externalTeaching.handleCommand('開始點名 T-EXAM-CUM', context);
+  const examMenu = externalTeaching.handleCommand('開始點名 T-EXAM-CUM', context);
+  assert.deepEqual(examMenu.lineMessage.template.columns[0].actions.map(action => action.label), ['考生已到', '查看／評分']);
+  const attendancePrompt = externalTeaching.handleCommand('查看考生 T-EXAM-CUM S-EXAM-CUM', context);
+  assert.equal(attendancePrompt.quickReply.items.some(item => item.action.label.includes('取消資格')), false);
   const firstPrompt = externalTeaching.handleCommand('點名狀態 T-EXAM-CUM S-EXAM-CUM 到場', context);
   assert.match(firstPrompt.text, /簡答題：⏳ 尚未評分/);
   assert.match(firstPrompt.text, /上機：⏳ 尚未評分/);

@@ -314,8 +314,7 @@ function automaticArrivalStatus(task, student, now = new Date()) {
 function attendancePrompt(task, student) {
   const { position, total } = studentPosition(task, student);
   const attendanceActions = isExam(task) ? [
-    { label: '✅ 考生已到', postback: `到場判定 ${task.id} ${student.id}` },
-    { label: '🚫 取消資格', postback: `點名狀態 ${task.id} ${student.id} 取消資格` }
+    { label: '✅ 考生已到', postback: `到場判定 ${task.id} ${student.id}` }
   ] : [
     { label: '✅ 學生已到', postback: `到場判定 ${task.id} ${student.id}` },
     { label: '📝 請假', postback: `點名狀態 ${task.id} ${student.id} 請假` },
@@ -339,7 +338,6 @@ function candidateMenu(task, page = 1, notice = '') {
     text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}`.slice(0, 60),
     actions: isExam(task) ? [
       postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
-      postbackAction('取消資格', `點名狀態 ${task.id} ${student.id} 取消資格`),
       postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
     ] : [
       postbackAction('學生已到（自動判定）', `到場判定 ${task.id} ${student.id}`),
