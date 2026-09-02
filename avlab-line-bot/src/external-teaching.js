@@ -94,6 +94,15 @@ function rowChanged(current, desired) {
   return desired.some((value, index) => comparable(current[index], index) !== comparable(value, index));
 }
 
+function reminderBelongsToSchedule(sentAt, date, startTime) {
+  if (!sentAt) return false;
+  const sent = sentAt instanceof Date ? new Date(sentAt) : new Date(sentAt);
+  const start = parseTaskStart({ date, start: startTime });
+  if (!start || Number.isNaN(sent.getTime())) return false;
+  const minutesBefore = (start.getTime() - sent.getTime()) / 60000;
+  return minutesBefore >= 0 && minutesBefore <= 90;
+}
+
 function syncFromSchedule() {
   const sourceBook = SpreadsheetApp.openById(ids.externalClassSchedule);
   const source = {};
@@ -115,11 +124,18 @@ function syncFromSchedule() {
     parsedIds.add(incoming.id);
     const existing = existingTasks.get(incoming.id);
     const currentStatus = existing?.task.status;
-    const status = ['點名中', '已完成'].includes(currentStatus) ? currentStatus : '已排定';
+    const scheduleChanged = Boolean(existing) && [
+      [existing.task.date, incoming.date, 3],
+      [existing.task.start, incoming.start, 4],
+      [existing.task.end, incoming.end, 5]
+    ].some(([current, desired, index]) => comparable(current, index) !== comparable(desired, index));
+    const status = !scheduleChanged && ['點名中', '已完成'].includes(currentStatus) ? currentStatus : '已排定';
+    const oneHourSentAt = !scheduleChanged && reminderBelongsToSchedule(existing?.task.twoHoursSentAt, incoming.date, incoming.start)
+      ? existing.task.twoHoursSentAt : '';
     const desired = [incoming.id, incoming.term, incoming.phase, incoming.date, incoming.start, incoming.end, incoming.equipment, incoming.location,
       incoming.examiner, userIdForName(incoming.examiner) || existing?.task.examinerUserId || '', existing?.task.groupId || '', status,
       existing ? existing.task.dayBefore : true, existing ? existing.task.twoHours : true,
-      existing?.task.dayBeforeSentAt || '', existing?.task.twoHoursSentAt || '', incoming.sourceSheet, incoming.sourceRange];
+      existing?.task.dayBeforeSentAt || '', oneHourSentAt, incoming.sourceSheet, incoming.sourceRange];
     if (!existing) { taskSheet.appendRow(desired); tasksAdded++; }
     else if (rowChanged(existing.values, desired)) { taskSheet.getRange(existing.row, 1, 1, desired.length).setValues([desired]); tasksUpdated++; }
   }
@@ -482,4 +498,4 @@ function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged } };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule } };

@@ -87,6 +87,12 @@ test('schedule sync treats timestamps on the same Taipei calendar day as the sam
   assert.equal(externalTeaching._test.rowChanged(current, desired), false);
 });
 
+test('only a reminder timestamp close to the current task start suppresses a new notification', () => {
+  const taskDate = new Date('2026-09-01T16:00:00.000Z');
+  assert.equal(externalTeaching._test.reminderBelongsToSchedule(new Date('2026-09-02T09:05:00.000Z'), taskDate, '18:05'), true);
+  assert.equal(externalTeaching._test.reminderBelongsToSchedule(new Date('2026-07-16T16:00:00.000Z'), taskDate, '18:05'), false);
+});
+
 test('external commands are routed to the smaller workbook set', () => {
   assert.equal(externalTeaching.isExternalCommand('近期任務'), true);
   assert.equal(externalTeaching.isExternalCommand('開始點名 T1'), true);
