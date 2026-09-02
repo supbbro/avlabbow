@@ -9,12 +9,14 @@ const SHEETS = {
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
 const REMINDER_LEAD_MINUTES = 60;
-const EXTERNAL_COMMAND = /^(綁定群組(?:\s|$)|解除群組$|今日任務$|對外任務$|近期任務$|查看任務\s|開始點名\s|點名狀態\s|考試登記\s|完成點名\s|同步對外排程$)/;
+const EXTERNAL_COMMAND = /^(綁定群組(?:\s|$)|解除群組$|今日任務$|對外任務$|近期任務$|查看任務\s|開始點名\s|查看考生\s|查看點名結果\s|修改出席\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
 let activeStudentsByTask = new Map();
 
 const qr = items => ({ items: items.slice(0, 13).map(item => ({
   type: 'action', action: item.uri
     ? { type: 'uri', label: item.label.slice(0, 20), uri: item.uri }
+    : item.postback
+      ? { type: 'postback', label: item.label.slice(0, 20), data: item.postback }
     : { type: 'message', label: item.label.slice(0, 20), text: item.text }
 })) });
 const reply = (text, items = []) => ({ text, ...(items.length ? { quickReply: qr(items) } : {}) });
@@ -284,36 +286,24 @@ function updateStudent(student, attendance, result) {
   student.attendance = attendance; student.result = result;
 }
 
-function attendanceColumn(task, student, position, total) {
-  const action = (label, status) => ({ type: 'message', label, text: `點名狀態 ${task.id} ${student.id} ${status}` });
-  return {
-    title: String(student.name || '未填姓名').slice(0, 40),
-    text: `${position}/${total}｜${student.number ? `學號 ${student.number}` : task.equipment}`.slice(0, 60),
-    actions: [action('準時', '到場'), action('遲到', '遲到'), action('缺席', '缺席')]
-  };
+function studentPosition(task, student) {
+  const students = studentsFor(task.id);
+  return { position: Math.max(0, students.findIndex(item => item.id === student.id)) + 1, total: students.length };
+}
+
+function attendancePrompt(task, student) {
+  const { position, total } = studentPosition(task, student);
+  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n目前出席：${student.attendance}\n\n請先登記這位學生的出席狀態：`, externalNav([
+    { label: '✅ 準時', postback: `點名狀態 ${task.id} ${student.id} 到場` },
+    { label: '⏰ 遲到', postback: `點名狀態 ${task.id} ${student.id} 遲到` },
+    { label: '📝 請假', postback: `點名狀態 ${task.id} ${student.id} 請假` },
+    { label: '❌ 缺席', postback: `點名狀態 ${task.id} ${student.id} 缺席` },
+    { label: '查看已點名結果', postback: `查看點名結果 ${task.id}` }
+  ], `查看任務 ${task.id}`, '回任務'));
 }
 
 function attendanceBoard(task, students) {
-  const visible = students.slice(0, 10);
-  const first = visible[0];
-  const textFallback = `【${task.equipment} 聊天室點名】\n尚有 ${students.length} 人未點名：\n${students.map(student => `• ${student.name}`).join('\n')}\n\n請使用下方點名卡選擇準時、遲到或缺席。`;
-  return {
-    text: textFallback,
-    fallbackQuickReply: qr(first ? [
-      { label: `${first.name} 準時`, text: `點名狀態 ${task.id} ${first.id} 到場` },
-      { label: `${first.name} 遲到`, text: `點名狀態 ${task.id} ${first.id} 遲到` },
-      { label: `${first.name} 缺席`, text: `點名狀態 ${task.id} ${first.id} 缺席` }
-    ] : []),
-    lineMessage: {
-      type: 'template',
-      altText: `${task.equipment} 聊天室點名（${students.length} 人）`,
-      template: { type: 'carousel', columns: visible.map((student, index) => attendanceColumn(task, student, index + 1, students.length)) },
-      quickReply: qr(externalNav([
-        { label: '查看任務統計', text: `查看任務 ${task.id}` },
-        { label: '重新整理點名', text: `開始點名 ${task.id}` }
-      ], `查看任務 ${task.id}`, '回任務'))
-    }
-  };
+  return attendancePrompt(task, students[0]);
 }
 
 function resultParts(result) {
@@ -359,6 +349,31 @@ function certificationText(certification) {
   return `累計結果：簡答 ${certification.shortAnswer ? '✅ 通過' : '❌ 未通過'}｜上機 ${certification.practical ? '✅ 通過' : '❌ 未通過'}\n保證金：${certification.refundable ? '✅ 可退保證金' : '⏳ 暫不可退（兩項皆通過才可退）'}`;
 }
 
+function examProgress(task, student) {
+  const previous = certificationForStudent(task, student, `${task.id}:${student.id}`);
+  const [sessionShort, sessionPractical] = resultParts(student.result);
+  const shortRecorded = previous.shortAnswer || ['通過', '未通過'].includes(sessionShort);
+  const practicalRecorded = previous.practical || ['通過', '未通過'].includes(sessionPractical);
+  return {
+    step: !shortRecorded ? 'short' : !practicalRecorded ? 'practical' : 'done',
+    previous, sessionShort, sessionPractical
+  };
+}
+
+function mergeExamPart(currentResult, part, passed) {
+  let [shortAnswer, practical] = resultParts(currentResult);
+  if (!['通過', '未通過'].includes(shortAnswer)) shortAnswer = '未記錄';
+  if (!['通過', '未通過'].includes(practical)) practical = '未記錄';
+  if (part === 'short') shortAnswer = passed ? '通過' : '未通過';
+  else practical = passed ? '通過' : '未通過';
+  if (shortAnswer === '通過' && practical === '通過') return '全部通過';
+  if (shortAnswer === '通過' && practical === '未通過') return '僅簡答通過';
+  if (shortAnswer === '未通過' && practical === '通過') return '僅上機通過';
+  if (shortAnswer === '未通過' && practical === '未通過') return '未通過';
+  if (shortAnswer !== '未記錄') return shortAnswer === '通過' ? '簡答通過' : '簡答未通過';
+  return practical === '通過' ? '上機通過' : '上機未通過';
+}
+
 function upsertAttendance(task, student, operatorName, operatorId) {
   const target = sheet(SHEETS.attendance);
   const recordId = `${task.id}:${student.id}`;
@@ -383,7 +398,7 @@ function upsertAttendance(task, student, operatorName, operatorId) {
 
 function nextPrompt(task, context) {
   const students = studentsFor(task.id);
-  const pendingResult = students.find(student => isExam(task) && ['到場', '遲到'].includes(student.attendance) && student.result === '未記錄');
+  const pendingResult = students.find(student => isExam(task) && ['到場', '遲到'].includes(student.attendance) && examProgress(task, student).step !== 'done');
   if (pendingResult) return resultPrompt(task, pendingResult);
   const pending = students.filter(student => student.attendance === '未點名');
   if (!pending.length) {
@@ -397,28 +412,50 @@ function nextPrompt(task, context) {
 }
 
 function resultPrompt(task, student) {
+  const progress = examProgress(task, student);
   const certification = certificationForStudent(task, student);
-  let actions = [
-    { label: '✅ 全部通過', text: `考試登記 ${task.id} ${student.id} 全部通過` },
-    { label: '📝 僅簡答通過', text: `考試登記 ${task.id} ${student.id} 僅簡答通過` },
-    { label: '🎥 僅上機通過', text: `考試登記 ${task.id} ${student.id} 僅上機通過` },
-    { label: '❌ 未通過', text: `考試登記 ${task.id} ${student.id} 未通過` }
+  const { position, total } = studentPosition(task, student);
+  const isShort = progress.step === 'short';
+  const actions = progress.step === 'done' ? [] : [
+    { label: '✅ 通過', postback: `${isShort ? '簡答' : '上機'}登記 ${task.id} ${student.id} 通過` },
+    { label: '❌ 未通過', postback: `${isShort ? '簡答' : '上機'}登記 ${task.id} ${student.id} 未通過` }
   ];
-  if (/補考/.test(task.phase)) {
-    if (certification.shortAnswer && certification.practical) actions = [
-      { label: '✅ 沿用通過結果', text: `考試登記 ${task.id} ${student.id} 全部通過` }
-    ];
-    else if (certification.shortAnswer) actions = [
-      { label: '✅ 上機通過', text: `考試登記 ${task.id} ${student.id} 上機通過` },
-      { label: '❌ 上機未通過', text: `考試登記 ${task.id} ${student.id} 上機未通過` }
-    ];
-    else if (certification.practical) actions = [
-      { label: '✅ 簡答通過', text: `考試登記 ${task.id} ${student.id} 簡答通過` },
-      { label: '❌ 簡答未通過', text: `考試登記 ${task.id} ${student.id} 簡答未通過` }
-    ];
-  }
-  return reply(`【${task.equipment} ${task.phase}結果】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n${certificationText(certification)}\n\n請選擇本次結果：`,
+  actions.push(
+    { label: '修改出席', postback: `修改出席 ${task.id} ${student.id}` },
+    { label: '查看已點名結果', postback: `查看點名結果 ${task.id}` }
+  );
+  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n出席：${student.attendance}\n${certificationText(certification)}\n\n${progress.step === 'short' ? '第 2 步：請登記線上簡答結果' : progress.step === 'practical' ? '第 3 步：請登記上機考結果' : '這位學生的資料已登記完成'}`,
     externalNav(actions, `查看任務 ${task.id}`, '回任務'));
+}
+
+function attendanceSummary(taskId) {
+  const task = findTask(taskId);
+  if (!task) return reply(`找不到任務 ${taskId}`);
+  const students = studentsFor(taskId);
+  const lines = students.map((student, index) => {
+    const result = isExam(task) && ['到場', '遲到'].includes(student.attendance)
+      ? `｜${student.result === '未記錄' ? '成績未完成' : student.result}` : '';
+    return `${index + 1}. ${student.name}：${student.attendance}${result}`;
+  });
+  const studentActions = students.slice(0, 10).map(student => ({
+    label: `查看 ${String(student.name).slice(0, 12)}`,
+    postback: `查看考生 ${task.id} ${student.id}`
+  }));
+  return reply(`【${task.equipment} 已點名結果】\n${lines.join('\n')}\n\n可點選學生查看或修改目前紀錄。`, externalNav([
+    ...studentActions,
+    { label: '繼續依序點名', postback: `開始點名 ${task.id}` }
+  ], `查看任務 ${task.id}`, '回任務'));
+}
+
+function showStudent(taskId, studentId) {
+  const task = findTask(taskId), student = findStudent(taskId, studentId);
+  if (!task || !student) return reply('找不到指定的任務或學生。');
+  if (student.attendance === '未點名') return attendancePrompt(task, student);
+  if (isExam(task) && ['到場', '遲到'].includes(student.attendance)) return resultPrompt(task, student);
+  return reply(`${student.name}目前出席狀態：${student.attendance}`, externalNav([
+    { label: '修改出席', postback: `修改出席 ${task.id} ${student.id}` },
+    { label: '繼續依序點名', postback: `開始點名 ${task.id}` }
+  ], `查看任務 ${task.id}`, '回任務'));
 }
 
 function startAttendance(taskId, context) {
@@ -435,11 +472,25 @@ function recordAttendance(taskId, studentId, status, context) {
   const task = findTask(taskId), student = findStudent(taskId, studentId);
   if (!task || !student) return reply('找不到指定的任務或學生，請重新開啟任務。');
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
-  const result = (!isExam(task) || ['請假', '缺席'].includes(status)) ? '不適用' : student.result;
+  const result = (!isExam(task) || ['請假', '缺席'].includes(status)) ? '不適用'
+    : student.result === '不適用' ? '未記錄' : student.result;
   updateStudent(student, status, result);
-  if (isExam(task) && ['到場', '遲到'].includes(status) && result === '未記錄') return resultPrompt(task, student);
   upsertAttendance(task, student, permission.name, context.userId);
+  if (isExam(task) && ['到場', '遲到'].includes(status) && examProgress(task, student).step !== 'done') return resultPrompt(task, student);
   return nextPrompt(task, context);
+}
+
+function recordExamPart(taskId, studentId, part, value, context) {
+  const task = findTask(taskId), student = findStudent(taskId, studentId);
+  if (!task || !student) return reply('找不到指定的任務或學生，請重新開啟任務。');
+  const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
+  if (!['到場', '遲到'].includes(student.attendance)) return reply('請先登記這位學生的出席狀態。');
+  const result = mergeExamPart(student.result, part, value === '通過');
+  updateStudent(student, student.attendance, result);
+  const certification = upsertAttendance(task, student, permission.name, context.userId);
+  const next = nextPrompt(task, context);
+  next.text = `✅ ${student.name}的${part === 'short' ? '簡答' : '上機'}已登記：${value}\n${certificationText(certification)}\n\n${next.text}`;
+  return next;
 }
 
 function recordResult(taskId, studentId, result, context) {
@@ -458,7 +509,7 @@ function finishAttendance(taskId, context) {
   const task = findTask(taskId); if (!task) return reply(`找不到任務 ${taskId}`);
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
   const students = studentsFor(taskId);
-  const pending = students.filter(student => student.attendance === '未點名' || (isExam(task) && ['到場', '遲到'].includes(student.attendance) && student.result === '未記錄'));
+  const pending = students.filter(student => student.attendance === '未點名' || (isExam(task) && ['到場', '遲到'].includes(student.attendance) && examProgress(task, student).step !== 'done'));
   if (pending.length) return reply(`尚有 ${pending.length} 位學生未完成登記。`, [{ label: '繼續點名', text: `開始點名 ${task.id}` }]);
   updateTaskStatus(task, '已完成');
   const counts = status => students.filter(student => student.attendance === status).length;
@@ -479,7 +530,7 @@ function handleCommand(text, context) {
     return reply(`✅ 已綁定「${upsertGroup(context, match[1])}」\n將於對外任務開始前 1 小時推播考生名單與點名入口。`);
   }
   if (command === '解除群組') { disableGroup(context.chatId); return reply('已停止此群組的對外任務提醒。'); }
-  const scheduleCommand = /^(今日任務|對外任務|近期任務|查看任務\s|開始點名\s|點名狀態\s|考試登記\s|完成點名\s|同步對外排程)/.test(command);
+  const scheduleCommand = /^(今日任務|對外任務|近期任務|查看任務\s|開始點名\s|同步對外排程)/.test(command);
   let syncResult = null;
   if (scheduleCommand) {
     try { syncResult = syncFromSchedule(); }
@@ -490,7 +541,17 @@ function handleCommand(text, context) {
   if (command === '對外任務' || command === '近期任務') return listTasks(context, false);
   if ((match = command.match(/^查看任務\s+(\S+)$/))) return showTask(match[1]);
   if ((match = command.match(/^開始點名\s+(\S+)$/))) return startAttendance(match[1], context);
+  if ((match = command.match(/^查看考生\s+(\S+)\s+(\S+)$/))) return showStudent(match[1], match[2]);
+  if ((match = command.match(/^查看點名結果\s+(\S+)$/))) return attendanceSummary(match[1]);
+  if ((match = command.match(/^修改出席\s+(\S+)\s+(\S+)$/))) {
+    const task = findTask(match[1]), student = findStudent(match[1], match[2]);
+    if (!task || !student) return reply('找不到指定的任務或學生。');
+    const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
+    return attendancePrompt(task, student);
+  }
   if ((match = command.match(/^點名狀態\s+(\S+)\s+(\S+)\s+(到場|遲到|請假|缺席)$/))) return recordAttendance(match[1], match[2], match[3], context);
+  if ((match = command.match(/^簡答登記\s+(\S+)\s+(\S+)\s+(通過|未通過)$/))) return recordExamPart(match[1], match[2], 'short', match[3], context);
+  if ((match = command.match(/^上機登記\s+(\S+)\s+(\S+)\s+(通過|未通過)$/))) return recordExamPart(match[1], match[2], 'practical', match[3], context);
   if ((match = command.match(/^考試登記\s+(\S+)\s+(\S+)\s+(全部通過|僅簡答通過|僅上機通過|未通過|簡答通過|簡答未通過|上機通過|上機未通過)$/))) return recordResult(match[1], match[2], match[3], context);
   if ((match = command.match(/^完成點名\s+(\S+)$/))) return finishAttendance(match[1], context);
   return null;

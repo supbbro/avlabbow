@@ -77,6 +77,14 @@ async function handleLineEvent(event) {
   } else if (event.type === 'leave') {
     await runtime.loadOnly(EXTERNAL_WORKBOOKS);
     externalTeaching.disableGroup(context.chatId);
+  } else if (event.type === 'postback') {
+    const userId = context.userId;
+    if (!userId) return;
+    const command = String(event.postback?.data || '').trim();
+    if (!externalTeaching.isExternalCommand(command)) return;
+    await runtime.loadOnly(EXTERNAL_WORKBOOKS, { force: externalTeaching.requiresFreshData(command) });
+    bot.recordUser(userId);
+    reply = externalTeaching.handleCommand(command, context);
   } else if (event.type === 'message') {
     const userId = context.userId;
     if (!userId) return;
