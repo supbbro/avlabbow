@@ -13,6 +13,7 @@ var USER_BIND_SHEET_NAME = '用戶綁定';
 var BIND_COL_USER_ID = 0;
 var BIND_COL_NAME = 1;
 var BIND_COL_TIME = 2;
+var BIND_COL_STUDENT_NUMBER = 3;
 
 // ========== 補考表單設定 ==========
 var RETEST_SHEET_ID = '1H5kVv2AOtasMvS-YBBtjG_TYyiV09b3al586jbeB8Zc';
@@ -573,13 +574,23 @@ function getAssistantNames(){
 
 // 對外考生也需要綁定 LINE，才能在未通過時收到補考表單。
 // 名單直接讀取已同步的「任務學生」，不另建一份容易過期的名冊。
-function getExternalStudentNames(){
+function getExternalStudents(){
   try{
     var s=SpreadsheetApp.openById(EXTERNAL_RESULTS_SHEET_ID).getSheetByName('任務學生');
     if(!s||s.getLastRow()<2)return[];
-    var names=s.getRange(2,3,s.getLastRow()-1,1).getValues().map(r=>r[0]).filter(n=>n);
-    return[...new Set(names.map(n=>nrm(n)))].sort();
+    var rows=s.getRange(2,3,s.getLastRow()-1,2).getValues(), seen={};
+    return rows.map(function(row){ return {name:nrm(row[0]), number:String(row[1]||'').trim()}; })
+      .filter(function(student){
+        if(!student.name)return false;
+        var key=student.name+'|'+nrm(student.number);
+        if(seen[key])return false;
+        seen[key]=true;
+        return true;
+      });
   }catch(e){return[];}
+}
+function getExternalStudentNames(){
+  return[...new Set(getExternalStudents().map(function(student){return student.name;}))].sort();
 }
 
 // ========== 模糊匹配與前綴處理 ==========
@@ -642,35 +653,39 @@ function recordUser(userId) {
   var sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
   if (!sheet) {
     sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).insertSheet(USER_BIND_SHEET_NAME);
-    sheet.getRange(1, 1, 1, 3).setValues([['LINE User ID', '姓名', '綁定時間']]);
+    sheet.getRange(1, 1, 1, 4).setValues([['LINE User ID', '姓名', '綁定時間', '學號']]);
   }
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (data[i][BIND_COL_USER_ID] === userId) return;
   }
-  sheet.appendRow([userId, '', new Date()]);
+  sheet.appendRow([userId, '', new Date(), '']);
   Logger.log('記錄新用戶：' + userId);
 }
 
 function handleBindName(rest, userId) {
-  if (!rest) return { text: '請輸入「我是 姓名」完成綁定，例如：我是 徐嘉翔', quickReply: bA() };
-  var name = rest.trim();
-  var normalizedName = nrm(name);
-  
-  var allNames = [...new Set(getAssistantNames().concat(getExternalStudentNames()))];
-  var exactName = allNames.find(function(candidate){ return candidate === normalizedName; });
-  
-  if (!exactName) {
-    return { text: '查無「' + name + '」在助理／對外學生名單中。為避免綁定成別人，姓名必須與分班表完全一致，請確認後再試。', quickReply: bA() };
+  if (!rest) return { text: '考生請輸入「我是 姓名 學號」完成綁定，例如：我是 王小明 112405001。\n教學官／考官可輸入「我是 姓名」。', quickReply: bA() };
+  var raw = rest.trim(), parts = raw.split(/[\s　]+/), suppliedNumber = parts.length > 1 ? parts.pop() : '';
+  var requestedName = parts.join(''), normalizedName = nrm(requestedName || raw);
+  var externalMatches = getExternalStudents().filter(function(student){ return student.name === normalizedName; });
+  var assistantName = getAssistantNames().find(function(candidate){ return candidate === normalizedName; });
+  var matchedStudent = null;
+  if (externalMatches.length) {
+    if (!suppliedNumber) return { text: '請連同學號一起輸入，格式為「我是 姓名 學號」。\n例如：我是 王小明 112405001', quickReply: bA() };
+    matchedStudent = externalMatches.find(function(student){ return nrm(student.number) === nrm(suppliedNumber); });
+    if (!matchedStudent) return { text: '姓名或學號與任務學生／修課名單不一致，請確認後再輸入「我是 姓名 學號」。', quickReply: bA() };
+  } else if (!assistantName) {
+    return { text: '查無「' + requestedName + '」在助理／對外學生名單中。姓名必須與分班表完全一致，請確認後再試。', quickReply: bA() };
   }
-  
-  var finalName = exactName;
+  var finalName = matchedStudent ? matchedStudent.name : assistantName;
+  var finalNumber = matchedStudent ? matchedStudent.number : '';
   
   var sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
   if (!sheet) {
     sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).insertSheet(USER_BIND_SHEET_NAME);
-    sheet.getRange(1, 1, 1, 3).setValues([['LINE User ID', '姓名', '綁定時間']]);
+    sheet.getRange(1, 1, 1, 4).setValues([['LINE User ID', '姓名', '綁定時間', '學號']]);
   }
+  if (sheet.getRange(1, BIND_COL_STUDENT_NUMBER + 1).getValue() !== '學號') sheet.getRange(1, BIND_COL_STUDENT_NUMBER + 1).setValue('學號');
   var data = sheet.getDataRange().getValues();
   var rowIndex = -1;
   for (var i = 1; i < data.length; i++) {
@@ -680,12 +695,11 @@ function handleBindName(rest, userId) {
     }
   }
   if (rowIndex === -1) {
-    sheet.appendRow([userId, finalName, new Date()]);
+    sheet.appendRow([userId, finalName, new Date(), finalNumber]);
   } else {
-    sheet.getRange(rowIndex, BIND_COL_NAME + 1).setValue(finalName);
-    sheet.getRange(rowIndex, BIND_COL_TIME + 1).setValue(new Date());
+    sheet.getRange(rowIndex, BIND_COL_NAME + 1, 1, 3).setValues([[finalName, new Date(), finalNumber]]);
   }
-  return { text: '✅ 綁定成功！您已綁定為：' + finalName, quickReply: bA() };
+  return { text: '✅ 綁定成功！您已綁定為：' + finalName + (finalNumber ? '（' + finalNumber + '）' : ''), quickReply: bA() };
 }
 
 function isUserBound(userId) {

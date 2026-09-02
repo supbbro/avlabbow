@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const { ids } = require('./config');
 const { parseWorkbook } = require('./external-schedule-parser');
 
@@ -9,6 +10,8 @@ const SHEETS = {
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
 const REMINDER_LEAD_MINUTES = 60;
+const ROSTER_SHEET = process.env.EXTERNAL_ROSTER_SHEET_NAME || '1151修課名單';
+const ROSTER_TASK_ID = 'ROSTER-1151';
 const EXTERNAL_COMMAND = /^(綁定群組(?:\s|$)|解除群組$|今日任務$|對外任務$|近期任務$|查看任務\s|開始點名\s|考生名單\s|查看考生\s|查看點名結果\s|修改出席\s|到場判定\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
 let activeStudentsByTask = new Map();
 
@@ -41,11 +44,15 @@ function boundName(userId) {
   return '';
 }
 
-function userIdForName(name) {
+function userIdForName(name, number = '') {
   const bindSheet = SpreadsheetApp.openById(ids.master).getSheetByName('用戶綁定');
   if (!bindSheet || !name) return '';
   const rows = bindSheet.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) if (norm(rows[i][1]) === norm(name)) return String(rows[i][0] || '');
+  for (let i = 1; i < rows.length; i++) {
+    if (norm(rows[i][1]) !== norm(name)) continue;
+    if (number && norm(rows[i][3]) !== norm(number)) continue;
+    return String(rows[i][0] || '');
+  }
   return '';
 }
 
@@ -76,9 +83,54 @@ function studentsFor(taskId) {
   const target = sheet(SHEETS.students);
   if (!target) return [];
   const active = activeStudentsByTask.get(taskId);
-  return target.getDataRange().getValues().slice(1).map((row, index) => studentFromRow(row, index + 2))
+  const students = target.getDataRange().getValues().slice(1).map((row, index) => studentFromRow(row, index + 2))
     .filter(student => student.taskId === taskId && student.id && !isTemplate(student.id) && (!active || active.has(student.id)))
     .sort((a, b) => a.order - b.order || String(a.name).localeCompare(String(b.name), 'zh-Hant'));
+  const seen = new Set();
+  return students.filter(student => {
+    const key = `${norm(student.name)}|${norm(student.number)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function rosterStudents(rows) {
+  const result = [], seen = new Set();
+  for (const row of rows || []) for (const column of [0, 5, 10, 15, 20, 25]) {
+    const name = String(row?.[column] || '').trim();
+    const number = String(row?.[column + 1] || '').trim();
+    if (!name || !number || /組$/.test(name) || /^(TRUE|FALSE|報名)$/i.test(number)) continue;
+    const key = `${norm(name)}|${norm(number)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({ name, number });
+  }
+  return result;
+}
+
+function enrichStudentsFromRoster(tasks, roster) {
+  const byName = new Map();
+  for (const student of roster) {
+    const key = norm(student.name);
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(student);
+  }
+  for (const task of tasks) {
+    const seen = new Set();
+    task.students = task.students.filter(student => {
+      const matches = byName.get(norm(student.name)) || [];
+      if (!student.number && matches.length === 1) student.number = matches[0].number;
+      const key = `${norm(student.name)}|${norm(student.number)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+}
+
+function rosterStudentId(student) {
+  return `STU-R-${crypto.createHash('sha1').update(`${norm(student.name)}|${norm(student.number)}`).digest('hex').slice(0, 10).toUpperCase()}`;
 }
 
 function findStudent(taskId, studentId) { return studentsFor(taskId).find(student => student.id === studentId) || null; }
@@ -118,6 +170,9 @@ function syncFromSchedule() {
     if (sourceSheet) source[name] = sourceSheet.getDataRange().getValues();
   });
   const parsed = parseWorkbook(source, process.env.ACADEMIC_TERM || '1151');
+  const rosterSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName(ROSTER_SHEET);
+  const roster = rosterStudents(rosterSheet ? rosterSheet.getDataRange().getValues() : []);
+  enrichStudentsFromRoster(parsed, roster);
   const taskSheet = sheet(SHEETS.tasks), studentSheet = sheet(SHEETS.students);
   if (!taskSheet || !studentSheet) throw new Error('找不到對外任務或任務學生工作表');
 
@@ -125,7 +180,7 @@ function syncFromSchedule() {
   const existingTasks = new Map();
   for (let i = 1; i < taskRows.length; i++) if (taskRows[i][0] && !isTemplate(taskRows[i][0])) existingTasks.set(String(taskRows[i][0]), { row: i + 1, values: taskRows[i], task: taskFromRow(taskRows[i], i + 1) });
   const parsedIds = new Set();
-  let tasksAdded = 0, tasksUpdated = 0, studentsAdded = 0, studentsUpdated = 0;
+  let tasksAdded = 0, tasksUpdated = 0, studentsAdded = 0, studentsUpdated = 0, duplicateStudentsCleared = 0, rosterStudentsAdded = 0;
 
   for (const incoming of parsed) {
     parsedIds.add(incoming.id);
@@ -157,9 +212,17 @@ function syncFromSchedule() {
   if (!studentRows.length) studentSheet.appendRow(studentHeaders);
   else if (studentHeaders.some((header, index) => studentRows[0][index] !== header)) studentSheet.getRange(1, 1, 1, studentHeaders.length).setValues([studentHeaders]);
   const existingStudents = new Map();
+  const duplicateStudentRows = [];
   for (let i = 1; i < studentRows.length; i++) {
     const student = studentFromRow(studentRows[i], i + 1);
-    if (student.taskId && student.id && !isTemplate(student.id)) existingStudents.set(`${student.taskId}|${student.id}`, { student, values: studentRows[i] });
+    if (!student.taskId || !student.id || isTemplate(student.id)) continue;
+    const key = `${student.taskId}|${student.id}`;
+    if (existingStudents.has(key)) duplicateStudentRows.push(student.row);
+    else existingStudents.set(key, { student, values: studentRows[i] });
+  }
+  for (const row of duplicateStudentRows) {
+    studentSheet.getRange(row, 1, 1, studentHeaders.length).setValues([Array(studentHeaders.length).fill('')]);
+    duplicateStudentsCleared++;
   }
   activeStudentsByTask = new Map();
   for (const incoming of parsed) {
@@ -180,7 +243,18 @@ function syncFromSchedule() {
       }
     }
   }
-  return { tasks: parsed.length, tasksAdded, tasksUpdated, students: [...activeStudentsByTask.values()].reduce((sum, set) => sum + set.size, 0), studentsAdded, studentsUpdated };
+  const scheduledPeople = new Set(parsed.flatMap(task => task.students.map(student => `${norm(student.name)}|${norm(student.number)}`)));
+  const rosterRows = new Map();
+  for (const existing of existingStudents.values()) {
+    if (existing.student.taskId === ROSTER_TASK_ID) rosterRows.set(`${norm(existing.student.name)}|${norm(existing.student.number)}`, existing);
+  }
+  for (const student of roster) {
+    const personKey = `${norm(student.name)}|${norm(student.number)}`;
+    if (scheduledPeople.has(personKey) || rosterRows.has(personKey)) continue;
+    studentSheet.appendRow([ROSTER_TASK_ID, rosterStudentId(student), student.name, student.number, 0, '名冊', '不適用', '', '', '', '']);
+    rosterStudentsAdded++; studentsAdded++;
+  }
+  return { tasks: parsed.length, tasksAdded, tasksUpdated, students: [...activeStudentsByTask.values()].reduce((sum, set) => sum + set.size, 0), studentsAdded, studentsUpdated, duplicateStudentsCleared, rosterStudentsAdded };
 }
 
 function groups() {
@@ -422,11 +496,13 @@ function examProgress(task, student) {
   const previous = certificationForStudent(task, student, `${task.id}:${student.id}`);
   const [sessionShort, sessionPractical] = resultParts(student.result);
   const shortRecorded = previous.shortAnswer || ['通過', '未通過'].includes(sessionShort);
-  const practicalRecorded = previous.practical || ['通過', '未通過'].includes(sessionPractical);
+  const shortPassed = previous.shortAnswer || sessionShort === '通過';
+  const shortFailed = shortRecorded && !shortPassed;
+  const practicalRecorded = shortFailed || previous.practical || ['通過', '未通過'].includes(sessionPractical);
   return {
     step: !shortRecorded ? 'short' : !practicalRecorded ? 'practical' : 'done',
     previous, sessionShort, sessionPractical, shortRecorded, practicalRecorded,
-    shortPassed: previous.shortAnswer || sessionShort === '通過',
+    shortPassed,
     practicalPassed: previous.practical || sessionPractical === '通過'
   };
 }
@@ -460,9 +536,10 @@ function upsertAttendance(task, student, operatorName, operatorId) {
   const refundable = cumulativeShort && cumulativePractical;
   const shortEvaluated = cumulativeShort || ['通過', '未通過'].includes(shortAnswer);
   const practicalEvaluated = cumulativePractical || ['通過', '未通過'].includes(practical);
+  const shortFailed = shortEvaluated && !cumulativeShort;
   const disqualified = student.attendance === '取消資格';
   const depositStatus = disqualified ? '不可退保證金（取消資格）'
-    : shortEvaluated && practicalEvaluated ? (refundable ? '可退保證金' : '不可退保證金') : '待兩項評分完成';
+    : shortEvaluated && (practicalEvaluated || shortFailed) ? (refundable ? '可退保證金' : '不可退保證金') : '待兩項評分完成';
   const cumulative = isExam(task)
     ? [cumulativeShort ? '通過' : '未通過', cumulativePractical ? '通過' : '未通過', depositStatus]
     : ['不適用', '不適用', '不適用'];
@@ -495,7 +572,7 @@ function resultPrompt(task, student) {
     { label: '簡答題 ✅', postback: `簡答登記 ${task.id} ${student.id} 通過` },
     { label: '簡答題 ❌', postback: `簡答登記 ${task.id} ${student.id} 未通過` }
   );
-  if (!progress.practicalRecorded) actions.push(
+  if (progress.shortPassed && !progress.practicalRecorded) actions.push(
     { label: '上機 ✅', postback: `上機登記 ${task.id} ${student.id} 通過` },
     { label: '上機 ❌', postback: `上機登記 ${task.id} ${student.id} 未通過` }
   );
@@ -504,9 +581,10 @@ function resultPrompt(task, student) {
     { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
   );
   const stateText = (recorded, passed) => !recorded ? '⏳ 尚未評分' : passed ? '✅ 通過' : '❌ 未通過';
+  const practicalText = progress.shortRecorded && !progress.shortPassed ? '⛔ 簡答題未通過，無上機資格' : stateText(progress.practicalRecorded, progress.practicalPassed);
   const depositText = progress.shortRecorded && progress.practicalRecorded
     ? `\n保證金：${progress.shortPassed && progress.practicalPassed ? '✅ 可退保證金' : '❌ 不可退保證金'}` : '';
-  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n出席：${student.attendance}\n\n簡答題：${stateText(progress.shortRecorded, progress.shortPassed)}\n上機：${stateText(progress.practicalRecorded, progress.practicalPassed)}${depositText}\n\n${progress.step === 'done' ? '兩項評分已完成。' : '請直接選擇簡答題或上機結果。'}`,
+  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n出席：${student.attendance}\n\n簡答題：${stateText(progress.shortRecorded, progress.shortPassed)}\n上機：${practicalText}${depositText}\n\n${progress.step === 'done' ? '本次評分已完成。' : '請直接選擇簡答題或上機結果。'}`,
     externalNav(actions, `查看任務 ${task.id}`, '回任務'));
 }
 
@@ -579,19 +657,24 @@ function recordExamPart(taskId, studentId, part, value, context) {
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
   if (!['到場', '遲到'].includes(student.attendance)) return reply('請先登記這位學生的出席狀態。');
   const previousProgress = examProgress(task, student);
+  if (part === 'practical' && previousProgress.shortRecorded && !previousProgress.shortPassed) return reply('這位考生的簡答題未通過，沒有上機考試資格。', externalNav([
+    { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` },
+    { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
+  ], `查看任務 ${task.id}`, '回任務'));
   const result = mergeExamPart(student.result, part, value === '通過');
   updateStudent(student, student.attendance, result);
   const certification = upsertAttendance(task, student, permission.name, context.userId);
   const progress = examProgress(task, student);
   if (progress.step === 'done') {
-    const failedParts = [!progress.shortPassed ? '簡答題' : '', !progress.practicalPassed ? '上機' : ''].filter(Boolean);
+    const failedParts = !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
     const needsRetest = failedParts.length > 0;
     const retest = retestForm(task);
     const notification = needsRetest && previousProgress.step !== 'done' ? notifyStudentForRetest(task, student, failedParts) : { sent: false, configured: Boolean(retest.url), finalAttempt: retest.finalAttempt };
     const examinerReminder = needsRetest
       ? `\n\n⚠️ 請考官務必提醒考生${retest.finalAttempt ? '本次為第二次補考，請依規定處理' : `填寫${retest.label}表單`}。\n未通過項目：${failedParts.join('、')}\n${notification.sent ? '✅ 已私訊已綁定的考生。' : notification.finalAttempt ? 'ℹ️ 已是第二次補考，不再傳送補考表單。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定補考表單網址，暫時無法傳送表單。'}` : '';
     const formActions = needsRetest && retest.url ? [{ label: `開啟${retest.label}表單`, uri: retest.url }] : [];
-    return reply(`✅ ${student.name}兩項評分完成\n\n簡答題：${progress.shortPassed ? '✅ 通過' : '❌ 未通過'}\n上機：${progress.practicalPassed ? '✅ 通過' : '❌ 未通過'}\n\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}${examinerReminder}`, externalNav([
+    const practicalSummary = progress.shortPassed ? (progress.practicalPassed ? '✅ 通過' : '❌ 未通過') : '⛔ 無上機資格';
+    return reply(`✅ ${student.name}本次評分完成\n\n簡答題：${progress.shortPassed ? '✅ 通過' : '❌ 未通過'}\n上機：${practicalSummary}\n\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}${examinerReminder}`, externalNav([
       ...formActions,
       { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
       { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` }
@@ -718,16 +801,16 @@ function retestForm(task) {
   return { url: validFormUrl(process.env.EXTERNAL_FIRST_RETEST_FORM_URL || process.env.EXTERNAL_RETEST_FORM_URL || 'https://forms.gle/3be87wRzRBKvdkFb6'), label: '第一次補考', finalAttempt: false };
 }
 
-function retestMessage(task, student, failedParts, label) {
-  return `【${label}提醒】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n請填寫${label}表單並留意後續分班通知。`;
+function retestMessage(task, student, failedParts, label, url) {
+  return `【${label}提醒】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n請填寫${label}表單並留意後續分班通知。\n報名連結：${url}`;
 }
 
 function notifyStudentForRetest(task, student, failedParts) {
   const form = retestForm(task);
   if (!form.url) return { sent: false, configured: false, finalAttempt: form.finalAttempt };
-  const studentUserId = userIdForName(student.name);
+  const studentUserId = userIdForName(student.name, student.number);
   if (!studentUserId) return { sent: false, configured: true, finalAttempt: false };
-  queuePush(studentUserId, reply(retestMessage(task, student, failedParts, form.label), [{ label: `填寫${form.label}表單`, uri: form.url }]));
+  queuePush(studentUserId, reply(retestMessage(task, student, failedParts, form.label, form.url), [{ label: `填寫${form.label}表單`, uri: form.url }]));
   return { sent: true, configured: true, finalAttempt: false };
 }
 
@@ -796,7 +879,7 @@ function sendExternalReminders(now = new Date()) {
     for (const student of studentsFor(task.id)) {
       const studentStart = studentTaskStart(task, student);
       if (!studentStart || studentStart <= now || student.reminderSentAt || now < new Date(studentStart.getTime() - REMINDER_LEAD_MINUTES * 60000)) continue;
-      const studentUserId = userIdForName(student.name);
+      const studentUserId = userIdForName(student.name, student.number);
       if (!studentUserId) continue;
       queuePush(studentUserId, reply(studentReminderText(task, student)));
       sheet(SHEETS.students).getRange(student.row, 11).setValue(now);
@@ -810,4 +893,4 @@ function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, studentReminderText } };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, studentReminderText, rosterStudents, enrichStudentsFromRoster } };

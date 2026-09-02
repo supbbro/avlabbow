@@ -41,13 +41,23 @@ function parseTimeRange(value) {
 
 function makeTask({ term, sheetName, itemRow, column, phase, date, time, equipment, location, examiner, students }) {
   const id = `EXT-${term}-${shortHash(`${sheetName}|${itemRow}|${column}`)}`;
+  const uniqueStudents = [];
+  const seenStudents = new Set();
+  for (const student of students) {
+    const name = typeof student === 'object' ? student.name : student;
+    const number = typeof student === 'object' ? text(student.number) : '';
+    const key = `${normalizeName(name)}|${number}`;
+    if (!normalizeName(name) || seenStudents.has(key)) continue;
+    seenStudents.add(key);
+    uniqueStudents.push(student);
+  }
   return {
     id, term, phase, date, start: time.start, end: time.end, equipment: text(equipment), location: text(location), examiner: text(examiner),
     sourceSheet: sheetName, sourceRange: `${columnName(column)}${itemRow + 1}:${columnName(column)}${itemRow + 1 + students.length + 3}`,
-    students: students.map((student, index) => {
+    students: uniqueStudents.map((student, index) => {
       const name = typeof student === 'object' ? student.name : student;
       return {
-        id: `STU-${shortHash(`${id}|${normalizeName(name)}`)}`, name: text(name), number: '', order: index + 1,
+        id: `STU-${shortHash(`${id}|${normalizeName(name)}|${typeof student === 'object' ? text(student.number) : ''}`)}`, name: text(name), number: typeof student === 'object' ? text(student.number) : '', order: index + 1,
         scheduledStart: typeof student === 'object' ? student.start : time.start,
         scheduledEnd: typeof student === 'object' ? student.end : time.end
       };

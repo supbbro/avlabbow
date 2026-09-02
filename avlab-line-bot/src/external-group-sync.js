@@ -22,6 +22,7 @@ function canonicalEquipment(value) {
   if (key.includes('聲音工作區')) return '聲音工作區';
   if (['ATOMOS', 'ATOMOS螢幕'].includes(key)) return 'ATOMOS';
   if (['VORTEX4S8S', 'V4V8'].includes(key)) return 'V4V8';
+  if (['200WPAR', 'PAR200W', '200PAR', 'PAR200'].includes(key)) return 'PAR200W';
   return key;
 }
 

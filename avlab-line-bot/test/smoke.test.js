@@ -276,7 +276,10 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   const typoResponse = bot.getReply('我是 外部測試身', 'U-external-student-typo-test');
   assert.match(typoResponse.text, /姓名必須與分班表完全一致/);
   assert.doesNotMatch(typoResponse.text, /綁定成功/);
-  const response = bot.getReply('我是 外部測試生', 'U-external-student-test');
+  const missingNumber = bot.getReply('我是 外部測試生', 'U-external-student-test');
+  assert.match(missingNumber.text, /學號/);
+  assert.doesNotMatch(missingNumber.text, /綁定成功/);
+  const response = bot.getReply('我是 外部測試生 TEST', 'U-external-student-test');
   assert.match(response.text, /綁定成功/);
   assert.match(response.text, /外部測試生/);
 
@@ -303,7 +306,24 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   const push = JSON.parse(runtime.httpOperations[0].options.payload);
   assert.equal(push.to, 'U-external-student-test');
   assert.match(push.messages[0].text, /上機/);
+  assert.match(push.messages[0].text, /報名連結：https:\/\/docs\.google\.com\/forms/);
   assert.equal(push.messages[0].quickReply.items[0].action.uri, 'https://docs.google.com/forms/d/FAKE/viewform');
+});
+
+test('a failed short answer immediately ends the attempt without practical buttons', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務');
+  const students = resultBook.getSheetByName('任務學生');
+  tasks.appendRow(['EXT-SHORT-FAIL','1151','考試',new Date('2026-09-22'),'12:00','13:00','200W Par','417','測試者','','G1','已排定',true,true,'','','考試週分班表I','C3:C8']);
+  students.appendRow(['EXT-SHORT-FAIL','STU-SHORT-FAIL','簡答未過生','SHORT001',1,'到場','未記錄','','12:00','12:15','']);
+  const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
+  const completed = externalTeaching.handleCommand('簡答登記 EXT-SHORT-FAIL STU-SHORT-FAIL 未通過', context);
+  assert.match(completed.text, /簡答題：❌ 未通過/);
+  assert.match(completed.text, /上機：⛔ 無上機資格/);
+  assert.match(completed.text, /未通過項目：簡答題/);
+  assert.equal(completed.quickReply.items.some(item => item.action.label.includes('上機')), false);
+  const blocked = externalTeaching.handleCommand('上機登記 EXT-SHORT-FAIL STU-SHORT-FAIL 通過', context);
+  assert.match(blocked.text, /沒有上機考試資格/);
 });
 
 test('a bound student receives the teaching reminder with the fifteen-minute rule', () => {
@@ -364,6 +384,7 @@ test('group matrix sync derives green and retest colors from cumulative LINE rec
   assert.equal(status('學生乙', '基礎配件課程'), '要補考');
   assert.equal(status('學生乙', 'H6'), '通過');
   assert.equal(status('學生乙', 'X160'), '要補考');
+  assert.equal(externalGroupSync._test.canonicalEquipment('200W Par'), externalGroupSync._test.canonicalEquipment('Par 200W考試'));
 });
 
 test('group matrix sync refreshes an existing student name without resetting result cells', () => {
@@ -445,6 +466,31 @@ test('exam assignments propagate merged date headers and choose the correct exam
   assert.deepEqual(tasks[1].students.map(student => student.name), ['學生乙', '學生丙']);
   assert.deepEqual(tasks[1].students.map(student => student.scheduledStart), ['12:05', '12:20']);
   assert.equal(tasks[0].date.getFullYear(), 2027);
+});
+
+test('duplicate names in the same schedule task are removed', () => {
+  const rows = Array.from({ length: 8 }, () => []);
+  rows[1][2] = '9/2(三)';
+  rows[2][0] = '項目'; rows[2][2] = '200W Par';
+  rows[3][2] = '417'; rows[4][2] = '考官甲';
+  rows[5][1] = '18:55-19:05'; rows[5][2] = '學生甲';
+  rows[6][1] = '19:05-19:15'; rows[6][2] = '學生甲';
+  const tasks = parseExamSheet(rows, '考試週分班表I', '1151');
+  assert.equal(tasks.length, 1);
+  assert.deepEqual(tasks[0].students.map(student => student.name), ['學生甲']);
+});
+
+test('schedule students are enriched from the roster and roster duplicates collapse by student number', () => {
+  const rows = Array.from({ length: 5 }, () => Array(7).fill(''));
+  rows[1][0] = '學生甲'; rows[1][1] = '1001';
+  rows[2][5] = '學生甲'; rows[2][6] = '1001';
+  rows[3][0] = '同名學生'; rows[3][1] = '2001';
+  rows[4][0] = '同名學生'; rows[4][1] = '2002';
+  const roster = externalTeaching._test.rosterStudents(rows);
+  assert.equal(roster.filter(student => student.name === '學生甲').length, 1);
+  const tasks = [{ students: [{ name: '學生甲', number: '' }, { name: '學生甲', number: '' }] }];
+  externalTeaching._test.enrichStudentsFromRoster(tasks, roster);
+  assert.deepEqual(tasks[0].students, [{ name: '學生甲', number: '1001' }]);
 });
 
 test('1151 Excel examiner table is normalized and multi-examiner cells are searchable', () => {
