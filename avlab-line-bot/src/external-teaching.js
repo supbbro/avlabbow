@@ -99,8 +99,8 @@ function reminderBelongsToSchedule(sentAt, date, startTime) {
   const sent = sentAt instanceof Date ? new Date(sentAt) : new Date(sentAt);
   const start = parseTaskStart({ date, start: startTime });
   if (!start || Number.isNaN(sent.getTime())) return false;
-  const minutesBefore = (start.getTime() - sent.getTime()) / 60000;
-  return minutesBefore >= 0 && minutesBefore <= 90;
+  const timezone = Session.getScriptTimeZone();
+  return Utilities.formatDate(sent, timezone, 'yyyy-MM-dd') === Utilities.formatDate(start, timezone, 'yyyy-MM-dd');
 }
 
 function syncFromSchedule() {

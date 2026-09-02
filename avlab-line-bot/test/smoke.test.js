@@ -87,9 +87,9 @@ test('schedule sync treats timestamps on the same Taipei calendar day as the sam
   assert.equal(externalTeaching._test.rowChanged(current, desired), false);
 });
 
-test('only a reminder timestamp close to the current task start suppresses a new notification', () => {
+test('a reminder on the current task day suppresses duplicates even when the sheet hides its time', () => {
   const taskDate = new Date('2026-09-01T16:00:00.000Z');
-  assert.equal(externalTeaching._test.reminderBelongsToSchedule(new Date('2026-09-02T09:05:00.000Z'), taskDate, '18:05'), true);
+  assert.equal(externalTeaching._test.reminderBelongsToSchedule(new Date('2026-09-01T16:00:00.000Z'), taskDate, '18:05'), true);
   assert.equal(externalTeaching._test.reminderBelongsToSchedule(new Date('2026-07-16T16:00:00.000Z'), taskDate, '18:05'), false);
 });
 
