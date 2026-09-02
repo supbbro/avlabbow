@@ -379,6 +379,22 @@ test('roster parsing uses a subsection title that appears before its group label
   assert.deepEqual(groups[0].members, [{ name: '學生丁', studentId: '1004' }]);
 });
 
+test('combined labels such as seventh and eighth groups remain group labels', () => {
+  const rows = Array.from({ length: 5 }, () => Array(22).fill(''));
+  rows[0][20] = '影視編導實務';
+  rows[1][20] = '第七組、第八組';
+  rows[2][20] = '學生戊';
+  rows[2][21] = '1005';
+  rows[3][20] = '第九組';
+  rows[4][20] = '學生己';
+  rows[4][21] = '1006';
+  const groups = externalGroupSync._test.parseRosterGroups(rows);
+  assert.equal(groups[0].course, '影視編導實務');
+  assert.equal(groups[0].group, '第七組、第八組');
+  assert.deepEqual(groups[0].members, [{ name: '學生戊', studentId: '1005' }]);
+  assert.equal(groups[1].course, '影視編導實務');
+});
+
 test('teaching assignments are parsed from date, time, examiner and student rows', () => {
   const rows = [
     ['', '教學週I'], ['', '9/14(一)'], ['時間', '12:00-13:00'], ['項目', '基礎配件課程'],

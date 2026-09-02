@@ -14,7 +14,7 @@ const lastApplied = new Map();
 
 const text = value => String(value ?? '').trim();
 const compact = value => text(value).normalize('NFKC').replace(/[\s\-_/／・·・（）()]/g, '').toUpperCase();
-const groupLabel = value => /^(?:第)?(?:[0-9]+|[一二三四五六七八九十]+)組$/.test(text(value));
+const groupLabel = value => /^(?:第)?(?:[0-9]+|[一二三四五六七八九十]+)組(?:[、,，](?:第)?(?:[0-9]+|[一二三四五六七八九十]+)組)*$/.test(text(value));
 
 function canonicalEquipment(value) {
   const key = compact(value).replace(/(?:考試|教學)$/u, '');
