@@ -33,6 +33,18 @@ test('menus omit retired links and common links only show current 1151 files', (
   assert.equal(externalLabels.some(label => /考試項目/.test(label)), false);
 });
 
+test('submenu pages consistently provide back and home navigation', () => {
+  for (const [index, command] of ['對外更多', '查詢', '助理更多', '請假選項', '流程'].entries()) {
+    const labels = bot.getReply(command, `U-nav-${index}`).quickReply.items.map(item => item.action.label);
+    assert.equal(labels.some(label => label.includes('回上一頁')), true, command);
+    assert.equal(labels.some(label => label.includes('回首頁')), true, command);
+  }
+  const externalMain = bot.getReply('對外學生', 'U-nav-external').quickReply.items.map(item => item.action.label);
+  const internalMain = bot.getReply('中心助理', 'U-nav-internal').quickReply.items.map(item => item.action.label);
+  assert.equal(externalMain.some(label => label.includes('回首頁')), true);
+  assert.equal(internalMain.some(label => label.includes('回首頁')), true);
+});
+
 test('Taipei date formatter supports the patterns used by the bot', () => {
   assert.equal(formatDate(new Date('2026-08-27T12:34:00Z'), 'yyyy/MM/dd HH:mm'), '2026/08/27 20:34');
   assert.equal(sheetApiValue(new Date('2026-08-29T16:00:00Z')), '2026/08/30 00:00:00');
@@ -167,6 +179,39 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.equal(finished.quickReply.items[0].action.type, 'uri');
   assert.match(finished.quickReply.items[0].action.uri, new RegExp(ids.externalResults));
   assert.equal(tasks.getRange(taskRow, 12).getValue(), '已完成');
+});
+
+test('retest preserves the passed written result and only asks for the practical result', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務');
+  const students = resultBook.getSheetByName('任務學生');
+  const attendance = resultBook.getSheetByName('LINE點名紀錄');
+  const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
+
+  tasks.appendRow(['T-EXAM-CUM','1151','考試',new Date('2026-09-12'),'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
+  students.appendRow(['T-EXAM-CUM','S-EXAM-CUM','補考學生','999',1,'未點名','未記錄','']);
+  externalTeaching.handleCommand('開始點名 T-EXAM-CUM', context);
+  const firstPrompt = externalTeaching.handleCommand('點名狀態 T-EXAM-CUM S-EXAM-CUM 到場', context);
+  assert.match(firstPrompt.text, /請選擇本次結果/);
+  externalTeaching.handleCommand('考試登記 T-EXAM-CUM S-EXAM-CUM 僅簡答通過', context);
+
+  tasks.appendRow(['T-RETEST-CUM','1151','第一次補考',new Date('2026-09-19'),'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
+  students.appendRow(['T-RETEST-CUM','S-RETEST-CUM','補考學生','999',1,'未點名','未記錄','']);
+  externalTeaching.handleCommand('開始點名 T-RETEST-CUM', context);
+  const retestPrompt = externalTeaching.handleCommand('點名狀態 T-RETEST-CUM S-RETEST-CUM 到場', context);
+  const resultLabels = retestPrompt.quickReply.items.map(item => item.action.label);
+  assert.equal(resultLabels.some(label => label.includes('上機通過')), true);
+  assert.equal(resultLabels.some(label => label.includes('上機未通過')), true);
+  assert.equal(resultLabels.some(label => label.includes('僅簡答')), false);
+  assert.match(retestPrompt.text, /簡答 ✅ 通過/);
+
+  const completed = externalTeaching.handleCommand('考試登記 T-RETEST-CUM S-RETEST-CUM 上機通過', context);
+  assert.match(completed.text, /可退保證金/);
+  const rows = attendance.getDataRange().getValues();
+  const retestRow = rows.find(row => row[0] === 'T-RETEST-CUM:S-RETEST-CUM');
+  assert.equal(retestRow[16], '通過');
+  assert.equal(retestRow[17], '通過');
+  assert.equal(retestRow[18], '可退保證金');
 });
 
 test('one-hour reminder pushes the roster to the examiner and assigned group', () => {

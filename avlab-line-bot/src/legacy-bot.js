@@ -112,8 +112,8 @@ function gC(s,e,d,l){return'https://www.google.com/calendar/render?action=TEMPLA
 function ck(u,k){var c=CacheService.getScriptCache(),l=c.get(u+'_last'),n=parseInt(c.get(u+'_count'))||0;n=l===k?n+1:1;c.put(u+'_last',k,3600);c.put(u+'_count',n,3600);return n>=7;}
 function nrm(r){return r?r.toString().replace(/[（(][^）)]*[）)]/g,'').replace(/\s+/g,''):'';}
 function qr(b){return{items:b.map(b=>({type:'action',action:{type:'message',label:b.label,text:b.text}}))};}
-function bA(){return qr([{label:'🔙 回助理主選單',text:'中心助理'},{label:'🔙 回主選單',text:'主選單'}]);}
-function bE(){return qr([{label:'🔙 回對外主選單',text:'對外學生'},{label:'🔙 回主選單',text:'主選單'}]);}
+function bA(){return qr([{label:'🔙 回上一頁',text:'中心助理'},{label:'🏠 回首頁',text:'主選單'}]);}
+function bE(){return qr([{label:'🔙 回上一頁',text:'對外學生'},{label:'🏠 回首頁',text:'主選單'}]);}
 
 // ========== 從總表讀取所有資料（點名 + 考試結果），加入快取（30秒） ==========
 function getMasterData() {
@@ -710,8 +710,8 @@ function getBoundName(userId) {
 
 // ========== 選單 ==========
 function getMainMenu(){return{text:'🤖 歡迎使用影音實驗室教學部機器人！\n\n請選擇您的身份：',quickReply:qr([{label:'👨‍🎓 對外學生',text:'對外學生'},{label:'👩‍💼 中心助理',text:'中心助理'}])};}
-function getExternalMainMenu(){return{text:'請選擇您想查詢的對外學生資訊：',quickReply:qr([{label:'📋 流程',text:'流程'},{label:'📅 時程',text:'對外時程'},{label:'📚 題庫/講義',text:'題庫講義'},{label:'💰 保證金',text:'保證金'},{label:'🚫 學生請假',text:'學生請假'},{label:'🔑 借器材',text:'借用規定'},{label:'🔧 器材練習',text:'器材練習'},{label:'🔍 更多',text:'對外更多'},{label:'🔙 回主選單',text:'主選單'}])};}
-function getExternalMoreMenu(){return{text:'更多對外學生資訊：',quickReply:qr([{label:'📘 講義',text:'講義'},{label:'⏰ 營業時間',text:'營業時間'},{label:'🚫 額滿',text:'額滿'},{label:'🔙 回對外主選單',text:'對外學生'},{label:'🔙 回主選單',text:'主選單'}])};}
+function getExternalMainMenu(){return{text:'請選擇您想查詢的對外學生資訊：',quickReply:qr([{label:'📋 流程',text:'流程'},{label:'📅 時程',text:'對外時程'},{label:'📚 題庫/講義',text:'題庫講義'},{label:'💰 保證金',text:'保證金'},{label:'🚫 學生請假',text:'學生請假'},{label:'🔑 借器材',text:'借用規定'},{label:'🔧 器材練習',text:'器材練習'},{label:'🔍 更多',text:'對外更多'},{label:'🏠 回首頁',text:'主選單'}])};}
+function getExternalMoreMenu(){return{text:'更多對外學生資訊：',quickReply:qr([{label:'📘 講義',text:'講義'},{label:'⏰ 營業時間',text:'營業時間'},{label:'🚫 額滿',text:'額滿'},{label:'🔙 回上一頁',text:'對外學生'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getInternalMainMenu(){
   return {
     text:'請選擇您想查詢的助理資訊：',
@@ -721,7 +721,7 @@ function getInternalMainMenu(){
       {label:'🔮 每日運勢', text:'每日運勢'},
       {label:'🍽️ 教學飽', text:'教學飽'},
       {label:'🔍 更多', text:'助理更多'},
-      {label:'🔙 回主選單', text:'主選單'}
+      {label:'🏠 回首頁', text:'主選單'}
     ])
   };
 }  // ← 這裡的右大括號是關鍵！
@@ -736,8 +736,8 @@ function getQueryTypeMenu(){
       {label:'📋 認證進度', text:'認證'},
       {label:'📋 考試結果', text:'考試結果'},
       {label:'📋 暫定個人', text:'我的暫定排班'},
-      {label:'🔙 回助理主選單', text:'中心助理'},
-      {label:'🔙 回主選單', text:'主選單'}
+      {label:'🔙 回上一頁', text:'中心助理'},
+      {label:'🏠 回首頁', text:'主選單'}
     ])
   };
 }
@@ -752,12 +752,12 @@ function getInternalMoreMenu(){
       {label:'📁 常用連結', text:'常用連結'},
       {label:'📊 全體點名統計', text:'全體點名統計'},
       {label:'📋 暫定總排班', text:'暫定總排班'},
-      {label:'🔙 回助理主選單', text:'中心助理'},
-      {label:'🔙 回主選單', text:'主選單'}
+      {label:'🔙 回上一頁', text:'中心助理'},
+      {label:'🏠 回首頁', text:'主選單'}
     ])
   };
 }
-function getLeaveOptionsMenu(){return{text:'請選擇請假類型：',quickReply:qr([{label:'📝 對內請假',text:'對內請假'},{label:'👥 對外考官更動',text:'對外考官更動'},{label:'🔙 回助理主選單',text:'中心助理'},{label:'🔙 回主選單',text:'主選單'}])};}
+function getLeaveOptionsMenu(){return{text:'請選擇請假類型：',quickReply:qr([{label:'📝 對內請假',text:'對內請假'},{label:'👥 對外考官更動',text:'對外考官更動'},{label:'🔙 回上一頁',text:'中心助理'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getCommonLinks(){return{text:'【1151 助理常用連結】\n\n📊 1151 教學總排程\nhttps://docs.google.com/spreadsheets/d/11SEPY8ugY1-l_EQ-J3qYdxmQoXHWARmgBY4wA-QFQzI/edit\n\n👨‍🏫 1151 對內教學官／考官安排\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit',quickReply:bA()};}
 
 // ========== 統一回應 ==========
@@ -765,7 +765,7 @@ var UNIFIED={
   流程:'🗺️【對外教學與認證流程說明】\n\n想取得影音實驗室的器材借用權限嗎？請跟著以下步驟通關：\n\n1️⃣ 【報名與繳交保證金】\n留意粉專報名表單，搶到名額後，務必於死線(3/27)前至中心繳交保證金。\n\n2️⃣ 【參加教學與預約練習】\n準時出席教學工作坊！課後可利用中心開放時間預約練習（每次上限2小時 / 2項器材）。\n\n3️⃣ 【參加考試】\n包含實作與簡答題。簡答題請務必熟讀題庫，缺席皆不可退保證金喔！\n\n4️⃣ 【取得借用權限】\n注意：器材是以「組」為單位，整組的「所有組員」都必須通過該項認證，才會正式開放借用權限！\n\n💡 溫馨提醒：【基礎配件課程】是所有進階器材的先修，一定要先考過才能報名其他的喔！',
   對外時程:'🗓️【對外教學工作坊 - 重要時程表】\n\n📝 對外報名時間 (第2、3週)\n3/2 (一) － 3/13 (五)\n\n📚 教學週 (第4、5週)\n3/16 (一) － 3/27 (五)\n\n📝 考試週 (第6、7週)\n3/30 (一) － 4/10 (五)\n\n🔄 第一次補考 (第8週)\n4/13 (一) － 4/17 (五)\n\n🔄 第二次補考 (第9週)\n4/20 (一) － 4/24 (五)\n\n⚠️ 請密切注意各階段的報名與保證金繳交死線(3/27)喔！',
   題庫講義:'【考試內容與題庫 + 上課講義】\n\n📚 題庫：\n👉 《影音實驗室對外教學工作坊-簡答題題庫》：\nhttps://docs.google.com/document/d/14WfMI5Vs90SOLBJQuuw6HgSORIu5x_dc/edit?usp=sharing&ouid=108650055905957222325&rtpof=true&sd=true\n\n📘 講義：\n👉 對外教學工作坊上課講義：\nhttps://avlab.nccu.edu.tw/PageDoc/Detail?fid=10543&id=18228',
-  保證金:'【保證金制度說明】\nhttps://drive.google.com/file/d/1cSVpcW5allLz6_tImqg2KEd7A2Jfu101/view',
+  保證金:'【保證金制度說明】\n\n✅ 同一項器材的「線上簡答」與「上機考」都通過，才符合退還保證金資格。\n\n🔄 補考採累計制：已通過的項目會保留。例如簡答已通過、上機未通過，補考只需重考上機；上機通過後即顯示可退保證金。\n\n❌ 若補考後仍有任一項未通過，保證金狀態會維持「暫不可退」。\n\n完整規定：\nhttps://drive.google.com/file/d/1cSVpcW5allLz6_tImqg2KEd7A2Jfu101/view',
   學生請假:'【請假與更改時間規定 (對外學生)】\n\n⚠️ 對外考生「不可請假」，但可透過「對外考試時間異動表單」申請更改時間或取消報名。⚠️\n\n❗ 取消報名仍「不予退費」，請確定報名項目後再繳交保證金。\n\n若測驗當天未出席將視同放棄資格，且已繳交之保證金一律「不予退費」。\n\n（⚠️ 更改時間表單目前建置中，如有需要請先私訊粉專處理。待表單完成後會另行公告。）',
   借用規定:'【器材借用權限說明】\n器材借用有兩大前提：\n1. 必須先上過「基礎配件課程」並取得權限。\n2. 器材是以「組」為單位，整組的「所有組員」都必須通過該項認證，才能開放借用權限！請督促隊友。',
   講義:'【對外教學工作坊 - 上課講義】\n上課前或複習時可以參考這裡的教學講義喔！\n\n👉 https://avlab.nccu.edu.tw/PageDoc/Detail?fid=10543&id=18228',
