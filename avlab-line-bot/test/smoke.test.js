@@ -168,11 +168,12 @@ test('group attendance writes a normalized record and completes the task', () =>
 
   const attendanceStart = externalTeaching.handleCommand('開始點名 T1', context);
   assert.match(attendanceStart.text, /學生甲/);
-  assert.match(attendanceStart.text, /第 1\/1 位/);
-  const attendanceActions = attendanceStart.quickReply.items.map(item => item.action);
-  assert.deepEqual(attendanceActions.slice(0, 4).map(action => action.type), ['postback', 'postback', 'postback', 'postback']);
-  assert.deepEqual(attendanceActions.slice(0, 4).map(action => action.label), ['✅ 準時', '⏰ 遲到', '📝 請假', '❌ 缺席']);
-  assert.match(externalTeaching.handleCommand('點名狀態 T1 S1 到場', context).text, /完成所有學生/);
+  assert.match(attendanceStart.text, /考生名單/);
+  assert.equal(attendanceStart.quickReply.items[0].action.type, 'postback');
+  const studentPrompt = externalTeaching.handleCommand('查看考生 T1 S1', context);
+  assert.match(studentPrompt.text, /15 分鐘後點名為遲到/);
+  assert.deepEqual(studentPrompt.quickReply.items.slice(0, 3).map(item => item.action.label), ['✅ 學生已到', '📝 請假', '❌ 缺席']);
+  assert.match(externalTeaching.handleCommand('點名狀態 T1 S1 到場', context).text, /已登記 學生甲：到場/);
   assert.equal(attendance.getRange(2, 10).getValue(), '到場');
   const finished = externalTeaching.handleCommand('完成點名 T1', context);
   assert.match(finished.text, /任務已完成/);
@@ -192,10 +193,14 @@ test('retest preserves the passed written result and only asks for the practical
   students.appendRow(['T-EXAM-CUM','S-EXAM-CUM','補考學生','999',1,'未點名','未記錄','']);
   externalTeaching.handleCommand('開始點名 T-EXAM-CUM', context);
   const firstPrompt = externalTeaching.handleCommand('點名狀態 T-EXAM-CUM S-EXAM-CUM 到場', context);
-  assert.match(firstPrompt.text, /第 2 步：請登記線上簡答結果/);
+  assert.match(firstPrompt.text, /口頭問答：⏳ 尚未評分/);
+  assert.match(firstPrompt.text, /上機：⏳ 尚未評分/);
+  assert.doesNotMatch(firstPrompt.text, /保證金：/);
   assert.equal(firstPrompt.quickReply.items[0].action.type, 'postback');
   const practicalPrompt = externalTeaching.handleCommand('簡答登記 T-EXAM-CUM S-EXAM-CUM 通過', context);
-  assert.match(practicalPrompt.text, /第 3 步：請登記上機考結果/);
+  assert.match(practicalPrompt.text, /口頭問答：✅ 通過/);
+  assert.match(practicalPrompt.text, /上機：⏳ 尚未評分/);
+  assert.doesNotMatch(practicalPrompt.text, /保證金：/);
   externalTeaching.handleCommand('上機登記 T-EXAM-CUM S-EXAM-CUM 未通過', context);
 
   tasks.appendRow(['T-RETEST-CUM','1151','第一次補考',new Date('2026-09-19'),'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
@@ -203,10 +208,11 @@ test('retest preserves the passed written result and only asks for the practical
   externalTeaching.handleCommand('開始點名 T-RETEST-CUM', context);
   const retestPrompt = externalTeaching.handleCommand('點名狀態 T-RETEST-CUM S-RETEST-CUM 到場', context);
   const resultLabels = retestPrompt.quickReply.items.map(item => item.action.label);
-  assert.match(retestPrompt.text, /第 3 步：請登記上機考結果/);
-  assert.equal(resultLabels.some(label => label.includes('通過')), true);
-  assert.equal(resultLabels.some(label => label.includes('未通過')), true);
-  assert.match(retestPrompt.text, /簡答 ✅ 通過/);
+  assert.match(retestPrompt.text, /口頭問答：✅ 通過/);
+  assert.match(retestPrompt.text, /上機：⏳ 尚未評分/);
+  assert.equal(resultLabels.some(label => label === '上機 ✅'), true);
+  assert.equal(resultLabels.some(label => label === '上機 ❌'), true);
+  assert.equal(resultLabels.some(label => label.includes('口頭問答')), false);
 
   const completed = externalTeaching.handleCommand('上機登記 T-RETEST-CUM S-RETEST-CUM 通過', context);
   assert.match(completed.text, /可退保證金/);
@@ -215,6 +221,14 @@ test('retest preserves the passed written result and only asks for the practical
   assert.equal(retestRow[16], '通過');
   assert.equal(retestRow[17], '通過');
   assert.equal(retestRow[18], '可退保證金');
+});
+
+test('arrival grace rules are five minutes for exams and fifteen minutes for teaching', () => {
+  const date = new Date('2026-09-02T00:00:00+08:00');
+  const student = { scheduledStart: '12:00' };
+  assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '考試', date, start: '12:00' }, student, new Date('2026-09-02T12:05:00+08:00')), '到場');
+  assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '考試', date, start: '12:00' }, student, new Date('2026-09-02T12:05:01+08:00')), '取消資格');
+  assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '教學', date, start: '12:00' }, student, new Date('2026-09-02T12:15:01+08:00')), '遲到');
 });
 
 test('one-hour reminder pushes the roster to the examiner and assigned group', () => {
@@ -259,6 +273,7 @@ test('exam assignments propagate merged date headers and choose the correct exam
   assert.equal(tasks[1].examiner, '考官乙');
   assert.equal(tasks[1].start, '12:05');
   assert.deepEqual(tasks[1].students.map(student => student.name), ['學生乙', '學生丙']);
+  assert.deepEqual(tasks[1].students.map(student => student.scheduledStart), ['12:05', '12:20']);
   assert.equal(tasks[0].date.getFullYear(), 2027);
 });
 
