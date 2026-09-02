@@ -736,6 +736,7 @@ function getInternalMainMenu(){
   return {
     text:'請選擇您想查詢的助理資訊：',
     quickReply:qr([
+      {label:'📋 點名', text:'點名'},
       {label:'⏰ 近期對內任務', text:'對內近期任務'},
       {label:'🔍 各項查詢', text:'查詢'},
       {label:'📝 請假', text:'請假選項'},
@@ -793,8 +794,8 @@ var UNIFIED={
   營業時間:'【中心開放時間】\n週一至週四：12:00～18:00\n週五：10:00～18:00',
   額滿:'【報名額滿怎麼辦】\n選項消失代表該時段已額滿。基礎配件課程限額 10 名，其他項目限額 6-8 名，請選擇其他時段。若所有時段皆無法配合，請私訊粉專。',
   器材練習:'【器材練習借用說明】\n\n本實驗室開放同學於參加考試前，至影音實驗室現場借用器材練習。由於器材與場地數量有限，請務必遵守以下規定：\n\n📌 預約方式\n• 可預約未來兩週內的練習時段（最晚須於練習「前一天」完成預約，不接受當天預約）。\n• 每人每天「僅能預約一個時段」，每時段至多 2 小時。\n• 每個時段可練習 1～2 項器材。\n\n⏰ 預約限制\n• 為確保公平使用機會，若無提前預約，現場無法保證能使用到器材。\n• 練習時間以兩小時為上限，逾時將影響其他同學權益。\n\n📝 請至影音實驗室填寫紙本報名表',
-  對內請假:'【對內請假規定與表單】\n\n⏳ 請假死線：\n正常請假死線為「星期三 23:59」。逾期緩衝死線為「星期四 18:00」，超過此時間皆視為曠職並扣考核分。\n\n📝 對內請假表單：\nhttps://docs.google.com/forms/d/e/1FAIpQLSfHCPloGR4rWQuYBamgp1Uz7L18YrzhhiubUny3-A49RMrffQ/viewform?usp=header\n\n⚠️ (若是對外學生要改考試時間，請輸入「學生請假」)',
-  越級考:'【越級考/補考說明】\n\n1️⃣ 若要申請越級考，請提前私訊對內教學組長「蔡季妍」，等候他協助安排考官。\n2️⃣ 由考生與考官自行約時間考試。\n3️⃣ 考試時由考官填寫認證表單，若登記為通過，兩個工作天內經理會開啟權限。\n\n【補考說明】\n若教學部已為同級助理開設統一考試時段，考試未過或未參與考試者，須於該年度完成補考：\n• 原開設時段考試未過：請找原考官補考。\n• 原開設時段未參與考試：請找原考官（若有兩位擇一即可）。\n• 若原考官已不在中心，請找對內教學組長「蔡季妍」安排，流程同越級考。\n\n【越級考/加開申請表單】\nhttps://docs.google.com/forms/d/e/1FAIpQLSfOrdq0UM02gi1F7eQjl1JA39Kp8Hli3DFVlWmUL958AfCCtw/viewform?usp=header',
+  對內請假:'【對內請假規定與表單】\n\n⏳ 請假死線：\n正常請假死線為「星期三 23:59」。逾期緩衝死線為「星期四 18:00」，超過此時間皆視為曠職並扣考核分。\n\n📝 對內請假表單：\nhttps://forms.gle/BoZnX4fnerBNbf4T7\n\n⚠️ (若是對外學生要改考試時間，請輸入「學生請假」)',
+  越級考:'【越級考/補考說明】\n\n1️⃣ 若要申請越級考，請提前私訊對內教學組長「蔡季妍」，等候他協助安排考官。\n2️⃣ 由考生與考官自行約時間考試。\n3️⃣ 考試時由考官填寫認證表單，若登記為通過，兩個工作天內經理會開啟權限。\n\n【補考說明】\n若教學部已為同級助理開設統一考試時段，考試未過或未參與考試者，須於該年度完成補考：\n• 原開設時段考試未過：請找原考官補考。\n• 原開設時段未參與考試：請找原考官（若有兩位擇一即可）。\n• 若原考官已不在中心，請找對內教學組長「李慈恩」安排，流程同越級考。\n\n【越級考/加開申請表單】\nhttps://forms.gle/MgWKkzpQWheo8GMv9',
   對外考官更動:'【對外教學考官更動表單 (中心助理專用)】\n當您擔任對外考官卻無法出席時，請務必找好代班人後再填寫此表單！\n\nhttps://docs.google.com/forms/d/e/1FAIpQLScZ-Xb5REWXs8cmW0b5u1txAcEJmV4Y_ZVKAEs-lYjUBpcr5w/viewform?usp=sharing&ouid=108650055905957222325\n\n⚠️ 備註：對外考官若無法出席，「一定要找代班」！請找好代班人後再填寫此表單。',
   對內考官:'【1151 對內考官安排】\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit\n\n⚠️ 備註：對內考官若需請假，請務必尋找「代班人」，並填寫對內請假表單：\nhttps://docs.google.com/forms/d/e/1FAIpQLSfHCPloGR4rWQuYBamgp1Uz7L18YrzhhiubUny3-A49RMrffQ/viewform?usp=header',
   對內時程:'【1151 對內教學／檢定時程】\n\n📚 9/6 暑訓教學\n📝 9/18 暑訓檢定\n📚 10/16 期中教學\n📝 10/30 期中檢定\n📚 11/6 期末教學\n📝 12/4 期末檢定\n\n完整器材與考官安排：\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit'
@@ -964,6 +965,21 @@ function onMasterSheetEdit(e) {
   
   var resultCol = -1;
   var equipCol = -1;
+
+  // 1151 改為每項器材各自一欄，例如「導播台結果」「錄放影機結果」。
+  // 直接在該欄選「通過」即可更新認證；選「不通過」不會清除既有認證。
+  if (header !== '考試結果' && header !== '加開結果' && /結果$/.test(header)) {
+    if (newValue !== '通過') {
+      Logger.log('逐器材結果不是「通過」，保留既有認證並退出');
+      return;
+    }
+    var equipmentFromHeader = header.replace(/結果$/, '').trim();
+    var directStudentName = sheet.getRange(row, 1).getValue();
+    if (equipmentFromHeader && directStudentName) {
+      updateCertificationForPerson(nrm(directStudentName.toString()), equipmentFromHeader);
+    }
+    return;
+  }
   
   if (header === '考試結果') {
     resultCol = col;

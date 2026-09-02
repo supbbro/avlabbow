@@ -173,7 +173,7 @@ const automations = {
   'leave-submit': [bot.onLeaveFormSubmit, ids.leave, '表單回覆 1'],
   'retest-submit': [bot.onRetestFormSubmit, ids.retest, '表單回覆 1'],
   'availability-submit': [bot.onAvailabilityFormSubmit, ids.schedule, '表單回覆 1'],
-  'master-edit': [bot.onMasterSheetEdit, ids.master, '教學考試點名和通過情況總表']
+  'master-edit': [bot.onMasterSheetEdit, ids.internalAttendance, '教學考試點名和通過情況總表']
 };
 
 app.post('/automation/:name', (req, res) => {

@@ -62,7 +62,6 @@ curl http://localhost:3000/health
    - `INTERNAL_TASK_FILE_ID=1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z`
    - `INTERNAL_ATTENDANCE_SHEET_ID=15INDclJDJSXKlXNDh2x50zbfeSi9hsGO8TKaJXjvlWo`
    - `INTERNAL_CERTIFICATION_SHEET_ID=1vUnpcRVsQmUH9zjqic8KFf5IlGk0E5GSH-rkhBGE7bk`
-   - `INTERNAL_SESSION_START_TIME=18:00`（考官表沒有時間欄，因此用這個時間計算一小時提醒）
    - `ACADEMIC_TERM=1151`
    - `TZ=Asia/Taipei`
    - `SHEETS_CACHE_TTL_MS=60000`（選用；預設快取 60 秒，降低 LINE 回覆延遲）
@@ -100,7 +99,7 @@ Railway 可取代 Apps Script 的 LINE webhook 和時間排程，但 Google Shee
 
 Railway 常駐程序會以台北時間執行：
 
-- 每分鐘：檢查對內任務，於開始前一小時內私訊已綁定的考官／教學官。
+- 每分鐘：檢查對內任務，在任務當週星期一 09:00 與任務當日 18:00 各提醒一次。
 - 每天 20:00：保留舊版明日任務提醒。
 - 每週一 01:00：結算射龍門「賭神」。
 - 每分鐘：檢查對外任務的一小時提醒。
@@ -112,7 +111,7 @@ Railway 常駐程序會以台北時間執行：
 - `src/server.js`：Express、LINE 驗簽、webhook、排程與 automation endpoints。
 - `src/runtime.js`：Apps Script API 到 Google Sheets API 的相容層。
 - `src/external-teaching.js`：群組綁定、對外任務提醒、點名與考試結果登記。
-- `src/internal-teaching.js`：對內一小時提醒、第一分頁點名與認證表更新。
+- `src/internal-teaching.js`：對內週一／當日提醒、點名表入口與逐器材認證同步。
 - `src/legacy-bot.js`：原有機器人商業邏輯（token 已改讀環境變數）。
 - `src/config.js`：試算表 ID 與工作表名稱。
 - `apps-script-relay.gs`：Google 編輯/表單觸發器的選用轉送器。

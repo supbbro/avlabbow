@@ -600,55 +600,55 @@ test('1151 Excel examiner table is normalized and multi-examiner cells are searc
   assert.equal(normalized[2][1], '暑訓教學');
 });
 
-test('internal one-hour reminder opens a card roster and only sends once', () => {
-  process.env.INTERNAL_SESSION_START_TIME = '18:00';
+test('internal reminders send on Monday at 09:00 and event day at 18:00 without cards', () => {
   const taskBook = runtime.openById(ids.task);
   const taskSheet = taskBook.getSheetByName('1151 對內教學官／考官安排') || taskBook.insertSheet('1151 對內教學官／考官安排');
   if (!taskSheet.getLastRow()) taskSheet.appendRow(['日期','階段','級別','項目','教學官／考官','地點']);
   taskSheet.appendRow([new Date(2026, 8, 6), '暑訓教學', '見習', 'H6', '內測考官', '新棚']);
-
   const attendanceBook = runtime.openById(ids.internalAttendance);
-  const attendance = attendanceBook.getSheetByName('教學考試點名和通過情況總表') || attendanceBook.insertSheet('教學考試點名和通過情況總表');
-  if (!attendance.getLastRow()) {
-    attendance.appendRow(['姓名／項目','學號']);
-    attendance.appendRow(['見習(1)','']);
-    attendance.appendRow(['內測學生','I001']);
-  }
-  const certification = runtime.openById(ids.internalCertification).getSheetByName('工作表1') || runtime.openById(ids.internalCertification).insertSheet('工作表1');
-  if (!certification.getLastRow()) {
-    certification.appendRow(['認證狀況']);
-    certification.appendRow(['姓名／項目','學號','','H6']);
-    certification.appendRow(['內測學生','I001','','']);
-  }
   const binds = runtime.openById(ids.master).getSheetByName('用戶綁定') || runtime.openById(ids.master).insertSheet('用戶綁定');
   if (!binds.getLastRow()) binds.appendRow(['LINE User ID','姓名','綁定時間','學號']);
   binds.appendRow(['U-INTERNAL','內測考官','','']);
   runtime.httpOperations = [];
 
-  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 8, 6, 17, 0)), 1);
-  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 8, 6, 17, 1)), 0);
-  const push = JSON.parse(runtime.httpOperations[0].options.payload);
-  assert.equal(push.to, 'U-INTERNAL');
-  assert.match(push.messages[0].text, /1 小時內開始/);
-  assert.match(push.messages[0].text, /內測學生/);
-  assert.match(push.messages[0].quickReply.items[0].action.data, /^對內點名 /);
+  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 7, 31, 8, 59)), 0);
+  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 7, 31, 9, 0)), 1);
+  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 7, 31, 9, 1)), 0);
+  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 8, 6, 17, 59)), 0);
+  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 8, 6, 18, 0)), 1);
+  const pushes = runtime.httpOperations.map(operation => JSON.parse(operation.options.payload));
+  assert.equal(pushes.length, 2);
+  assert.equal(pushes.every(push => push.to === 'U-INTERNAL'), true);
+  assert.equal(pushes.every(push => push.messages[0].quickReply.items[0].action.type === 'uri'), true);
+  assert.equal(pushes.some(push => /名單調整/.test(push.messages[0].text)), true);
+  assert.equal(pushes.some(push => /今天有你的/.test(push.messages[0].text)), true);
+  const direct = internalTeaching.handleCommand('點名', { sourceType: 'user', userId: 'U-INTERNAL' });
+  assert.equal(direct.quickReply.items[0].action.type, 'uri');
+  assert.match(direct.quickReply.items[0].action.uri, /gid=653206596/);
 });
 
-test('internal exam attendance writes the first tab and passing adds certification without clearing history', () => {
-  const taskSheet = runtime.openById(ids.task).getSheetByName('1151 對內教學官／考官安排');
-  taskSheet.appendRow([new Date(2026, 8, 18), '暑訓檢定', '見習', 'H6', '內測考官', '新棚']);
-  const task = internalTeaching._test.allTasks().find(item => item.phase === '暑訓檢定' && item.examiner === '內測考官');
-  const context = { sourceType: 'user', userId: 'U-INTERNAL', chatId: 'U-INTERNAL' };
-  const menu = internalTeaching.handleCommand(`對內點名 ${task.id} 1`, context);
-  assert.equal(menu.lineMessage.type, 'template');
-  assert.equal(menu.lineMessage.template.columns[0].title, '內測學生');
-  const student = internalTeaching._test.rosterStudents(task)[0];
-  const arrived = internalTeaching.handleCommand(`對內出席 ${task.id} ${student.id} 到`, context);
-  assert.match(arrived.text, /請登記本次檢定結果/);
-  const passed = internalTeaching.handleCommand(`對內結果 ${task.id} ${student.id} 通過`, context);
-  assert.match(passed.text, /認證表已開通：H6/);
-  const columns = internalTeaching._test.ensureActivityColumns(task);
-  assert.equal(columns.target.getRange(student.row, columns.activity).getValue(), '到');
-  assert.equal(columns.target.getRange(student.row, columns.result).getValue(), '通過');
-  assert.equal(runtime.openById(ids.internalCertification).getSheetByName('工作表1').getRange(3, 4).getValue(), 'V');
+test('an equipment-specific result updates only that certification when the sheet edit says passed', () => {
+  const attendanceBook = runtime.openById(ids.internalAttendance);
+  const attendance = attendanceBook.getSheetByName('教學考試點名和通過情況總表') || attendanceBook.insertSheet('教學考試點名和通過情況總表');
+  attendance.getRange(1, 1, 3, 4).setValues([
+    ['姓名／項目','學號','導播台結果','錄放影機結果'],
+    ['內測學生','I001','通過','不通過'],
+    ['另一學生','I002','','']
+  ]);
+  const certification = runtime.openById(ids.internalCertification).getSheetByName('工作表1') || runtime.openById(ids.internalCertification).insertSheet('工作表1');
+  certification.getRange(1, 1, 5, 5).setValues([
+    ['認證狀況','','','',''],
+    ['姓名／項目','學號','','導播台','錄放影機'],
+    ['見習(2)','','','',''],
+    ['內測學生','I001','','','V'],
+    ['另一學生','I002','','','']
+  ]);
+  bot.onMasterSheetEdit({ value: '通過', range: attendance.getRange(2, 3) });
+  assert.equal(certification.getRange(4, 4).getValue(), 'V');
+  assert.equal(certification.getRange(4, 5).getValue(), 'V');
+  bot.onMasterSheetEdit({ value: '不通過', range: attendance.getRange(2, 4) });
+  assert.equal(certification.getRange(4, 5).getValue(), 'V');
+  attendance.getRange(3, 4).setValue('通過');
+  assert.equal(internalTeaching.syncInternalCertifications(), 1);
+  assert.equal(certification.getRange(5, 5).getValue(), 'V');
 });
