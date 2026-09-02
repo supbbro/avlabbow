@@ -14,6 +14,7 @@ const runtime = new GoogleSheetsRuntime();
 installGlobals(runtime);
 const bot = require('./legacy-bot');
 const externalTeaching = require('./external-teaching');
+const externalGroupSync = require('./external-group-sync');
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master];
@@ -190,6 +191,7 @@ async function schedulerTick() {
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: process.env.TZ || 'Asia/Taipei', weekday: 'short' }).format(new Date());
   const jobs = [];
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
+  jobs.push([`external-group-sync:${stamp}`, () => externalGroupSync.syncExternalCertificationMatrix(runtime.api, ids.externalResults), []]);
   if (time === '20:00') jobs.push([`daily:${date}`, bot.sendTomorrowTaskReminders, null]);
   if (weekday === 'Mon' && time === '01:00') jobs.push([`weekly:${date}`, bot.calculateWeeklyGodOfGamblers, null]);
   for (const [key, fn, workbookIds] of jobs) {
@@ -197,7 +199,7 @@ async function schedulerTick() {
     await enqueue(async () => {
       if (workbookIds) await runtime.loadOnly(workbookIds, { force: true });
       else await runtime.loadAll({ force: true });
-      fn();
+      await fn();
       await runtime.flush();
     });
     completedSchedules.add(key);

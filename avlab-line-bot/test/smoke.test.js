@@ -12,6 +12,7 @@ const runtime = new GoogleSheetsRuntime();
 installGlobals(runtime);
 const bot = require('../src/legacy-bot');
 const externalTeaching = require('../src/external-teaching');
+const externalGroupSync = require('../src/external-group-sync');
 const { parseTeachingSheet, parseExamSheet } = require('../src/external-schedule-parser');
 const { parseInternalTaskWorkbook } = require('../src/internal-task-parser');
 
@@ -324,6 +325,58 @@ test('failed exam stages select the next retest form and stop after the second r
   assert.equal(externalTeaching._test.retestForm({ phase: '考試' }).url, 'https://forms.gle/3be87wRzRBKvdkFb6');
   assert.equal(externalTeaching._test.retestForm({ phase: '第一次補考' }).url, 'https://forms.gle/t1vrm4U43xMhoWxD9');
   assert.equal(externalTeaching._test.retestForm({ phase: '第二次補考' }).finalAttempt, true);
+});
+
+test('group matrix sync derives green and retest colors from cumulative LINE records', () => {
+  const roster = [
+    ['音響學'],
+    ['第一組'],
+    ['學生甲', '1001'],
+    ['學生乙', '1002'],
+    ['學生丙', '1003']
+  ];
+  const matrix = [
+    ['姓名', '系級', '學號', '課程', '', '基礎配件課程', 'H6考試', 'X160考試'],
+    ['說明'],
+    ['學生甲', '', '1001', '音響學'],
+    ['學生乙', '', '1002', '音響學']
+  ];
+  const header = ['紀錄ID','任務ID','日期','開始時間','階段','器材','學生ID','學生姓名','學號','出席狀態','簡答題結果','上機結果','總結果','操作考官','考官LINE User ID','記錄時間','累計簡答題結果','累計上機結果','保證金狀態'];
+  const log = (id, phase, equipment, name, attendance, short, practical, deposit) => {
+    const row = Array(19).fill('');
+    Object.assign(row, { 0: id, 4: phase, 5: equipment, 7: name, 9: attendance, 16: short, 17: practical, 18: deposit });
+    return row;
+  };
+  const logs = [header,
+    log('1', '教學', '基礎配件課程', '學生甲', '到場', '', '', '不適用'),
+    log('2', '教學', '基礎配件課程', '學生乙', '缺席', '', '', '不適用'),
+    log('3', '考試', 'H6', '學生甲', '到場', '通過', '通過', '可退保證金'),
+    log('4', '考試', 'H6', '學生乙', '到場', '通過', '未通過', '不可退保證金'),
+    log('5', '第一次補考', 'H6', '學生乙', '到場', '通過', '通過', '可退保證金'),
+    log('6', '考試', 'X160', '學生乙', '取消資格', '未通過', '未通過', '不可退保證金（取消資格）')
+  ];
+  const plan = externalGroupSync._test.planMatrix(roster, matrix, logs);
+  assert.equal(plan.groups.length, 1);
+  assert.equal(plan.memberships.length, 3);
+  assert.equal(plan.missing.length, 1);
+  const status = (name, equipment) => plan.updates.find(update => update.name === name && update.equipment === equipment)?.status;
+  assert.equal(status('學生甲', '基礎配件課程'), '通過');
+  assert.equal(status('學生乙', '基礎配件課程'), '要補考');
+  assert.equal(status('學生乙', 'H6'), '通過');
+  assert.equal(status('學生乙', 'X160'), '要補考');
+});
+
+test('roster parsing uses a subsection title that appears before its group labels', () => {
+  const rows = Array.from({ length: 4 }, () => Array(12).fill(''));
+  rows[0][10] = '非劇情片理論與創作';
+  rows[1][10] = '導演方法';
+  rows[2][10] = '第一組';
+  rows[3][10] = '學生丁';
+  rows[3][11] = '1004';
+  const groups = externalGroupSync._test.parseRosterGroups(rows);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].course, '導演方法');
+  assert.deepEqual(groups[0].members, [{ name: '學生丁', studentId: '1004' }]);
 });
 
 test('teaching assignments are parsed from date, time, examiner and student rows', () => {
