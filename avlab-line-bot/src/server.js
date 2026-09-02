@@ -13,12 +13,14 @@ for (const key of ['LINE_CHANNEL_ACCESS_TOKEN', 'LINE_CHANNEL_SECRET']) {
 const runtime = new GoogleSheetsRuntime();
 installGlobals(runtime);
 const bot = require('./legacy-bot');
+const internalTeaching = require('./internal-teaching');
 const externalTeaching = require('./external-teaching');
 const externalGroupSync = require('./external-group-sync');
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master, ids.externalRegistration, ids.deposit];
-const TASK_QUERY_WORKBOOKS = [ids.task, ids.externalClassSchedule, ids.externalResults, ids.assistant, ids.master];
+const INTERNAL_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.master];
+const TASK_QUERY_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.externalClassSchedule, ids.externalResults, ids.assistant, ids.master];
 const LIVE_TASK_WORKBOOKS = [ids.task, ids.externalClassSchedule, ids.externalResults];
 const LIGHTWEIGHT_COMMANDS = new Set(['主選單', '對外學生', '對外更多', '中心助理', '助理更多', '請假選項', '請假', '查詢', '常用連結']);
 const ASSISTANT_PROMPT_COMMANDS = new Set(['查任務', '個人點名統計', '代班查詢', '認證', '認證進度', '考試結果']);
@@ -82,10 +84,11 @@ async function handleLineEvent(event) {
     const userId = context.userId;
     if (!userId) return;
     const command = String(event.postback?.data || '').trim();
-    if (!externalTeaching.isExternalCommand(command)) return;
-    await runtime.loadOnly(EXTERNAL_WORKBOOKS, { force: externalTeaching.requiresFreshData(command) });
+    const internal = internalTeaching.isInternalCommand(command);
+    if (!internal && !externalTeaching.isExternalCommand(command)) return;
+    await runtime.loadOnly(internal ? INTERNAL_WORKBOOKS : EXTERNAL_WORKBOOKS, { force: internal ? internalTeaching.requiresFreshData(command) : externalTeaching.requiresFreshData(command) });
     bot.recordUser(userId);
-    reply = externalTeaching.handleCommand(command, context);
+    reply = internal ? internalTeaching.handleCommand(command, context) : externalTeaching.handleCommand(command, context);
   } else if (event.type === 'message') {
     const userId = context.userId;
     if (!userId) return;
@@ -97,6 +100,8 @@ async function handleLineEvent(event) {
       const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
       if (bindingCommand) {
         await runtime.loadOnly([ids.master, ids.assistant, ids.externalResults], { force: true });
+      } else if (internalTeaching.isInternalCommand(text)) {
+        await runtime.loadOnly(INTERNAL_WORKBOOKS, { force: internalTeaching.requiresFreshData(text) });
       } else if (combinedTaskQuery) {
         await runtime.loadOnly(TASK_QUERY_WORKBOOKS, { forceIds: LIVE_TASK_WORKBOOKS });
         externalTeaching.syncFromSchedule();
@@ -110,7 +115,7 @@ async function handleLineEvent(event) {
         await runtime.loadAll();
       }
       bot.recordUser(userId);
-      reply = externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
+      reply = internalTeaching.handleCommand(text, context) || externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
     } else if (event.message.type === 'sticker') {
       await runtime.loadOnly([ids.master]);
       bot.recordUser(userId);
@@ -191,6 +196,7 @@ async function schedulerTick() {
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: process.env.TZ || 'Asia/Taipei', weekday: 'short' }).format(new Date());
   const jobs = [];
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
+  jobs.push([`internal-reminders:${stamp}`, internalTeaching.sendInternalReminders, INTERNAL_WORKBOOKS]);
   jobs.push([`external-group-sync:${stamp}`, () => externalGroupSync.syncExternalCertificationMatrix(runtime.api, ids.externalResults), []]);
   if (time === '20:00') jobs.push([`daily:${date}`, bot.sendTomorrowTaskReminders, null]);
   if (weekday === 'Mon' && time === '01:00') jobs.push([`weekly:${date}`, bot.calculateWeeklyGodOfGamblers, null]);

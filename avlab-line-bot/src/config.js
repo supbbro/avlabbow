@@ -6,6 +6,8 @@ const configuredDepositId = process.env.EXTERNAL_DEPOSIT_FILE_ID;
 
 const ids = {
   task: process.env.INTERNAL_TASK_FILE_ID || '1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z',
+  internalAttendance: process.env.INTERNAL_ATTENDANCE_SHEET_ID || '15INDclJDJSXKlXNDh2x50zbfeSi9hsGO8TKaJXjvlWo',
+  internalCertification: process.env.INTERNAL_CERTIFICATION_SHEET_ID || '1vUnpcRVsQmUH9zjqic8KFf5IlGk0E5GSH-rkhBGE7bk',
   master: '1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY',
   leave: '1A0wZWctAbihNzNi3Ji0CVW6at024QQQDnNzdQP1K2XI',
   external: '1UGoTWRq59rNatZn5ZUYRu-reiYiRquI2GREeWDsf5sU',
@@ -24,6 +26,8 @@ const ids = {
 
 const workbooks = {
   [ids.task]: ['1151 對內教學官／考官安排'],
+  [ids.internalAttendance]: ['教學考試點名和通過情況總表', '考生分配', '用戶綁定', 'LINE對內紀錄'],
+  [ids.internalCertification]: ['工作表1'],
   [ids.master]: ['教學考試點名和通過情況總表', '用戶綁定', '最終排班結果'],
   [ids.leave]: ['表單回覆 1'],
   [ids.external]: ['表單回覆 1'],

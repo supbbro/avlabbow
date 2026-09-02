@@ -11,6 +11,7 @@ const { ids } = require('../src/config');
 const runtime = new GoogleSheetsRuntime();
 installGlobals(runtime);
 const bot = require('../src/legacy-bot');
+const internalTeaching = require('../src/internal-teaching');
 const externalTeaching = require('../src/external-teaching');
 const externalGroupSync = require('../src/external-group-sync');
 const { parseTeachingSheet, parseExamSheet } = require('../src/external-schedule-parser');
@@ -597,4 +598,57 @@ test('1151 Excel examiner table is normalized and multi-examiner cells are searc
   assert.equal(normalized[3][5], '新棚');
   assert.equal(normalized[1][0].getFullYear(), 2026);
   assert.equal(normalized[2][1], '暑訓教學');
+});
+
+test('internal one-hour reminder opens a card roster and only sends once', () => {
+  process.env.INTERNAL_SESSION_START_TIME = '18:00';
+  const taskBook = runtime.openById(ids.task);
+  const taskSheet = taskBook.getSheetByName('1151 對內教學官／考官安排') || taskBook.insertSheet('1151 對內教學官／考官安排');
+  if (!taskSheet.getLastRow()) taskSheet.appendRow(['日期','階段','級別','項目','教學官／考官','地點']);
+  taskSheet.appendRow([new Date(2026, 8, 6), '暑訓教學', '見習', 'H6', '內測考官', '新棚']);
+
+  const attendanceBook = runtime.openById(ids.internalAttendance);
+  const attendance = attendanceBook.getSheetByName('教學考試點名和通過情況總表') || attendanceBook.insertSheet('教學考試點名和通過情況總表');
+  if (!attendance.getLastRow()) {
+    attendance.appendRow(['姓名／項目','學號']);
+    attendance.appendRow(['見習(1)','']);
+    attendance.appendRow(['內測學生','I001']);
+  }
+  const certification = runtime.openById(ids.internalCertification).getSheetByName('工作表1') || runtime.openById(ids.internalCertification).insertSheet('工作表1');
+  if (!certification.getLastRow()) {
+    certification.appendRow(['認證狀況']);
+    certification.appendRow(['姓名／項目','學號','','H6']);
+    certification.appendRow(['內測學生','I001','','']);
+  }
+  const binds = runtime.openById(ids.master).getSheetByName('用戶綁定') || runtime.openById(ids.master).insertSheet('用戶綁定');
+  if (!binds.getLastRow()) binds.appendRow(['LINE User ID','姓名','綁定時間','學號']);
+  binds.appendRow(['U-INTERNAL','內測考官','','']);
+  runtime.httpOperations = [];
+
+  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 8, 6, 17, 0)), 1);
+  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 8, 6, 17, 1)), 0);
+  const push = JSON.parse(runtime.httpOperations[0].options.payload);
+  assert.equal(push.to, 'U-INTERNAL');
+  assert.match(push.messages[0].text, /1 小時內開始/);
+  assert.match(push.messages[0].text, /內測學生/);
+  assert.match(push.messages[0].quickReply.items[0].action.data, /^對內點名 /);
+});
+
+test('internal exam attendance writes the first tab and passing adds certification without clearing history', () => {
+  const taskSheet = runtime.openById(ids.task).getSheetByName('1151 對內教學官／考官安排');
+  taskSheet.appendRow([new Date(2026, 8, 18), '暑訓檢定', '見習', 'H6', '內測考官', '新棚']);
+  const task = internalTeaching._test.allTasks().find(item => item.phase === '暑訓檢定' && item.examiner === '內測考官');
+  const context = { sourceType: 'user', userId: 'U-INTERNAL', chatId: 'U-INTERNAL' };
+  const menu = internalTeaching.handleCommand(`對內點名 ${task.id} 1`, context);
+  assert.equal(menu.lineMessage.type, 'template');
+  assert.equal(menu.lineMessage.template.columns[0].title, '內測學生');
+  const student = internalTeaching._test.rosterStudents(task)[0];
+  const arrived = internalTeaching.handleCommand(`對內出席 ${task.id} ${student.id} 到`, context);
+  assert.match(arrived.text, /請登記本次檢定結果/);
+  const passed = internalTeaching.handleCommand(`對內結果 ${task.id} ${student.id} 通過`, context);
+  assert.match(passed.text, /認證表已開通：H6/);
+  const columns = internalTeaching._test.ensureActivityColumns(task);
+  assert.equal(columns.target.getRange(student.row, columns.activity).getValue(), '到');
+  assert.equal(columns.target.getRange(student.row, columns.result).getValue(), '通過');
+  assert.equal(runtime.openById(ids.internalCertification).getSheetByName('工作表1').getRange(3, 4).getValue(), 'V');
 });

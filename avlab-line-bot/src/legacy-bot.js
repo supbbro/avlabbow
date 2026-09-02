@@ -1,13 +1,14 @@
 'use strict';
 var CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 var TASK_SHEET_ID=process.env.INTERNAL_TASK_FILE_ID||'1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z',TASK_SHEET_NAME='1151 對內教學官／考官安排',COL_TASK_DATE=0,COL_TASK_PHASE=1,COL_TASK_LEVEL=2,COL_TASK_ITEM=3,COL_TASK_NAME=4,COL_TASK_LOCATION=5;
+var INTERNAL_ATTENDANCE_SHEET_ID=process.env.INTERNAL_ATTENDANCE_SHEET_ID||'15INDclJDJSXKlXNDh2x50zbfeSi9hsGO8TKaJXjvlWo';
 var EXTERNAL_RESULTS_SHEET_ID=process.env.EXTERNAL_RESULTS_SHEET_ID||'1WXeO6VF-emmoP_07tzsGk5z0WGSU7aFLbtbT0ImYACg',EXTERNAL_TASK_SHEET_NAME='對外任務';
 var MASTER_SHEET_ID='1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY';
 var ATTENDANCE_SHEET_NAME='教學考試點名和通過情況總表';
 var LEAVE_SHEET_ID='1A0wZWctAbihNzNi3Ji0CVW6at024QQQDnNzdQP1K2XI',LEAVE_SHEET_NAME='表單回覆 1',COL_LEAVE_TIMESTAMP=0,COL_LEAVE_NAME=1,COL_LEAVE_DATE=5,COL_LEAVE_SUBSTITUTE=7;
 var EXTERNAL_SHEET_ID='1UGoTWRq59rNatZn5ZUYRu-reiYiRquI2GREeWDsf5sU',EXTERNAL_SHEET_NAME='表單回覆 1',COL_EXTERNAL_TIMESTAMP=0,COL_EXTERNAL_NAME=1,COL_EXTERNAL_DATE=2,COL_EXTERNAL_SUBSTITUTE=5;
 var ASSISTANT_SHEET_ID='1n5-GLLMxCORCwNqne2nLzplC16n9YPfbKlU2oxzuCp0',ASSISTANT_SHEET_NAME='助理名單',COL_NAME_IN_LIST=0;
-var CERT_SHEET_ID='1R-3NyQ24se2jWE-YunOGXKu2sc4bpBHzE7tmI4RCWD0',CERT_SHEET_NAME='工作表1',COL_CERT_NAME=0,FIRST_EQUIP_COL=3;
+var CERT_SHEET_ID=process.env.INTERNAL_CERTIFICATION_SHEET_ID||'1vUnpcRVsQmUH9zjqic8KFf5IlGk0E5GSH-rkhBGE7bk',CERT_SHEET_NAME='工作表1',COL_CERT_NAME=0,FIRST_EQUIP_COL=3;
 // ========== 用戶綁定表設定 ==========
 var USER_BIND_SHEET_NAME = '用戶綁定';
 var BIND_COL_USER_ID = 0;
@@ -123,7 +124,7 @@ function getMasterData() {
   if (cached) return JSON.parse(cached);
 
   try {
-    var sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(ATTENDANCE_SHEET_NAME);
+    var sheet = SpreadsheetApp.openById(INTERNAL_ATTENDANCE_SHEET_ID).getSheetByName(ATTENDANCE_SHEET_NAME);
     if (!sheet) return [];
 
     var lastRow = sheet.getLastRow();
@@ -735,6 +736,7 @@ function getInternalMainMenu(){
   return {
     text:'請選擇您想查詢的助理資訊：',
     quickReply:qr([
+      {label:'⏰ 近期對內任務', text:'對內近期任務'},
       {label:'🔍 各項查詢', text:'查詢'},
       {label:'📝 請假', text:'請假選項'},
       {label:'🔮 每日運勢', text:'每日運勢'},

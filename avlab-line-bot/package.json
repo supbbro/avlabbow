@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/runtime.js && node --check src/internal-task-parser.js && node --check src/external-registration-parser.js && node --check src/external-schedule-parser.js && node --check src/external-group-sync.js && node --check src/external-teaching.js && node --check src/legacy-bot.js",
+    "check": "node --check src/server.js && node --check src/runtime.js && node --check src/internal-task-parser.js && node --check src/internal-teaching.js && node --check src/external-registration-parser.js && node --check src/external-schedule-parser.js && node --check src/external-group-sync.js && node --check src/external-teaching.js && node --check src/legacy-bot.js",
     "test": "node --test"
   },
   "keywords": [],
