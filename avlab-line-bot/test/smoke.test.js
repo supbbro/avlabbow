@@ -205,7 +205,10 @@ test('retest preserves the passed written result and only asks for the practical
   assert.match(practicalPrompt.text, /簡答題：✅ 通過/);
   assert.match(practicalPrompt.text, /上機：⏳ 尚未評分/);
   assert.doesNotMatch(practicalPrompt.text, /保證金：/);
-  externalTeaching.handleCommand('上機登記 T-EXAM-CUM S-EXAM-CUM 未通過', context);
+  const failed = externalTeaching.handleCommand('上機登記 T-EXAM-CUM S-EXAM-CUM 未通過', context);
+  assert.match(failed.text, /請考官務必提醒考生填寫補考表單/);
+  assert.match(failed.text, /未通過項目：上機/);
+  assert.match(failed.text, /尚未設定補考表單網址/);
 
   tasks.appendRow(['T-RETEST-CUM','1151','第一次補考',new Date('2026-09-19'),'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
   students.appendRow(['T-RETEST-CUM','S-RETEST-CUM','補考學生','999',1,'未點名','未記錄','']);
@@ -252,6 +255,33 @@ test('one-hour reminder pushes the roster to the examiner and assigned group', (
     assert.match(push.messages[0].text, /學生乙/);
     assert.equal(push.messages[0].quickReply.items[0].action.text, '開始點名 T-REMIND');
   }
+});
+
+test('a roster student can bind LINE and receives a retest form after failed grading', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務');
+  const students = resultBook.getSheetByName('任務學生');
+  students.appendRow(['EXT-BIND-TEST', 'STU-BIND-TEST', '外部測試生', 'TEST', 1, '未點名', '未記錄', '']);
+  const response = bot.getReply('我是 外部測試生', 'U-external-student-test');
+  assert.match(response.text, /綁定成功/);
+  assert.match(response.text, /外部測試生/);
+
+  tasks.appendRow(['EXT-BIND-TEST','1151','考試',new Date('2026-09-20'),'12:00','13:00','H6','401','測試者','','G1','已排定',true,true,'','','','']);
+  const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
+  externalTeaching.handleCommand('開始點名 EXT-BIND-TEST', context);
+  externalTeaching.handleCommand('點名狀態 EXT-BIND-TEST STU-BIND-TEST 到場', context);
+  externalTeaching.handleCommand('簡答登記 EXT-BIND-TEST STU-BIND-TEST 通過', context);
+  const previousUrl = process.env.EXTERNAL_RETEST_FORM_URL;
+  process.env.EXTERNAL_RETEST_FORM_URL = 'https://docs.google.com/forms/d/FAKE/viewform';
+  runtime.httpOperations = [];
+  const failed = externalTeaching.handleCommand('上機登記 EXT-BIND-TEST STU-BIND-TEST 未通過', context);
+  if (previousUrl === undefined) delete process.env.EXTERNAL_RETEST_FORM_URL;
+  else process.env.EXTERNAL_RETEST_FORM_URL = previousUrl;
+  assert.match(failed.text, /已私訊已綁定的考生/);
+  const push = JSON.parse(runtime.httpOperations[0].options.payload);
+  assert.equal(push.to, 'U-external-student-test');
+  assert.match(push.messages[0].text, /上機/);
+  assert.equal(push.messages[0].quickReply.items[0].action.uri, 'https://docs.google.com/forms/d/FAKE/viewform');
 });
 
 test('teaching assignments are parsed from date, time, examiner and student rows', () => {

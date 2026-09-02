@@ -571,6 +571,17 @@ function getAssistantNames(){
   return n;
 }
 
+// 對外考生也需要綁定 LINE，才能在未通過時收到補考表單。
+// 名單直接讀取已同步的「任務學生」，不另建一份容易過期的名冊。
+function getExternalStudentNames(){
+  try{
+    var s=SpreadsheetApp.openById(EXTERNAL_RESULTS_SHEET_ID).getSheetByName('任務學生');
+    if(!s||s.getLastRow()<2)return[];
+    var names=s.getRange(2,3,s.getLastRow()-1,1).getValues().map(r=>r[0]).filter(n=>n);
+    return[...new Set(names.map(n=>nrm(n)))].sort();
+  }catch(e){return[];}
+}
+
 // ========== 模糊匹配與前綴處理 ==========
 function lev(a,b){
   if(a.length===0) return b.length;
@@ -646,7 +657,7 @@ function handleBindName(rest, userId) {
   var name = rest.trim();
   var normalizedName = nrm(name);
   
-  var allNames = getAssistantNames();
+  var allNames = [...new Set(getAssistantNames().concat(getExternalStudentNames()))];
   var exactMatch = allNames.includes(normalizedName);
   var closest = null;
   if (!exactMatch) {
@@ -654,7 +665,7 @@ function handleBindName(rest, userId) {
   }
   
   if (!exactMatch && (!closest || closest.dist > 2)) {
-    return { text: '查無「' + name + '」或近似姓名在助理名單中，請確認後再試', quickReply: bA() };
+    return { text: '查無「' + name + '」或近似姓名在助理／對外考生名單中，請確認後再試', quickReply: bA() };
   }
   
   var finalName = exactMatch ? name : closest.name;

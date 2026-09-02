@@ -580,12 +580,20 @@ function recordExamPart(taskId, studentId, part, value, context) {
   if (!task || !student) return reply('找不到指定的任務或學生，請重新開啟任務。');
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
   if (!['到場', '遲到'].includes(student.attendance)) return reply('請先登記這位學生的出席狀態。');
+  const previousProgress = examProgress(task, student);
   const result = mergeExamPart(student.result, part, value === '通過');
   updateStudent(student, student.attendance, result);
   const certification = upsertAttendance(task, student, permission.name, context.userId);
   const progress = examProgress(task, student);
   if (progress.step === 'done') {
-    return reply(`✅ ${student.name}兩項評分完成\n\n簡答題：${progress.shortPassed ? '✅ 通過' : '❌ 未通過'}\n上機：${progress.practicalPassed ? '✅ 通過' : '❌ 未通過'}\n\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}`, externalNav([
+    const failedParts = [!progress.shortPassed ? '簡答題' : '', !progress.practicalPassed ? '上機' : ''].filter(Boolean);
+    const needsRetest = failedParts.length > 0;
+    const notification = needsRetest && previousProgress.step !== 'done' ? notifyStudentForRetest(task, student, failedParts) : { sent: false, configured: Boolean(retestFormUrl()) };
+    const examinerReminder = needsRetest
+      ? `\n\n⚠️ 請考官務必提醒考生填寫補考表單。\n未通過項目：${failedParts.join('、')}\n${notification.sent ? '✅ 已私訊已綁定的考生。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定補考表單網址，暫時無法傳送表單。'}` : '';
+    const formActions = needsRetest && retestFormUrl() ? [{ label: '開啟補考表單', uri: retestFormUrl() }] : [];
+    return reply(`✅ ${student.name}兩項評分完成\n\n簡答題：${progress.shortPassed ? '✅ 通過' : '❌ 未通過'}\n上機：${progress.practicalPassed ? '✅ 通過' : '❌ 未通過'}\n\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}${examinerReminder}`, externalNav([
+      ...formActions,
       { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
       { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` }
     ], `查看任務 ${task.id}`, '回任務'));
@@ -695,6 +703,24 @@ function queuePush(chatId, content) {
     method: 'post', headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
     payload: JSON.stringify({ to: chatId, messages: [message] }), muteHttpExceptions: true
   });
+}
+
+function retestFormUrl() {
+  const url = String(process.env.EXTERNAL_RETEST_FORM_URL || '').trim();
+  return /^https:\/\/docs\.google\.com\/forms\//.test(url) ? url : '';
+}
+
+function retestMessage(task, student, failedParts) {
+  return `【補考提醒】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n請填寫補考表單並留意後續分班通知。`;
+}
+
+function notifyStudentForRetest(task, student, failedParts) {
+  const url = retestFormUrl();
+  if (!url) return { sent: false, configured: false };
+  const studentUserId = userIdForName(student.name);
+  if (!studentUserId) return { sent: false, configured: true };
+  queuePush(studentUserId, reply(retestMessage(task, student, failedParts), [{ label: '填寫補考表單', uri: url }]));
+  return { sent: true, configured: true };
 }
 
 function studentRosterText(task) {
