@@ -11,7 +11,8 @@ const ids = {
   game: '1fGQiWWbfiuX5i_ADm5p95aPgZP0jTXGxPyrBQvqoOmQ',
   schedule: '1UauuYQcPHQrYKQLIhFidem1x_UO0PxUICu_v7Tqy4GU',
   externalClassSchedule: process.env.EXTERNAL_CLASS_SCHEDULE_ID || '1oaEKt3JVxcdy8yPBGZAuRh3lkhnvRoIJ9rTNbj-Gh9I',
-  externalResults: process.env.EXTERNAL_RESULTS_SHEET_ID || '1WXeO6VF-emmoP_07tzsGk5z0WGSU7aFLbtbT0ImYACg'
+  externalResults: process.env.EXTERNAL_RESULTS_SHEET_ID || '1WXeO6VF-emmoP_07tzsGk5z0WGSU7aFLbtbT0ImYACg',
+  deposit: process.env.EXTERNAL_DEPOSIT_FILE_ID || '1reCwiEQ4EGG4hOox58niLC-6evfC47UY'
 };
 
 const workbooks = {
@@ -25,9 +26,10 @@ const workbooks = {
   [ids.game]: ['玩家資料', '交易紀錄', '池底紀錄', '稱號紀錄', '系統狀態'],
   [ids.schedule]: ['對外考試排程', '表單回覆 1'],
   [ids.externalClassSchedule]: ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'],
-  [ids.externalResults]: ['1151修課名單', '對外任務', '任務學生', 'LINE點名紀錄', 'LINE群組設定']
+  [ids.externalResults]: ['1151修課名單', '對外任務', '任務學生', 'LINE點名紀錄', 'LINE群組設定', '保證金提醒紀錄'],
+  [ids.deposit]: ['保證金對帳']
 };
 
-const excelWorkbookIds = new Set([ids.task]);
+const excelWorkbookIds = new Set([ids.task, ids.deposit]);
 
 module.exports = { ids, workbooks, excelWorkbookIds, timezone: process.env.TZ || 'Asia/Taipei' };

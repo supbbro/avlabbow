@@ -6,9 +6,11 @@ const LOG_SHEET = 'LINE點名紀錄';
 const COURSE_COLUMNS = [0, 5, 10, 15, 20, 25];
 const PASS = '通過';
 const RETEST = '要補考';
+const DEPOSIT_DISQUALIFIED = '保證金未繳';
 const COLORS = {
   [PASS]: { red: 0.7137255, green: 0.84313726, blue: 0.65882355 },
-  [RETEST]: { red: 0.9764706, green: 0.79607844, blue: 0.6117647 }
+  [RETEST]: { red: 0.9764706, green: 0.79607844, blue: 0.6117647 },
+  [DEPOSIT_DISQUALIFIED]: { red: 0.9764706, green: 0.79607844, blue: 0.6117647 }
 };
 const lastApplied = new Map();
 
@@ -74,6 +76,7 @@ function outcomeMap(logRows) {
     const equipment = logEquipmentKey(row[5], phase);
     if (!name || !equipment) continue;
     const attendance = text(row[9]);
+    const operator = text(row[13]);
     const deposit = text(row[18]);
     const cumulativeShort = text(row[16]);
     const cumulativePractical = text(row[17]);
@@ -83,13 +86,17 @@ function outcomeMap(logRows) {
     if (phase === '教學') {
       if (['到場', '遲到'].includes(attendance)) status = PASS;
       else if (['請假', '缺席', '取消資格'].includes(attendance)) status = RETEST;
+    } else if (attendance === '取消資格' && operator === DEPOSIT_DISQUALIFIED) {
+      status = DEPOSIT_DISQUALIFIED;
     } else if ((cumulativeShort === PASS && cumulativePractical === PASS) || deposit === '可退保證金') {
       status = PASS;
     } else if (['請假', '缺席', '取消資格'].includes(attendance) || deposit.startsWith('不可退保證金')) {
       status = RETEST;
     }
     if (!status) continue;
-    if (status === PASS || previous !== PASS) outcomes.set(key, status);
+    // A later deposit cancellation must visibly override an older pass; a later
+    // valid pass can in turn clear the strike-through.
+    if (status === PASS || status === DEPOSIT_DISQUALIFIED || previous !== PASS) outcomes.set(key, status);
   }
   return outcomes;
 }
@@ -206,8 +213,11 @@ async function syncExternalCertificationMatrix(api, spreadsheetId) {
     if (lastApplied.get(cacheKey) === update.status) continue;
     requests.push({ repeatCell: {
       range: { sheetId: matrixSheetId, startRowIndex: update.rowIndex, endRowIndex: update.rowIndex + 1, startColumnIndex: update.column, endColumnIndex: update.column + 1 },
-      cell: { userEnteredFormat: { backgroundColorStyle: { rgbColor: COLORS[update.status] } } },
-      fields: 'userEnteredFormat.backgroundColorStyle'
+      cell: { userEnteredFormat: {
+        backgroundColorStyle: { rgbColor: COLORS[update.status] },
+        textFormat: { strikethrough: update.status === DEPOSIT_DISQUALIFIED }
+      } },
+      fields: 'userEnteredFormat.backgroundColorStyle,userEnteredFormat.textFormat.strikethrough'
     } });
     appliedAfterSuccess.push([cacheKey, update.status]);
     updated++;

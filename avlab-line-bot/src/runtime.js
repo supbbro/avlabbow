@@ -4,6 +4,7 @@ const { google } = require('googleapis');
 const XLSX = require('xlsx');
 const { workbooks, ids, excelWorkbookIds, timezone } = require('./config');
 const { parseInternalTaskWorkbook } = require('./internal-task-parser');
+const { parseDepositWorkbook } = require('./deposit-parser');
 
 const a1 = name => `'${String(name).replaceAll("'", "''")}'`;
 const colName = number => {
@@ -187,7 +188,9 @@ class GoogleSheetsRuntime {
   }
 
   async loadAll(options = {}) {
-    return this.loadOnly(Object.keys(workbooks), options);
+    // The deposit workbook is an Excel file and is comparatively expensive to
+    // download/parse. Only the external reminder job needs it.
+    return this.loadOnly(Object.keys(workbooks).filter(id => id !== ids.deposit), options);
   }
 
   async loadOnly(spreadsheetIds, { force = false, forceIds = [], forceMetadata = false } = {}) {
@@ -248,7 +251,9 @@ class GoogleSheetsRuntime {
       name,
       XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '', raw: false, dateNF: 'm/d/yyyy' })
     ]));
-    const normalized = parseInternalTaskWorkbook(rawSheets, process.env.ACADEMIC_TERM || '1151');
+    const normalized = fileId === ids.deposit
+      ? parseDepositWorkbook(rawSheets)
+      : parseInternalTaskWorkbook(rawSheets, process.env.ACADEMIC_TERM || '1151');
     const alias = requested[0];
     this.sheets.set(fileId, new Map([[alias, new SheetFacade(this, fileId, alias, normalized)]]));
   }

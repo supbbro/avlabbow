@@ -5,7 +5,8 @@ const { ids } = require('./config');
 const { parseWorkbook } = require('./external-schedule-parser');
 
 const SHEETS = {
-  tasks: '對外任務', students: '任務學生', attendance: 'LINE點名紀錄', groups: 'LINE群組設定'
+  tasks: '對外任務', students: '任務學生', attendance: 'LINE點名紀錄', groups: 'LINE群組設定',
+  depositReminders: '保證金提醒紀錄'
 };
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
@@ -735,8 +736,13 @@ function recordExamPart(taskId, studentId, part, value, context) {
     const needsRetest = failedParts.length > 0;
     const retest = retestForm(task);
     const notification = needsRetest && previousProgress.step !== 'done' ? notifyStudentForRetest(task, student, failedParts) : { sent: false, configured: Boolean(retest.url), finalAttempt: retest.finalAttempt };
+    const feeReminder = retest.label === '第二次補考'
+      ? '\n💰 第二次補考須繳交 100 元，且不退費；請考官一併提醒考生。'
+      : retest.label === '第一次補考'
+        ? '\n提醒：若第一次補考仍未通過，第二次補考須繳交 100 元且不退費。'
+        : '';
     const examinerReminder = needsRetest
-      ? `\n\n⚠️ 請考官務必提醒考生${retest.finalAttempt ? '本次為第二次補考，請依規定處理' : `填寫${retest.label}表單`}。\n未通過項目：${failedParts.join('、')}\n${notification.sent ? '✅ 已私訊已綁定的考生。' : notification.finalAttempt ? 'ℹ️ 已是第二次補考，不再傳送補考表單。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定補考表單網址，暫時無法傳送表單。'}` : '';
+      ? `\n\n⚠️ 請考官務必提醒考生${retest.finalAttempt ? '本次為第二次補考，請依規定處理' : `填寫${retest.label}表單`}。\n未通過項目：${failedParts.join('、')}${feeReminder}\n${notification.sent ? '✅ 已私訊已綁定的考生。' : notification.finalAttempt ? 'ℹ️ 已是第二次補考，不再傳送補考表單。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定補考表單網址，暫時無法傳送表單。'}` : '';
     const formActions = needsRetest && retest.url ? [{ label: `開啟${retest.label}表單`, uri: retest.url }] : [];
     const practicalSummary = progress.shortPassed ? (progress.practicalPassed ? '✅ 通過' : '❌ 未通過') : '⛔ 無上機資格';
     return reply(`✅ ${student.name}本次評分完成\n\n簡答題：${progress.shortPassed ? '✅ 通過' : '❌ 未通過'}\n上機：${practicalSummary}\n\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}${examinerReminder}`, externalNav([
@@ -867,7 +873,10 @@ function retestForm(task) {
 }
 
 function retestMessage(task, student, failedParts, label, url) {
-  return `【${label}提醒】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n請填寫${label}表單並留意後續分班通知。\n報名連結：${url}`;
+  const feeNotice = label === '第二次補考'
+    ? '\n\n💰 第二次補考須繳交 100 元，且不退費。'
+    : '\n\n提醒：若第一次補考仍未通過，申請第二次補考須繳交 100 元，且不退費。';
+  return `【${label}提醒】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n請填寫${label}表單並留意後續分班通知。${feeNotice}\n報名連結：${url}`;
 }
 
 function notifyStudentForRetest(task, student, failedParts) {
@@ -893,6 +902,137 @@ function studentReminderText(task, student) {
   return `⏰ 你的對外${task.phase}將於 1 小時內開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n${attendanceRule}`;
 }
 
+const DEPOSIT_LOG_HEADERS = ['提醒鍵','類型','學生姓名','學號','任務ID','提醒時間','狀態'];
+
+function paidFlag(value) {
+  if (value === true) return true;
+  return /^(?:TRUE|是|已繳|已繳交|Y|YES|1)$/i.test(String(value ?? '').trim());
+}
+
+function depositRows() {
+  const target = SpreadsheetApp.openById(ids.deposit).getSheetByName('保證金對帳');
+  if (!target) return [];
+  return target.getDataRange().getValues().slice(1).map(row => ({
+    phase: String(row[0] || '').trim(), name: String(row[1] || '').trim(), number: String(row[2] || '').trim(),
+    paid: paidFlag(row[3]), requiredAmount: row[4], paidAmount: row[5], items: row[6]
+  })).filter(row => row.name && row.number);
+}
+
+function depositRecordFor(student, phase = '考試', rows = depositRows()) {
+  const phaseRows = rows.filter(row => row.phase === phase);
+  const number = norm(student.number);
+  if (number) return phaseRows.find(row => norm(row.number) === number) || null;
+  const matches = phaseRows.filter(row => norm(row.name) === norm(student.name));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function depositLogSheet() {
+  const book = SpreadsheetApp.openById(ids.externalResults);
+  let target = book.getSheetByName(SHEETS.depositReminders);
+  if (!target) target = book.insertSheet(SHEETS.depositReminders);
+  const rows = target.getDataRange().getValues();
+  if (!rows.length || DEPOSIT_LOG_HEADERS.some((header, index) => rows[0][index] !== header)) {
+    target.getRange(1, 1, 1, DEPOSIT_LOG_HEADERS.length).setValues([DEPOSIT_LOG_HEADERS]);
+  }
+  return target;
+}
+
+function depositLogKeys(target = depositLogSheet()) {
+  return new Set(target.getDataRange().getValues().slice(1).map(row => String(row[0] || '')).filter(Boolean));
+}
+
+function logDepositAction(target, key, type, student, task, now, status) {
+  target.appendRow([key, type, student.name, student.number, task?.id || '', now, status]);
+}
+
+function taipeiDate(value) {
+  return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+function dateAtTaipeiMidnight(value) {
+  const raw = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const date = new Date(`${raw}T00:00:00+08:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function dayBeforeDate(value) {
+  const date = new Date(value);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return taipeiDate(date);
+}
+
+function earliestInitialExams() {
+  const people = new Map();
+  for (const task of allTasks().filter(task => task.phase === '考試' && ['已排定', '點名中'].includes(task.status))) {
+    for (const student of studentsFor(task.id)) {
+      const start = studentTaskStart(task, student);
+      if (!start) continue;
+      const key = norm(student.number) || `NAME:${norm(student.name)}`;
+      const previous = people.get(key);
+      if (!previous || start < previous.start) people.set(key, { task, student, start });
+    }
+  }
+  return [...people.values()];
+}
+
+function depositReminderText(kind, task, student, deadline) {
+  if (kind === 'deadline') return `【考試保證金提醒】\n${student.name}你好，目前對帳表仍顯示尚未繳交考試保證金。\n\n繳費期限：${formatDate(deadline)}\n最早考試：${formatDate(task.date)} ${formatTime(student.scheduledStart || task.start)}｜${task.equipment}\n\n請於期限內完成繳費；未繳者將取消考試資格。`;
+  return `【考試前保證金提醒】\n${student.name}你好，目前對帳表仍顯示尚未繳交考試保證金。\n\n你的最早考試：${formatDate(task.date)} ${formatTime(student.scheduledStart || task.start)}｜${task.equipment}\n請最遲於考試前一天完成繳費；若考試開始前仍未繳交，將取消考試資格。`;
+}
+
+function processDepositRequirements(now = new Date()) {
+  const deadline = dateAtTaipeiMidnight(process.env.EXTERNAL_DEPOSIT_DEADLINE || '2026-10-09');
+  if (!deadline) return { reminders: 0, canceled: 0 };
+  const today = taipeiDate(now);
+  const records = depositRows();
+  const logSheet = depositLogSheet();
+  const logged = depositLogKeys(logSheet);
+  let reminders = 0, canceled = 0;
+
+  for (const entry of earliestInitialExams()) {
+    const { task, student, start } = entry;
+    const record = depositRecordFor(student, '考試', records);
+    if (record?.paid) continue;
+    const personKey = norm(student.number) || `NAME-${norm(student.name)}`;
+    const studentUserId = userIdForName(student.name, student.number);
+    const remindersDue = [];
+    if (today === dayBeforeDate(deadline)) remindersDue.push(['deadline', `DEPOSIT-DEADLINE:${personKey}:${taipeiDate(deadline)}`]);
+    if (today === dayBeforeDate(start)) remindersDue.push(['exam-day-before', `DEPOSIT-EXAM:${personKey}:${taipeiDate(start)}`]);
+    const pendingReminders = remindersDue.filter(([, key]) => !logged.has(key));
+    if (pendingReminders.length && studentUserId) {
+      const messageKind = pendingReminders.some(([kind]) => kind === 'exam-day-before') ? 'exam-day-before' : 'deadline';
+      queuePush(studentUserId, reply(depositReminderText(messageKind, task, student, deadline)));
+      for (const [kind, key] of pendingReminders) {
+        logDepositAction(logSheet, key, kind, student, task, now, '已合併推播');
+        logged.add(key);
+      }
+      reminders++;
+    }
+  }
+
+  if (now < deadline) return { reminders, canceled };
+  for (const task of allTasks().filter(task => task.phase === '考試' && ['已排定', '點名中'].includes(task.status))) {
+    for (const student of studentsFor(task.id)) {
+      const start = studentTaskStart(task, student);
+      if (!start || now < start || student.attendance !== '未點名') continue;
+      if (depositRecordFor(student, '考試', records)?.paid) continue;
+      const key = `DEPOSIT-CANCEL:${task.id}:${student.id}`;
+      if (logged.has(key)) continue;
+      updateStudent(student, '取消資格', '不適用');
+      upsertAttendance(task, student, '保證金未繳', 'SYSTEM');
+      const studentUserId = userIdForName(student.name, student.number);
+      const message = `【考試資格取消】\n${student.name}你好，因考試開始前對帳表仍顯示未繳交保證金，本次 ${task.equipment} 考試資格已取消。\n\n如仍需參加考試，請直接聯絡影音實驗室。`;
+      if (studentUserId) queuePush(studentUserId, reply(message));
+      const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
+      if (examinerUserId) queuePush(examinerUserId, reply(`🚫 ${student.name} 因未繳交保證金，已取消 ${task.equipment} 考試資格。若學生仍需考試，請其聯絡影音實驗室。`));
+      logDepositAction(logSheet, key, '取消資格', student, task, now, '保證金未繳');
+      logged.add(key); canceled++;
+    }
+  }
+  return { reminders, canceled };
+}
+
 function expireExamQualifications(now = new Date()) {
   const timezone = Session.getScriptTimeZone();
   const today = Utilities.formatDate(now, timezone, 'yyyy-MM-dd');
@@ -911,6 +1051,7 @@ function expireExamQualifications(now = new Date()) {
 
 function sendExternalReminders(now = new Date()) {
   syncFromSchedule();
+  const deposit = processDepositRequirements(now);
   expireExamQualifications(now);
   const activeGroups = groups().filter(group => group.enabled === '是');
   let sent = 0;
@@ -951,11 +1092,11 @@ function sendExternalReminders(now = new Date()) {
       sent++;
     }
   }
-  return sent;
+  return sent + deposit.reminders;
 }
 
 function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, studentReminderText, rosterStudents, enrichStudentsFromRoster } };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, dayBeforeDate, processDepositRequirements } };

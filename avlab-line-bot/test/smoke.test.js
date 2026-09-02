@@ -15,6 +15,7 @@ const externalTeaching = require('../src/external-teaching');
 const externalGroupSync = require('../src/external-group-sync');
 const { parseTeachingSheet, parseExamSheet } = require('../src/external-schedule-parser');
 const { parseInternalTaskWorkbook } = require('../src/internal-task-parser');
+const { parseDepositWorkbook } = require('../src/deposit-parser');
 
 test('main menu survives the Apps Script to Node compatibility layer', () => {
   const reply = bot.getReply('主選單', 'U-test');
@@ -345,6 +346,35 @@ test('failed exam stages select the next retest form and stop after the second r
   assert.equal(externalTeaching._test.retestForm({ phase: '考試' }).url, 'https://forms.gle/3be87wRzRBKvdkFb6');
   assert.equal(externalTeaching._test.retestForm({ phase: '第一次補考' }).url, 'https://forms.gle/t1vrm4U43xMhoWxD9');
   assert.equal(externalTeaching._test.retestForm({ phase: '第二次補考' }).finalAttempt, true);
+  assert.match(externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第一次補考', 'https://forms.gle/first'), /第二次補考須繳交 100 元，且不退費/);
+  assert.match(externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第二次補考', 'https://forms.gle/second'), /第二次補考須繳交 100 元，且不退費/);
+});
+
+test('deposit workbook parser normalizes initial and retest payment rows', () => {
+  const parsed = parseDepositWorkbook({
+    '考試保證金': [
+      ['說明'], ['姓名','系級','學號','報名考試項目','總共項數','保證金總額','已繳交','繳交金額'],
+      ['學生甲','廣電一','1001','H6',1,100,true,100]
+    ],
+    '第一次補考保證金': [
+      ['姓名','學號','須補交補考保證金之考試項目(原因)','已繳交','繳交金額'],
+      ['學生乙','1002','X160',false,'']
+    ],
+    '第二次補考': [
+      ['第二次補考每人100元且不退費'],
+      ['姓名','學號','報名考試項目','已繳交','繳交金額'],
+      ['學生丙','1003','CX350','TRUE',100]
+    ]
+  });
+  assert.deepEqual(parsed.slice(1).map(row => [row[0], row[1], row[2], row[3]]), [
+    ['考試','學生甲','1001','true'],
+    ['第一次補考','學生乙','1002','false'],
+    ['第二次補考','學生丙','1003','TRUE']
+  ]);
+  const records = parsed.slice(1).map(row => ({ phase: row[0], name: row[1], number: row[2], paid: externalTeaching._test.paidFlag(row[3]) }));
+  assert.equal(externalTeaching._test.depositRecordFor({ name: '同名', number: '1001' }, '考試', records).paid, true);
+  assert.equal(externalTeaching._test.depositRecordFor({ name: '同名', number: '1002' }, '第一次補考', records).paid, false);
+  assert.equal(externalTeaching._test.dayBeforeDate(new Date('2026-10-09T00:00:00+08:00')), '2026-10-08');
 });
 
 test('group matrix sync derives green and retest colors from cumulative LINE records', () => {
@@ -367,13 +397,16 @@ test('group matrix sync derives green and retest colors from cumulative LINE rec
     Object.assign(row, { 0: id, 4: phase, 5: equipment, 7: name, 9: attendance, 16: short, 17: practical, 18: deposit });
     return row;
   };
+  const depositCanceled = log('7', '考試', 'X160', '學生乙', '取消資格', '未通過', '未通過', '不可退保證金（取消資格）');
+  depositCanceled[13] = '保證金未繳';
   const logs = [header,
     log('1', '教學', '基礎配件課程', '學生甲', '到場', '', '', '不適用'),
     log('2', '教學', '基礎配件課程', '學生乙', '缺席', '', '', '不適用'),
     log('3', '考試', 'H6', '學生甲', '到場', '通過', '通過', '可退保證金'),
     log('4', '考試', 'H6', '學生乙', '到場', '通過', '未通過', '不可退保證金'),
     log('5', '第一次補考', 'H6', '學生乙', '到場', '通過', '通過', '可退保證金'),
-    log('6', '考試', 'X160', '學生乙', '取消資格', '未通過', '未通過', '不可退保證金（取消資格）')
+    log('6', '考試', 'X160', '學生乙', '取消資格', '未通過', '未通過', '不可退保證金（取消資格）'),
+    depositCanceled
   ];
   const plan = externalGroupSync._test.planMatrix(roster, matrix, logs);
   assert.equal(plan.groups.length, 1);
@@ -383,7 +416,7 @@ test('group matrix sync derives green and retest colors from cumulative LINE rec
   assert.equal(status('學生甲', '基礎配件課程'), '通過');
   assert.equal(status('學生乙', '基礎配件課程'), '要補考');
   assert.equal(status('學生乙', 'H6'), '通過');
-  assert.equal(status('學生乙', 'X160'), '要補考');
+  assert.equal(status('學生乙', 'X160'), '保證金未繳');
   assert.equal(externalGroupSync._test.canonicalEquipment('200W Par'), externalGroupSync._test.canonicalEquipment('Par 200W考試'));
 });
 
@@ -466,6 +499,35 @@ test('exam assignments propagate merged date headers and choose the correct exam
   assert.deepEqual(tasks[1].students.map(student => student.name), ['學生乙', '學生丙']);
   assert.deepEqual(tasks[1].students.map(student => student.scheduledStart), ['12:05', '12:20']);
   assert.equal(tasks[0].date.getFullYear(), 2027);
+});
+
+test('unpaid students are canceled at exam start and both student and examiner are notified', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  const resultBook = isolated.openById(ids.externalResults);
+  const tasks = resultBook.insertSheet('對外任務');
+  tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','考官','考官LINE User ID','群組ID','狀態']);
+  tasks.appendRow(['DEPOSIT-TASK','1151','考試',new Date('2026-10-10'),'12:00','12:15','H6','401','考官甲','U-EXAM','','已排定']);
+  const students = resultBook.insertSheet('任務學生');
+  students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間','個別開始時間','個別結束時間','提醒時間']);
+  students.appendRow(['DEPOSIT-TASK','DEPOSIT-STUDENT','學生甲','1001',1,'未點名','未記錄','','12:00','12:15','']);
+  resultBook.insertSheet('LINE點名紀錄');
+  resultBook.insertSheet('LINE群組設定');
+  const deposits = isolated.openById(ids.deposit).insertSheet('保證金對帳');
+  deposits.appendRow(['階段','姓名','學號','已繳交']);
+  deposits.appendRow(['考試','學生甲','1001','FALSE']);
+  const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
+  bindings.appendRow(['LINE User ID','姓名','綁定時間','學號']);
+  bindings.appendRow(['U-STUDENT','學生甲','','1001']);
+
+  const result = externalTeaching._test.processDepositRequirements(new Date('2026-10-10T12:00:00+08:00'));
+  assert.deepEqual(result, { reminders: 0, canceled: 1 });
+  assert.equal(students.getRange(2, 6).getValue(), '取消資格');
+  assert.equal(resultBook.getSheetByName('LINE點名紀錄').getRange(2, 14).getValue(), '保證金未繳');
+  assert.equal(resultBook.getSheetByName('保證金提醒紀錄').getRange(2, 2).getValue(), '取消資格');
+  const pushes = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload));
+  assert.deepEqual(new Set(pushes.map(push => push.to)), new Set(['U-STUDENT', 'U-EXAM']));
+  installGlobals(runtime);
 });
 
 test('duplicate names in the same schedule task are removed', () => {
