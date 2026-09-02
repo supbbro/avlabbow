@@ -441,8 +441,9 @@ function parseTaskStart(task) {
   if (Number.isNaN(date.getTime())) return null;
   const time = clockParts(task.start);
   if (!time) return null;
-  date.setHours(time.hour, time.minute, 0, 0);
-  return date;
+  const calendarDate = Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const isoTime = `${String(time.hour).padStart(2, '0')}:${String(time.minute).padStart(2, '0')}:00`;
+  return new Date(`${calendarDate}T${isoTime}+08:00`);
 }
 function enabledFlag(value, defaultValue = true) {
   if (value === '' || value == null) return defaultValue;
@@ -498,4 +499,4 @@ function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule } };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart } };
