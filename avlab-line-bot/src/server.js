@@ -21,6 +21,7 @@ const app = express();
 const port = Number(process.env.PORT || 3000);
 const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master, ids.externalRegistration, ids.deposit];
 const INTERNAL_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.master];
+const INTERNAL_CERT_WORKBOOKS = [ids.internalAttendance, ids.internalCertification];
 const TASK_QUERY_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.externalClassSchedule, ids.externalResults, ids.assistant, ids.master];
 const LIVE_TASK_WORKBOOKS = [ids.task, ids.externalClassSchedule, ids.externalResults];
 const LIGHTWEIGHT_COMMANDS = new Set(['主選單', '對外學生', '對外更多', '中心助理', '助理更多', '助理排程', '助理工具', '請假選項', '請假', '查詢', '常用連結']);
@@ -204,7 +205,10 @@ async function schedulerTick() {
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: process.env.TZ || 'Asia/Taipei', weekday: 'short' }).format(new Date());
   const jobs = [];
   // 認證同步獨立且優先執行，避免其他排程失敗時連帶阻斷對內認證更新。
-  jobs.push([`internal-cert-sync:${stamp}`, internalTeaching.syncInternalCertifications, INTERNAL_WORKBOOKS]);
+  // Certification syncing only depends on these two native Sheets files. Loading
+  // the task workbook or binding workbook here made an unrelated read failure
+  // prevent otherwise valid certification results from being copied.
+  jobs.push([`internal-cert-sync:${stamp}`, internalTeaching.syncInternalCertifications, INTERNAL_CERT_WORKBOOKS]);
   jobs.push([`internal-reminders:${stamp}`, internalTeaching.sendInternalReminders, INTERNAL_WORKBOOKS]);
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
   jobs.push([`external-group-sync:${stamp}`, () => externalGroupSync.syncExternalCertificationMatrix(runtime.api, ids.externalResults), []]);
