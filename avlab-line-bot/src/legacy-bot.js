@@ -114,7 +114,12 @@ const LEVEL_MAP={'徐嘉翔':'一級','毛成甄':'一級','王鈺慈':'一級',
 function gC(s,e,d,l){return'https://www.google.com/calendar/render?action=TEMPLATE&text='+encodeURIComponent(s)+'&dates='+((d=>d.toISOString().replace(/-|:|\.\d+/g,''))(e)+'/'+d.toISOString().replace(/-|:|\.\d+/g,''))+'&details='+encodeURIComponent(d||'')+'&location='+encodeURIComponent(l||'');}
 function ck(u,k){var c=CacheService.getScriptCache(),l=c.get(u+'_last'),n=parseInt(c.get(u+'_count'))||0;n=l===k?n+1:1;c.put(u+'_last',k,3600);c.put(u+'_count',n,3600);return n>=7;}
 function nrm(r){return r?r.toString().replace(/[（(][^）)]*[）)]/g,'').replace(/\s+/g,''):'';}
-function qr(b){return{items:b.map(b=>({type:'action',action:{type:'message',label:b.label,text:b.text}}))};}
+function qr(b){return{items:b.map(function(item){return{
+  type:'action',
+  action:item.uri
+    ? {type:'uri',label:item.label,uri:item.uri}
+    : {type:'message',label:item.label,text:item.text}
+};})};}
 function bA(){return qr([{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}]);}
 function bE(){return qr([{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}]);}
 
@@ -782,6 +787,7 @@ function getInternalMainMenu(){
       {label:'🔍 個人查詢', text:'查詢'},
       {label:'📝 請假與代班', text:'請假選項'},
       {label:'📅 時程與排班', text:'助理排程'},
+      {label:'📚 講義區', text:'講義區'},
       {label:'📖 認證與補考', text:'越級考'},
       {label:'🎲 休閒工具', text:'助理工具'},
       {label:'🏠 回首頁', text:'主選單'}
@@ -819,6 +825,70 @@ function getInternalScheduleMenu(){
 function getInternalToolsMenu(){return{text:'請選擇休閒工具：',quickReply:qr([{label:'🔮 每日運勢',text:'每日運勢'},{label:'🍽️ 教學飽',text:'教學飽'},{label:'🎴 射龍門',text:'射龍門'},{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getLeaveOptionsMenu(){return{text:'請選擇請假或代班紀錄：',quickReply:qr([{label:'📝 對內請假',text:'對內請假'},{label:'👥 對外考官更動',text:'對外考官更動'},{label:'📋 代班紀錄',text:'代班查詢'},{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getCommonLinks(){return{text:'【1151 助理常用連結】\n\n📊 1151 教學總排程\nhttps://docs.google.com/spreadsheets/d/11SEPY8ugY1-l_EQ-J3qYdxmQoXHWARmgBY4wA-QFQzI/edit\n\n👨‍🏫 1151 對內教學官／考官安排\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit',quickReply:bA()};}
+
+var INTERNAL_RESOURCE_VIDEOS={
+  '講義影片攝影':[
+    ['Sony PXW-X160','https://youtu.be/qVjd6gF9IBs'],
+    ['Sony A7SII','https://youtu.be/lH3i9z1AVEY'],
+    ['Sony PXW-FS7','https://youtu.be/sQYuTTJO9Nc'],
+    ['Atomos 外接螢幕','https://youtu.be/8i51HBq7_cc']
+  ],
+  '講義影片燈光':[
+    ['Zoom 350','https://youtu.be/3UFxrYTlNpk'],
+    ['Lith LED','https://youtu.be/Az9KciHWJi8'],
+    ['BrightCast LED 軟殼燈','https://youtu.be/fMrGmRqBhus'],
+    ['Litepanels','https://youtu.be/cEGU0W1aAqo'],
+    ['HMI Mini Par 200W','https://youtu.be/MWnHNx_S5qU'],
+    ['LED Flo-Box','https://youtu.be/tjTbQvs_pRY']
+  ],
+  '講義影片聲音':[
+    ['Zoom H6','https://youtu.be/SENcBwiVxno'],
+    ['Sound Devices 633','https://youtu.be/j9TXQUbpKXY'],
+    ['聲音工作區','https://youtu.be/_IniiyNIhg8']
+  ],
+  '講義影片影棚':[
+    ['VisCG 字幕機','https://youtu.be/T9tPoBznq-Y'],
+    ['StudioLive 成音台','https://youtu.be/fRczXMDj2NI']
+  ]
+};
+var INTERNAL_RESOURCE_PLAYLISTS={
+  '講義影片攝影':'https://www.youtube.com/playlist?list=PLETCaHJSoQwU1LykDPJy_ZQmrQooIxFRE',
+  '講義影片燈光':'https://www.youtube.com/playlist?list=PLETCaHJSoQwUUhm8tcr2hK2GwUSsmB0Eg',
+  '講義影片聲音':'https://www.youtube.com/playlist?list=PLETCaHJSoQwWzEx8njRu9uMjiHdEU8xGk',
+  '講義影片影棚':'https://www.youtube.com/playlist?list=PLETCaHJSoQwV4xcWkuzhDrC-iJJkYtfQq'
+};
+
+function resourceNavigation(){return[
+  {label:'📚 講義區分類',text:'講義區'},
+  {label:'🔙 回上一頁',text:'回上一頁'},
+  {label:'🏠 回首頁',text:'主選單'}
+];}
+
+function getInternalResourcesMenu(){return{
+  text:'📚【中心助理講義區】\n\n依照需要選擇資料類別；影片已整理自影音實驗室官方 YouTube 頻道與對外教學播放清單。',
+  quickReply:qr([
+    {label:'📁 文件／講義',text:'講義文件'},
+    {label:'📷 攝影機',text:'講義影片攝影'},
+    {label:'💡 燈光',text:'講義影片燈光'},
+    {label:'🎙️ 聲音',text:'講義影片聲音'},
+    {label:'🎛️ 影棚設備',text:'講義影片影棚'},
+    {label:'📺 官方頻道',uri:'https://www.youtube.com/@NCCUAVLab'},
+    {label:'🔙 回上一頁',text:'回上一頁'},
+    {label:'🏠 回首頁',text:'主選單'}
+  ])
+};}
+
+function getInternalDocuments(){return{
+  text:'📁【文件／講義資源】\n\n📚 講義、題庫資料夾\nhttps://drive.google.com/drive/folders/1-4XPVE68GlFzydhFJObxXhXJCILBe7D4\n\n🗂️ 教學部完整資料夾\nhttps://drive.google.com/drive/folders/1tS-W8F87FkowayUkafvHK_YLhHG214HC\n\n📖 官網器材教學手冊\nhttps://avlab.nccu.edu.tw/PageDownload?fid=10553',
+  quickReply:qr(resourceNavigation())
+};}
+
+function getInternalVideoResources(command){
+  var names={'講義影片攝影':'攝影機與配件','講義影片燈光':'燈光器材','講義影片聲音':'聲音器材','講義影片影棚':'影棚設備'};
+  var videos=INTERNAL_RESOURCE_VIDEOS[command]||[];
+  var text='🎬【'+names[command]+'教學影片】\n\n▶️ 播放全部\n'+INTERNAL_RESOURCE_PLAYLISTS[command]+'\n\n'+videos.map(function(video,index){return (index+1)+'️⃣ '+video[0]+'\n'+video[1];}).join('\n\n');
+  return{text:text,quickReply:qr(resourceNavigation())};
+}
 
 // ========== 統一回應 ==========
 var UNIFIED={
@@ -3284,6 +3354,12 @@ function getReply(u, i) {
     '助理更多': getInternalMoreMenu,
     '助理排程': getInternalScheduleMenu,
     '助理工具': getInternalToolsMenu,
+    '講義區': getInternalResourcesMenu,
+    '講義文件': getInternalDocuments,
+    '講義影片攝影': function(){return getInternalVideoResources('講義影片攝影');},
+    '講義影片燈光': function(){return getInternalVideoResources('講義影片燈光');},
+    '講義影片聲音': function(){return getInternalVideoResources('講義影片聲音');},
+    '講義影片影棚': function(){return getInternalVideoResources('講義影片影棚');},
     '請假選項': getLeaveOptionsMenu,
     '請假': getLeaveOptionsMenu,
     '查詢': getQueryTypeMenu,

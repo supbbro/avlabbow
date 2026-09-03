@@ -73,6 +73,29 @@ test('internal menu groups each feature once without a catch-all more page', () 
   assert.equal(schedule.some(command => /暫定/.test(command)), false);
 });
 
+test('assistant resource library groups official documents and all teaching videos', () => {
+  const main = bot.getReply('中心助理', 'U-resources');
+  assert.equal(main.quickReply.items.some(item => item.action.text === '講義區'), true);
+  const library = bot.getReply('講義區', 'U-resources');
+  assert.deepEqual(library.quickReply.items.filter(item => item.action.type === 'message').slice(0, 5).map(item => item.action.text), [
+    '講義文件', '講義影片攝影', '講義影片燈光', '講義影片聲音', '講義影片影棚'
+  ]);
+  const documents = bot.getReply('講義文件', 'U-resources').text;
+  assert.match(documents, /1-4XPVE68GlFzydhFJObxXhXJCILBe7D4/);
+  assert.match(documents, /PageDownload\?fid=10553/);
+  const pages = ['講義影片攝影', '講義影片燈光', '講義影片聲音', '講義影片影棚'].map(command => bot.getReply(command, 'U-resources').text);
+  assert.equal(pages.join('\n').match(/https:\/\/youtu\.be\//g).length, 15);
+  assert.match(pages[0], /X160/);
+  assert.match(pages[1], /Flo-Box/);
+  assert.match(pages[2], /聲音工作區/);
+  assert.match(pages[3], /VisCG/);
+  for (const [index, command] of ['講義區', '講義文件', '講義影片攝影', '講義影片燈光', '講義影片聲音', '講義影片影棚'].entries()) {
+    const labels = bot.getReply(command, `U-resources-navigation-${index}`).quickReply.items.map(item => item.action.label);
+    assert.equal(labels.some(label => label.includes('回上一頁')), true, command);
+    assert.equal(labels.some(label => label.includes('回首頁')), true, command);
+  }
+});
+
 test('back navigation returns through the real per-user page history', () => {
   const cache = new Map();
   const facade = {
