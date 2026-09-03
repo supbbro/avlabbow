@@ -110,7 +110,8 @@ async function handleLineEvent(event) {
       const combinedTaskQuery = text === '我的任務';
       const personalQueryIds = personalQueryWorkbooks(text);
       const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
-      if (bindingCommand) {
+      const identityFlowCommand = text === '繼續使用目前身份' || /^更改身份\s+(?:中心助理|對外學生)$/.test(text);
+      if (bindingCommand || identityFlowCommand) {
         await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit], { force: true });
       } else if (text === '選擇中心助理') {
         await runtime.loadOnly([ids.master, ids.internalAttendance], { force: true });

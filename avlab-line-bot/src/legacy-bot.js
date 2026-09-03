@@ -754,12 +754,46 @@ function getBoundRecord(userId){
   var sheet=SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
   if(!sheet)return null;
   var data=sheet.getDataRange().getValues();
-  for(var i=1;i<data.length;i++)if(data[i][BIND_COL_USER_ID]===userId)return{name:nrm(data[i][BIND_COL_NAME]),number:String(data[i][BIND_COL_STUDENT_NUMBER]||'').trim()};
+  for(var i=1;i<data.length;i++)if(data[i][BIND_COL_USER_ID]===userId)return{name:nrm(data[i][BIND_COL_NAME]),number:String(data[i][BIND_COL_STUDENT_NUMBER]||'').trim(),role:String(data[i][BIND_COL_ROLE]||'').trim()};
   return null;
+}
+
+function identityRole(bound){
+  if(!bound||!bound.name)return'';
+  var external=getExternalStudents().some(function(person){return bound.number&&nrm(person.number)===nrm(bound.number);});
+  var assistant=getActiveAssistantRecords().some(function(person){return person.name===bound.name;});
+  if(bound.role==='external'&&external)return'external';
+  if(bound.role==='assistant'&&assistant)return'assistant';
+  if(external)return'external';
+  return assistant?'assistant':'';
+}
+function identityRoleLabel(role){return role==='external'?'對外學生':'中心助理';}
+function identityMenu(role){return role==='external'?getExternalMainMenu():getInternalMainMenu();}
+function identityBindingPrompt(role){
+  if(role==='external')return{text:'🔄 更改對外學生綁定\n\n請輸入：我是 姓名 學號\n例如：我是 王小明 112405001',quickReply:qr([{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};
+  return{text:'🔄 更改中心助理綁定\n\n請輸入：我是 姓名\n例如：我是 王小明',quickReply:qr([{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};
+}
+function continueBoundIdentity(userId){
+  var bound=getBoundRecord(userId),role=identityRole(bound);
+  if(!role)return{text:'目前沒有有效綁定，請回首頁重新選擇身分。',quickReply:qr([{label:'🏠 選擇身份',text:'主選單'}])};
+  return Object.assign(identityMenu(role),{navigationPage:identityRoleLabel(role)});
+}
+function beginIdentityChange(role,userId){
+  CacheService.getScriptCache().put(PENDING_ROLE_PREFIX+userId,role,1800);
+  return identityBindingPrompt(role);
 }
 
 function selectIdentity(role,userId){
   var bound=getBoundRecord(userId),cache=CacheService.getScriptCache();
+  if(bound&&bound.name){
+    var currentRole=identityRole(bound),currentLabel=currentRole?identityRoleLabel(currentRole):'已綁定使用者';
+    var targetLabel=identityRoleLabel(role);
+    return{text:'✅ 目前已綁定\n\n姓名：'+bound.name+(bound.number?'\n學號：'+bound.number:'')+'\n身分：'+currentLabel+'\n\n是否要繼續使用目前身分，或更改為「'+targetLabel+'」？',quickReply:qr([
+      {label:'✅ 繼續使用',text:'繼續使用目前身份'},
+      {label:'🔄 更改身份',text:'更改身份 '+targetLabel},
+      {label:'🏠 回首頁',text:'主選單'}
+    ])};
+  }
   if(role==='assistant'){
     var activeAssistants=getActiveAssistantRecords();
     var active=activeAssistants.some(function(person){return bound&&person.name===bound.name;});
@@ -3262,6 +3296,8 @@ function getReply(u, i) {
   var bindPrefixes = ['我是', '綁定'];
   var m;
   if ((m = matchPrefix(u, bindPrefixes)).matched) return handleBindName(m.rest, i);
+  if(u==='繼續使用目前身份')return continueBoundIdentity(i);
+  if((m=u.match(/^更改身份\s+(中心助理|對外學生)$/)))return beginIdentityChange(m[1]==='對外學生'?'external':'assistant',i);
   if(u==='選擇中心助理')return selectIdentity('assistant',i);
   if(u==='選擇對外學生')return selectIdentity('external',i);
   if(u==='我的任務'){

@@ -376,6 +376,12 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   const bindingRows = bindingSheet.getDataRange().getValues();
   assert.equal(bindingRows.find(row => row[0] === 'U-external-student-old')[1], '');
   assert.equal(bindingRows.find(row => row[0] === 'U-external-student-test')[4], 'external');
+  const confirmation = bot.getReply('選擇中心助理', 'U-external-student-test');
+  assert.match(confirmation.text, /目前已綁定/);
+  assert.match(confirmation.text, /是否要繼續使用目前身分/);
+  assert.deepEqual(confirmation.quickReply.items.slice(0, 2).map(item => item.action.text), ['繼續使用目前身份', '更改身份 中心助理']);
+  assert.match(bot.getReply('繼續使用目前身份', 'U-external-student-test').text, /對外學生資訊/);
+  assert.match(bot.getReply('更改身份 中心助理', 'U-external-student-test').text, /請輸入：我是 姓名/);
 
   tasks.appendRow(['EXT-BIND-TEST','1151','考試',new Date('2026-09-20'),'12:00','13:00','H6','401','測試者','','G1','已排定',true,true,'','','','']);
   runtime.httpOperations = [];
