@@ -99,10 +99,14 @@ async function handleLineEvent(event) {
       const originalText = event.message.text.trim();
       const navigationResult = navigation.resolve(runtime.cache, userId, originalText);
       const text = navigationResult.command;
-      const combinedTaskQuery = externalTeaching.isCombinedTaskQuery(text);
+      const combinedTaskQuery = text === '我的任務' || externalTeaching.isCombinedTaskQuery(text);
       const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
       if (bindingCommand) {
-        await runtime.loadOnly([ids.master, ids.assistant, ids.externalResults], { force: true });
+        await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalResults], { force: true });
+      } else if (text === '選擇中心助理') {
+        await runtime.loadOnly([ids.master, ids.internalAttendance], { force: true });
+      } else if (text === '選擇對外學生') {
+        await runtime.loadOnly([ids.master, ids.externalResults], { force: true });
       } else if (internalTeaching.isInternalCommand(text)) {
         await runtime.loadOnly(INTERNAL_WORKBOOKS, { force: internalTeaching.requiresFreshData(text) });
       } else if (combinedTaskQuery) {
@@ -119,7 +123,7 @@ async function handleLineEvent(event) {
       }
       bot.recordUser(userId);
       reply = internalTeaching.handleCommand(text, context) || externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
-      if (!navigationResult.isBack) navigation.remember(runtime.cache, userId, text, Boolean(reply));
+      if (!navigationResult.isBack) navigation.remember(runtime.cache, userId, reply?.navigationPage || text, Boolean(reply));
     } else if (event.message.type === 'sticker') {
       await runtime.loadOnly([ids.master]);
       bot.recordUser(userId);

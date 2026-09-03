@@ -24,6 +24,7 @@ test('main menu survives the Apps Script to Node compatibility layer', () => {
   const reply = bot.getReply('主選單', 'U-test');
   assert.match(reply.text, /影音實驗室/);
   assert.equal(reply.quickReply.items.length, 2);
+  assert.deepEqual(reply.quickReply.items.map(item => item.action.text), ['選擇對外學生', '選擇中心助理']);
 });
 
 test('menus omit retired links and common links only show current 1151 files', () => {
@@ -65,7 +66,10 @@ test('internal menu groups each feature once without a catch-all more page', () 
   const schedule = bot.getReply('助理排程', 'U-menu-schedule').quickReply.items.map(item => item.action.text);
   assert.equal(query.includes('代班查詢'), false);
   assert.equal(leave.includes('代班查詢'), true);
+  assert.equal(leave.includes('找代班'), false);
   assert.equal(schedule.includes('常用連結'), false);
+  assert.equal(query.includes('我的暫定排班'), false);
+  assert.equal(schedule.some(command => /暫定/.test(command)), false);
 });
 
 test('back navigation returns through the real per-user page history', () => {
@@ -172,9 +176,20 @@ test('name task query includes assignments synchronized from the external schedu
   const tasks = resultBook.getSheetByName('對外任務') || resultBook.insertSheet('對外任務');
   if (!tasks.getLastRow()) tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','教學官／考官','考官LINE User ID','LINE群組ID','任務狀態']);
   tasks.appendRow(['EXT-NAME-QUERY','1151','教學',new Date('2026-03-17'),'12:00','13:00','基礎配件課程','大勇401','黃忻妤','','','已排定']);
+  const internalTasks = runtime.openById(ids.task).getSheetByName('1151 對內教學官／考官安排') || runtime.openById(ids.task).insertSheet('1151 對內教學官／考官安排');
+  if (!internalTasks.getLastRow()) internalTasks.appendRow(['日期','階段','級別','項目','教學官／考官','地點']);
+  internalTasks.appendRow([new Date('2026-03-18'),'期中教學','二級','導播台','黃忻妤','新棚']);
   const response = bot.getReply('任務 黃忻妤', 'U-test');
-  assert.match(response.text, /黃忻妤 的教學\/考官任務/);
+  assert.match(response.text, /黃忻妤 的對內＋對外教學官／考官任務/);
   assert.match(response.text, /\[對外\].*基礎配件課程/);
+  assert.match(response.text, /\[對內\].*導播台/);
+
+  const binds = runtime.openById(ids.master).getSheetByName('用戶綁定') || runtime.openById(ids.master).insertSheet('用戶綁定');
+  if (!binds.getLastRow()) binds.appendRow(['LINE User ID','姓名','綁定時間','學號']);
+  binds.appendRow(['U-COMBINED','黃忻妤','','112703005']);
+  const mine = bot.getReply('我的任務', 'U-COMBINED');
+  assert.match(mine.text, /\[對內\].*導播台/);
+  assert.match(mine.text, /\[對外\].*基礎配件課程/);
   assert.match(response.text, /任務已過期/);
 });
 
@@ -182,7 +197,7 @@ test('task query can find an examiner who is not in the assistant roster', () =>
   const tasks = runtime.openById(ids.externalResults).getSheetByName('對外任務');
   tasks.appendRow(['EXT-TEMP-EXAMINER','1151','教學',new Date('2026-03-19'),'12:00','13:00','聲音工作區','聲音工作區','真假','','','已排定']);
   const response = bot.getReply('任務 真假', 'U-test');
-  assert.match(response.text, /真假 的教學\/考官任務/);
+  assert.match(response.text, /真假 的對內＋對外教學官／考官任務/);
   assert.match(response.text, /\[對外\].*聲音工作區/);
   assert.doesNotMatch(response.text, /助理名單/);
 });
@@ -201,8 +216,8 @@ test('group attendance writes a normalized record and completes the task', () =>
   const groups = resultBook.insertSheet('LINE群組設定');
   groups.appendRow(['群組ID','群組名稱','用途','啟用','前一天提醒時間','提前提醒小時','時區','管理員','建立時間','更新時間']);
   groups.appendRow(['G1','測試群組','對外教學','是','20:00',2,'Asia/Taipei','測試者','','']);
-  const binds = runtime.openById(ids.master).insertSheet('用戶綁定');
-  binds.appendRow(['LINE User ID','姓名','綁定時間']);
+  const binds = runtime.openById(ids.master).getSheetByName('用戶綁定') || runtime.openById(ids.master).insertSheet('用戶綁定');
+  if (!binds.getLastRow()) binds.appendRow(['LINE User ID','姓名','綁定時間','學號']);
   binds.appendRow(['U1','測試者','']);
   const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
 
@@ -312,9 +327,11 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   const tasks = resultBook.getSheetByName('對外任務');
   const students = resultBook.getSheetByName('任務學生');
   students.appendRow(['EXT-BIND-TEST', 'STU-BIND-TEST', '外部測試生', 'TEST', 1, '未點名', '未記錄', '', '13:00', '13:15', '']);
-  const typoResponse = bot.getReply('我是 外部測試身', 'U-external-student-typo-test');
-  assert.match(typoResponse.text, /姓名必須與分班表完全一致/);
+  bot.getReply('選擇對外學生', 'U-external-student-typo-test');
+  const typoResponse = bot.getReply('我是 外部測試身 TEST', 'U-external-student-typo-test');
+  assert.match(typoResponse.text, /姓名或學號/);
   assert.doesNotMatch(typoResponse.text, /綁定成功/);
+  bot.getReply('選擇對外學生', 'U-external-student-test');
   const missingNumber = bot.getReply('我是 外部測試生', 'U-external-student-test');
   assert.match(missingNumber.text, /學號/);
   assert.doesNotMatch(missingNumber.text, /綁定成功/);
@@ -347,6 +364,24 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   assert.match(push.messages[0].text, /上機/);
   assert.match(push.messages[0].text, /報名連結：https:\/\/docs\.google\.com\/forms/);
   assert.equal(push.messages[0].quickReply.items[0].action.uri, 'https://docs.google.com/forms/d/FAKE/viewform');
+});
+
+test('assistant identity binding only accepts the active attendance roster', () => {
+  const attendanceBook = runtime.openById(ids.internalAttendance);
+  const roster = attendanceBook.getSheetByName('教學考試點名和通過情況總表') || attendanceBook.insertSheet('教學考試點名和通過情況總表');
+  const rows = [['姓名／項目','學號']];
+  for (let index = 1; index <= 53; index++) rows.push([`現役${String(index).padStart(2, '0')}`, `123456${String(index).padStart(3, '0')}`]);
+  roster.getRange(1, 1, rows.length, 2).setValues(rows);
+
+  assert.match(bot.getReply('選擇中心助理', 'U-active-assistant').text, /53 位中心助理/);
+  const active = bot.getReply('我是 現役01', 'U-active-assistant');
+  assert.match(active.text, /綁定成功/);
+  assert.match(active.text, /助理資訊/);
+
+  bot.getReply('選擇中心助理', 'U-retired-assistant');
+  const retired = bot.getReply('我是 已退助理', 'U-retired-assistant');
+  assert.match(retired.text, /查無/);
+  assert.doesNotMatch(retired.text, /綁定成功/);
 });
 
 test('a failed short answer immediately ends the attempt without practical buttons', () => {

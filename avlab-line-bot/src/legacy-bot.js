@@ -15,6 +15,7 @@ var BIND_COL_USER_ID = 0;
 var BIND_COL_NAME = 1;
 var BIND_COL_TIME = 2;
 var BIND_COL_STUDENT_NUMBER = 3;
+var PENDING_ROLE_PREFIX = 'pending_role_';
 
 // ========== 補考表單設定 ==========
 var RETEST_SHEET_ID = '1H5kVv2AOtasMvS-YBBtjG_TYyiV09b3al586jbeB8Zc';
@@ -446,11 +447,11 @@ function showTasksForName(name) {
                '📝 10/30 期中檢定\n\n' +
                '📚 11/6 期末教學\n\n' +
                '📝 12/4 期末檢定\n\n' +
-               '⚠️ 考官與考生請留意時間，無法出席請提早尋找代班或完成請假程序喔！';
+               '⚠️ 考官與考生請留意時間，無法出席請依規定完成請假程序喔！';
   var t = getTasksFromSheet(name).concat(getExternalTasksForName(name)).sort((a,b)=>a.start-b.start);
   if(level==='見習'&&!t.length)return{text:apprenticeText,quickReply:bA()};
   if (!t.length) return { text: '找不到 ' + name + ' 的任務記錄', quickReply: bA(), notFound: true };
-  var txt=(level==='見習'?apprenticeText+'\n\n':'')+'【' + name + ' 的教學/考官任務】\n\n',q=[],td=new Date();
+  var txt=(level==='見習'?apprenticeText+'\n\n':'')+'【' + name + ' 的對內＋對外教學官／考官任務】\n\n',q=[],td=new Date();
   var today=new Date(td);today.setHours(0,0,0,0);
   t.forEach((tk, i) => {
     txt += tk.summary + '\n';
@@ -573,6 +574,17 @@ function getAssistantNames(){
   return n;
 }
 
+// 身份入口只以目前對內點名表 A、B 欄的現役 53 人為準；群組標題沒有學號，會自動略過。
+function getActiveAssistantRecords(){
+  try{
+    var s=SpreadsheetApp.openById(INTERNAL_ATTENDANCE_SHEET_ID).getSheetByName(ATTENDANCE_SHEET_NAME);
+    if(!s||s.getLastRow()<2)return[];
+    return s.getRange(2,1,s.getLastRow()-1,2).getValues().map(function(row){
+      return{name:nrm(row[0]),number:String(row[1]||'').trim()};
+    }).filter(function(person){return person.name&&/^\d{9}$/.test(person.number);});
+  }catch(e){return[];}
+}
+
 // 對外考生也需要綁定 LINE，才能在未通過時收到補考表單。
 // 名單直接讀取已同步的「任務學生」，不另建一份容易過期的名冊。
 function getExternalStudents(){
@@ -665,18 +677,21 @@ function recordUser(userId) {
 }
 
 function handleBindName(rest, userId) {
-  if (!rest) return { text: '考生請輸入「我是 姓名 學號」完成綁定，例如：我是 王小明 112405001。\n教學官／考官可輸入「我是 姓名」。', quickReply: bA() };
+  var cache=CacheService.getScriptCache(),pendingRole=cache.get(PENDING_ROLE_PREFIX+userId);
+  if(!pendingRole)return{text:'請先回首頁選擇「中心助理」或「對外學生」，再依畫面指示完成綁定。',quickReply:qr([{label:'🏠 選擇身份',text:'主選單'}])};
+  if (!rest) return { text: pendingRole==='assistant'?'請輸入「我是 姓名」完成中心助理綁定。':'請輸入「我是 姓名 學號」完成對外學生綁定，例如：我是 王小明 112405001。', quickReply: bA() };
   var raw = rest.trim(), parts = raw.split(/[\s　]+/), suppliedNumber = parts.length > 1 ? parts.pop() : '';
   var requestedName = parts.join(''), normalizedName = nrm(requestedName || raw);
   var externalMatches = getExternalStudents().filter(function(student){ return student.name === normalizedName; });
-  var assistantName = getAssistantNames().find(function(candidate){ return candidate === normalizedName; });
+  var activeAssistants=getActiveAssistantRecords();
+  var assistantName = activeAssistants.map(function(person){return person.name;}).find(function(candidate){ return candidate === normalizedName; });
   var matchedStudent = null;
-  if (externalMatches.length) {
+  if(pendingRole==='external'){
     if (!suppliedNumber) return { text: '請連同學號一起輸入，格式為「我是 姓名 學號」。\n例如：我是 王小明 112405001', quickReply: bA() };
     matchedStudent = externalMatches.find(function(student){ return nrm(student.number) === nrm(suppliedNumber); });
     if (!matchedStudent) return { text: '姓名或學號與任務學生／修課名單不一致，請確認後再輸入「我是 姓名 學號」。', quickReply: bA() };
-  } else if (!assistantName) {
-    return { text: '查無「' + requestedName + '」在助理／對外學生名單中。姓名必須與分班表完全一致，請確認後再試。', quickReply: bA() };
+  }else if(!assistantName){
+    return{text:'查無「'+requestedName+'」在目前 '+activeAssistants.length+' 位中心助理名單中，請確認姓名後再試。',quickReply:bA()};
   }
   var finalName = matchedStudent ? matchedStudent.name : assistantName;
   var finalNumber = matchedStudent ? matchedStudent.number : '';
@@ -700,7 +715,10 @@ function handleBindName(rest, userId) {
   } else {
     sheet.getRange(rowIndex, BIND_COL_NAME + 1, 1, 3).setValues([[finalName, new Date(), finalNumber]]);
   }
-  return { text: '✅ 綁定成功！您已綁定為：' + finalName + (finalNumber ? '（' + finalNumber + '）' : ''), quickReply: bA() };
+  cache.remove(PENDING_ROLE_PREFIX+userId);
+  var destination=pendingRole==='external'?'對外學生':'中心助理';
+  var menu=pendingRole==='external'?getExternalMainMenu():getInternalMainMenu();
+  return { text: '✅ 綁定成功！您已綁定為：' + finalName + (finalNumber ? '（' + finalNumber + '）' : '')+'\n\n'+menu.text, quickReply: menu.quickReply, navigationPage:destination };
 }
 
 function isUserBound(userId) {
@@ -728,8 +746,31 @@ function getBoundName(userId) {
   return null;
 }
 
+function getBoundRecord(userId){
+  var sheet=SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
+  if(!sheet)return null;
+  var data=sheet.getDataRange().getValues();
+  for(var i=1;i<data.length;i++)if(data[i][BIND_COL_USER_ID]===userId)return{name:nrm(data[i][BIND_COL_NAME]),number:String(data[i][BIND_COL_STUDENT_NUMBER]||'').trim()};
+  return null;
+}
+
+function selectIdentity(role,userId){
+  var bound=getBoundRecord(userId),cache=CacheService.getScriptCache();
+  if(role==='assistant'){
+    var activeAssistants=getActiveAssistantRecords();
+    var active=activeAssistants.some(function(person){return bound&&person.name===bound.name;});
+    if(active)return Object.assign(getInternalMainMenu(),{navigationPage:'中心助理'});
+    cache.put(PENDING_ROLE_PREFIX+userId,'assistant',1800);
+    return{text:'👩‍💼 中心助理綁定\n\n請輸入「我是 姓名」。\n只有目前名單中的 '+activeAssistants.length+' 位中心助理可以完成綁定。',quickReply:qr([{label:'🏠 回首頁',text:'主選單'}])};
+  }
+  var student=getExternalStudents().some(function(person){return bound&&person.name===bound.name&&nrm(person.number)===nrm(bound.number);});
+  if(student)return Object.assign(getExternalMainMenu(),{navigationPage:'對外學生'});
+  cache.put(PENDING_ROLE_PREFIX+userId,'external',1800);
+  return{text:'👨‍🎓 對外學生綁定\n\n請輸入「我是 姓名 學號」。\n例如：我是 王小明 112405001',quickReply:qr([{label:'🏠 回首頁',text:'主選單'}])};
+}
+
 // ========== 選單 ==========
-function getMainMenu(){return{text:'🤖 歡迎使用影音實驗室教學部機器人！\n\n請選擇您的身份：',quickReply:qr([{label:'👨‍🎓 對外學生',text:'對外學生'},{label:'👩‍💼 中心助理',text:'中心助理'}])};}
+function getMainMenu(){return{text:'🤖 歡迎使用影音實驗室教學部機器人！\n\n請選擇您的身份並完成綁定：',quickReply:qr([{label:'👨‍🎓 對外學生',text:'選擇對外學生'},{label:'👩‍💼 中心助理',text:'選擇中心助理'}])};}
 function getExternalMainMenu(){return{text:'請選擇您想查詢的對外學生資訊：',quickReply:qr([{label:'📋 流程',text:'流程'},{label:'📅 時程',text:'對外時程'},{label:'📚 題庫/講義',text:'題庫講義'},{label:'💰 保證金',text:'保證金'},{label:'🚫 學生請假',text:'學生請假'},{label:'🔑 借器材',text:'借用規定'},{label:'🔧 器材練習',text:'器材練習'},{label:'🔍 更多',text:'對外更多'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getExternalMoreMenu(){return{text:'更多對外學生資訊：',quickReply:qr([{label:'📘 講義',text:'講義'},{label:'⏰ 營業時間',text:'營業時間'},{label:'🚫 額滿',text:'額滿'},{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getInternalMainMenu(){
@@ -737,7 +778,7 @@ function getInternalMainMenu(){
     text:'請選擇您想查詢的助理資訊：',
     quickReply:qr([
       {label:'📋 點名', text:'點名'},
-      {label:'⏰ 近期對內任務', text:'對內近期任務'},
+      {label:'⏰ 我的對內／對外任務', text:'我的任務'},
       {label:'🔍 個人／任務查詢', text:'查詢'},
       {label:'📝 請假與代班', text:'請假選項'},
       {label:'📅 時程與排班', text:'助理排程'},
@@ -755,7 +796,6 @@ function getQueryTypeMenu(){
       {label:'📊 個人點名統計', text:'個人點名統計'},
       {label:'📋 認證進度', text:'認證'},
       {label:'📋 考試結果', text:'考試結果'},
-      {label:'📋 暫定個人', text:'我的暫定排班'},
       {label:'📊 全體點名統計', text:'全體點名統計'},
       {label:'🔙 回上一頁', text:'回上一頁'},
       {label:'🏠 回首頁', text:'主選單'}
@@ -772,15 +812,13 @@ function getInternalScheduleMenu(){
       {label:'📅 時程', text:'對內時程'},
       {label:'👨‍🏫 對內考官安排', text:'對內考官'},
       {label:'📊 教學總排程', text:'教學總排程'},
-      {label:'📋 我的暫定排班', text:'我的暫定排班'},
-      {label:'📋 暫定總排班', text:'暫定總排班'},
       {label:'🔙 回上一頁', text:'回上一頁'},
       {label:'🏠 回首頁', text:'主選單'}
     ])
   };
 }
 function getInternalToolsMenu(){return{text:'請選擇休閒工具：',quickReply:qr([{label:'🔮 每日運勢',text:'每日運勢'},{label:'🍽️ 教學飽',text:'教學飽'},{label:'🎴 射龍門',text:'射龍門'},{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};}
-function getLeaveOptionsMenu(){return{text:'請選擇請假或代班功能：',quickReply:qr([{label:'📝 對內請假',text:'對內請假'},{label:'👥 對外考官更動',text:'對外考官更動'},{label:'🆘 找代班',text:'找代班'},{label:'📋 代班紀錄',text:'代班查詢'},{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};}
+function getLeaveOptionsMenu(){return{text:'請選擇請假或代班紀錄：',quickReply:qr([{label:'📝 對內請假',text:'對內請假'},{label:'👥 對外考官更動',text:'對外考官更動'},{label:'📋 代班紀錄',text:'代班查詢'},{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getCommonLinks(){return{text:'【1151 助理常用連結】\n\n📊 1151 教學總排程\nhttps://docs.google.com/spreadsheets/d/11SEPY8ugY1-l_EQ-J3qYdxmQoXHWARmgBY4wA-QFQzI/edit\n\n👨‍🏫 1151 對內教學官／考官安排\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit',quickReply:bA()};}
 
 // ========== 統一回應 ==========
@@ -3125,6 +3163,12 @@ function getReply(u, i) {
   var bindPrefixes = ['我是', '綁定'];
   var m;
   if ((m = matchPrefix(u, bindPrefixes)).matched) return handleBindName(m.rest, i);
+  if(u==='選擇中心助理')return selectIdentity('assistant',i);
+  if(u==='選擇對外學生')return selectIdentity('external',i);
+  if(u==='我的任務'){
+    var boundTaskName=getBoundName(i);
+    return boundTaskName?showTasksForName(boundTaskName):{text:'請先回首頁選擇身份並完成綁定。',quickReply:qr([{label:'🏠 選擇身份',text:'主選單'}])};
+  }
   
   // ===== 排班查詢指令 =====
   var schedulePrefixes = ['排班', '考官', '找考官'];
@@ -3133,12 +3177,6 @@ function getReply(u, i) {
   }
 
   // ===== 特定指令 =====
-  if (u === '我的暫定排班') {
-    return getMyTentativeSchedule(i);
-  }
-  if (u === '暫定總排班' || u === '暫定總表') {
-    return getTentativeOverallSchedule();
-  }
   if (u === '缺人報表') {
     return getShortageReport();
   }
@@ -3208,9 +3246,6 @@ function getReply(u, i) {
   var sp = ['代班查詢', '代班紀錄', '代班'];
   var cp = ['認證進度', '認證', '缺考', '進度'];
   var ep = ['考試結果', '成績', '結果'];
-  var fp = ['找代班', '我不行', '靠杯', '怎搞'];
-
-  if ((m = matchPrefix(u, fp)).matched) return handleFindSubstitute(m.rest, i);
   if ((m = matchPrefix(u, tp)).matched) return handleQuery(m.rest, 'task');
   if ((m = matchPrefix(u, ap)).matched) return handleQuery(m.rest, 'att');
   if ((m = matchPrefix(u, sp)).matched) return handleQuery(m.rest, 'sub');
