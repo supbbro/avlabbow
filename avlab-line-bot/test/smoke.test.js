@@ -815,7 +815,7 @@ test('1151 Excel examiner table is normalized and multi-examiner cells are searc
   assert.equal(normalized[2][1], '暑訓教學');
 });
 
-test('internal reminders send on Monday at 09:00 and event day at 18:00 without cards', () => {
+test('internal reminders send on Monday at 09:00 and event day at 09:00 without cards', () => {
   const taskBook = runtime.openById(ids.task);
   const taskSheet = taskBook.getSheetByName('1151 對內教學官／考官安排') || taskBook.insertSheet('1151 對內教學官／考官安排');
   if (!taskSheet.getLastRow()) taskSheet.appendRow(['日期','階段','級別','項目','教學官／考官','地點']);
@@ -829,8 +829,8 @@ test('internal reminders send on Monday at 09:00 and event day at 18:00 without 
   assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 7, 31, 8, 59)), 0);
   assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 7, 31, 9, 0)), 1);
   assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 7, 31, 9, 1)), 0);
-  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 8, 6, 17, 59)), 0);
-  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 8, 6, 18, 0)), 1);
+  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 8, 6, 8, 59)), 0);
+  assert.equal(internalTeaching.sendInternalReminders(new Date(2026, 8, 6, 9, 0)), 1);
   const pushes = runtime.httpOperations.map(operation => JSON.parse(operation.options.payload));
   assert.equal(pushes.length, 2);
   assert.equal(pushes.every(push => push.to === 'U-INTERNAL'), true);

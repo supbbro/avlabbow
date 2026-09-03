@@ -175,7 +175,7 @@ function mondayReminderDate(value) {
 function eventReminderDate(value) {
   const date = value instanceof Date ? new Date(value) : new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  date.setHours(18, 0, 0, 0);
+  date.setHours(9, 0, 0, 0);
   return date;
 }
 
