@@ -336,7 +336,7 @@ test('arrival grace rules are five minutes for exams and fifteen minutes for tea
   assert.doesNotMatch(teachingReminder, /取消本次考試資格/);
 });
 
-test('one-hour reminder pushes the roster to the examiner and assigned group', () => {
+test('one-hour reminder privately pushes the roster to the examiner', () => {
   const resultBook = runtime.openById(ids.externalResults);
   const tasks = resultBook.getSheetByName('對外任務');
   const students = resultBook.getSheetByName('任務學生');
@@ -345,9 +345,9 @@ test('one-hour reminder pushes the roster to the examiner and assigned group', (
   runtime.httpOperations = [];
 
   const sent = externalTeaching.sendExternalReminders(new Date(2026, 8, 11, 11, 0));
-  assert.equal(sent, 2);
+  assert.equal(sent, 1);
   const pushes = runtime.httpOperations.map(operation => JSON.parse(operation.options.payload));
-  assert.deepEqual(new Set(pushes.map(push => push.to)), new Set(['U1', 'G1']));
+  assert.deepEqual(new Set(pushes.map(push => push.to)), new Set(['U1']));
   for (const push of pushes) {
     assert.match(push.messages[0].text, /1 小時內/);
     assert.match(push.messages[0].text, /學生乙/);
@@ -477,7 +477,7 @@ test('a bound student receives the teaching reminder with the fifteen-minute rul
   tasks.appendRow(['EXT-TEACH-REMIND','1151','教學',new Date('2026-09-21'),'14:00','15:00','X160','401','測試者','','G1','已排定',true,true,'','','','']);
   students.appendRow(['EXT-TEACH-REMIND','STU-TEACH-REMIND','外部測試生','TEST',1,'未點名','未記錄','','14:00','15:00','']);
   runtime.httpOperations = [];
-  assert.equal(externalTeaching.sendExternalReminders(new Date('2026-09-21T13:00:00+08:00')), 3);
+  assert.equal(externalTeaching.sendExternalReminders(new Date('2026-09-21T13:00:00+08:00')), 2);
   const pushes = runtime.httpOperations.map(operation => JSON.parse(operation.options.payload));
   const studentPush = pushes.find(push => push.to === 'U-external-student-test');
   assert.ok(studentPush);
@@ -844,6 +844,9 @@ test('internal reminders send on Monday at 09:00 and event day at 09:00 without 
 });
 
 test('a teaching group receives the 1151 weekly and daily schedule reminders at 09:00', () => {
+  assert.doesNotMatch(externalTeaching.joinReply().text, /綁定群組 群組名稱/);
+  assert.match(externalTeaching.joinReply().text, /綁定教學群組 群組名稱/);
+  assert.equal(externalTeaching.isExternalCommand('綁定群組 測試群組'), false);
   const scheduleBook = runtime.openById(ids.teachingSchedule);
   const september = scheduleBook.getSheetByName('9月') || scheduleBook.insertSheet('9月');
   september.getRange(1, 1, 4, 8).setValues([

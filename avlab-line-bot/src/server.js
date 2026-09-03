@@ -90,7 +90,6 @@ async function handleLineEvent(event) {
     reply = externalTeaching.joinReply();
   } else if (event.type === 'leave') {
     await runtime.loadOnly(EXTERNAL_WORKBOOKS);
-    externalTeaching.disableGroup(context.chatId);
     teachingSchedule.disableGroup(context.chatId);
   } else if (event.type === 'postback') {
     const userId = context.userId;

@@ -14,7 +14,7 @@ const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '考試週�
 const REMINDER_LEAD_MINUTES = 60;
 const ROSTER_SHEET = process.env.EXTERNAL_ROSTER_SHEET_NAME || '1151修課名單';
 const REGISTRATION_TASK_ID = 'REGISTRATION-1151';
-const EXTERNAL_COMMAND = /^(綁定群組(?:\s|$)|解除群組$|今日任務$|對外任務$|近期任務$|查看任務\s|開始點名\s|考生名單\s|查看考生\s|查看點名結果\s|修改出席\s|到場判定\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
+const EXTERNAL_COMMAND = /^(今日任務$|對外任務$|近期任務$|查看任務\s|開始點名\s|考生名單\s|查看考生\s|查看點名結果\s|修改出席\s|到場判定\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
 let activeStudentsByTask = new Map();
 
 const qr = items => ({ items: items.slice(0, 13).map(item => ({
@@ -570,28 +570,8 @@ function groups() {
   })).filter(group => group.id && group.id !== 'DEFAULT');
 }
 
-function upsertGroup(context, requestedName) {
-  const target = sheet(SHEETS.groups);
-  if (!target) throw new Error('找不到 LINE群組設定 工作表');
-  const existing = groups().find(group => group.id === context.chatId && group.scope === '對外教學');
-  const now = new Date();
-  const name = requestedName || context.groupName || `對外教學群組-${context.chatId.slice(-6)}`;
-  if (existing) {
-    target.getRange(existing.row, 2, 1, 9).setValues([[name, '對外教學', '是', '20:00', 2, 'Asia/Taipei', boundName(context.userId), now, now]]);
-  } else {
-    target.appendRow([context.chatId, name, '對外教學', '是', '20:00', 2, 'Asia/Taipei', boundName(context.userId), now, now]);
-  }
-  return name;
-}
-
-function disableGroup(chatId) {
-  const target = sheet(SHEETS.groups);
-  const existing = groups().find(group => group.id === chatId && group.scope === '對外教學');
-  if (target && existing) { target.getRange(existing.row, 4).setValue('否'); target.getRange(existing.row, 10).setValue(new Date()); }
-}
-
 function groupAdmins(chatId) {
-  const group = groups().find(item => item.id === chatId);
+  const group = groups().find(item => item.id === chatId && item.scope === '對外教學');
   return String(group?.admin || '').split(/[,，、]/).map(norm).filter(Boolean);
 }
 
@@ -1024,11 +1004,6 @@ function finishAttendance(taskId, context) {
 function handleCommand(text, context) {
   const command = String(text || '').trim();
   let match;
-  if ((match = command.match(/^綁定群組(?:\s+(.+))?$/))) {
-    if (!['group', 'room'].includes(context.sourceType)) return reply('請在要接收提醒的 LINE 群組中輸入這個指令。');
-    return reply(`✅ 已綁定「${upsertGroup(context, match[1])}」\n將於對外任務開始前 1 小時推播考生名單與點名入口。`);
-  }
-  if (command === '解除群組') { disableGroup(context.chatId); return reply('已停止此群組的對外任務提醒。'); }
   const scheduleCommand = /^(今日任務|對外任務|近期任務|查看任務\s|開始點名\s|同步對外排程)/.test(command);
   let syncResult = null;
   if (scheduleCommand) {
@@ -1328,7 +1303,6 @@ function sendExternalReminders(now = new Date()) {
   syncFromSchedule();
   const deposit = processDepositRequirements(now);
   expireExamQualifications(now);
-  const activeGroups = groups().filter(group => group.enabled === '是' && group.scope === '對外教學');
   let sent = 0;
   for (const task of allTasks()) {
     if (!['已排定', '點名中'].includes(task.status)) continue;
@@ -1342,16 +1316,11 @@ function sendExternalReminders(now = new Date()) {
     ];
     const roster = studentRosterText(task);
     const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
-    const targetGroups = task.groupId ? activeGroups.filter(group => group.id === task.groupId) : activeGroups;
     let taskSent = false;
 
     if (!task.twoHoursSentAt && start > now && now >= reminderDue) {
       if (examinerUserId) {
         queuePush(examinerUserId, reply(`⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}`, buttons));
-        sent++; taskSent = true;
-      }
-      for (const group of targetGroups) {
-        queuePush(group.id, reply(`📣 對外工作坊將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n請考生準時到場；考官可由下方按鈕開始點名。`, buttons));
         sent++; taskSent = true;
       }
       if (taskSent) sheet(SHEETS.tasks).getRange(task.row, 16).setValue(now);
@@ -1371,7 +1340,7 @@ function sendExternalReminders(now = new Date()) {
 }
 
 function joinReply() {
-  return reply('👋 我可以提供兩種群組提醒：\n\n1️⃣ 對外教學／考試與點名\n輸入「綁定群組 群組名稱」\n\n2️⃣ 1151 教學總排程\n輸入「綁定教學群組 群組名稱」');
+  return reply('👋 我可以在群組中提醒 1151 教學總排程。\n請輸入「綁定教學群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName } };
+module.exports = { handleCommand, sendExternalReminders, joinReply, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName } };
