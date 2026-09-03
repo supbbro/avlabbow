@@ -710,9 +710,20 @@ test('an equipment-specific result updates only that certification when the shee
     ['內測學生','I001','','','V'],
     ['另一學生','I002','','','']
   ]);
+  const master = runtime.openById(ids.master);
+  const bindings = master.getSheetByName('用戶綁定') || master.insertSheet('用戶綁定');
+  bindings.getRange(1, 1, 2, 3).setValues([
+    ['LINE User ID','姓名','綁定時間'],
+    ['U-INTERNAL-CERT','內測學生','2026/09/03']
+  ]);
+  runtime.httpOperations = [];
   bot.onMasterSheetEdit({ value: '通過', range: attendance.getRange(2, 3) });
   assert.equal(certification.getRange(4, 4).getValue(), 'V');
   assert.equal(certification.getRange(4, 5).getValue(), 'V');
+  assert.equal(JSON.parse(runtime.httpOperations[0].options.payload).to, 'U-INTERNAL-CERT');
+  attendance.getRange(2, 3).setValue('');
+  bot.onMasterSheetEdit({ value: undefined, oldValue: '通過', range: attendance.getRange(2, 3) });
+  assert.equal(certification.getRange(4, 4).getValue(), '');
   bot.onMasterSheetEdit({ value: '不通過', range: attendance.getRange(2, 4) });
   assert.equal(certification.getRange(4, 5).getValue(), 'V');
   attendance.getRange(3, 4).setValue('通過');

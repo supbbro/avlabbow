@@ -107,6 +107,7 @@ function syncInternalCertifications() {
       if (['V', '✓', 'TRUE'].includes(current)) return;
       certification.getRange(certificationRow + 1, certificationColumn + 1).setValue('V');
       certificationData[certificationRow][certificationColumn] = 'V';
+      notifyCertificationPassed(row[0], column.header.replace(/結果$/, '').trim());
       updated++;
     });
   });
@@ -193,6 +194,19 @@ function queuePush(userId, text) {
       to: userId, messages: [{ type: 'text', text: message.text, quickReply: message.quickReply }]
     }), muteHttpExceptions: true
   });
+}
+
+function notifyCertificationPassed(studentName, equipment) {
+  const userId = userIdForName(studentName);
+  if (!userId) return false;
+  UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'post', headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}` },
+    contentType: 'application/json', payload: JSON.stringify({
+      to: userId,
+      messages: [{ type: 'text', text: `🎉 恭喜！您的認證已更新。\n\n📌 通過器材：${equipment}\n請輸入「認證」查看最新進度。` }]
+    }), muteHttpExceptions: true
+  });
+  return true;
 }
 
 function sendInternalReminders(now = new Date()) {

@@ -1006,16 +1006,24 @@ function onMasterSheetEdit(e) {
   var equipCol = -1;
 
   // 1151 改為每項器材各自一欄，例如「導播台結果」「錄放影機結果」。
-  // 直接在該欄選「通過」即可更新認證；選「不通過」不會清除既有認證。
+  // 選「通過」會取得認證；把通過刪除或改成其他狀態時會撤回該項認證。
   if (header !== '考試結果' && header !== '加開結果' && /結果$/.test(header)) {
-    if (newValue !== '通過') {
-      Logger.log('逐器材結果不是「通過」，保留既有認證並退出');
-      return;
-    }
     var equipmentFromHeader = header.replace(/結果$/, '').trim();
     var directStudentName = sheet.getRange(row, 1).getValue();
     if (equipmentFromHeader && directStudentName) {
-      updateCertificationForPerson(nrm(directStudentName.toString()), equipmentFromHeader);
+      var normalizedDirectStudent = nrm(directStudentName.toString());
+      if (newValue === '通過') {
+        updateCertificationForPerson(normalizedDirectStudent, equipmentFromHeader);
+      } else if (e.oldValue === '通過') {
+        var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+        var rowValues = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0];
+        var stillPassed = headers.some(function(candidateHeader, index) {
+          return index !== col - 1 && typeof candidateHeader === 'string' &&
+            candidateHeader.replace(/結果$/, '').trim() === equipmentFromHeader &&
+            rowValues[index] === '通過';
+        });
+        if (!stillPassed) clearCertificationForPerson(normalizedDirectStudent, equipmentFromHeader);
+      }
     }
     return;
   }
@@ -1132,6 +1140,29 @@ function updateCertificationForPerson(studentName, equipName) {
     }
   } else {
     Logger.log('該器材已通過，無需更新');
+  }
+}
+
+function clearCertificationForPerson(studentName, equipName) {
+  Logger.log('開始撤回認證：學生=' + studentName + ', 器材=' + equipName);
+  var certSheet = SpreadsheetApp.openById(CERT_SHEET_ID).getSheetByName(CERT_SHEET_NAME);
+  if (!certSheet) return;
+  var certData = certSheet.getDataRange().getValues();
+  var headers = certData[1] || [];
+  var studentRow = -1;
+  for (var i = 2; i < certData.length; i++) {
+    var certName = nrm(certData[i][COL_CERT_NAME] ? certData[i][COL_CERT_NAME].toString() : '');
+    if (certName === studentName) { studentRow = i + 1; break; }
+  }
+  var equipCol = -1;
+  for (var j = FIRST_EQUIP_COL; j < headers.length; j++) {
+    if (headers[j] === equipName) { equipCol = j + 1; break; }
+  }
+  if (studentRow === -1 || equipCol === -1) return;
+  var current = certSheet.getRange(studentRow, equipCol).getValue();
+  if (current === 'V' || current === true || current === '✓') {
+    certSheet.getRange(studentRow, equipCol).setValue('');
+    Logger.log('↩️ 已撤回：' + studentName + ' 的 ' + equipName + ' 認證');
   }
 }
 

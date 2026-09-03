@@ -182,14 +182,15 @@ const automations = {
   'leave-submit': [bot.onLeaveFormSubmit, ids.leave, '表單回覆 1'],
   'retest-submit': [bot.onRetestFormSubmit, ids.retest, '表單回覆 1'],
   'availability-submit': [bot.onAvailabilityFormSubmit, ids.schedule, '表單回覆 1'],
-  'master-edit': [bot.onMasterSheetEdit, ids.internalAttendance, '教學考試點名和通過情況總表']
+  'master-edit': [bot.onMasterSheetEdit, ids.internalAttendance, '教學考試點名和通過情況總表', [ids.internalAttendance, ids.internalCertification, ids.master]]
 };
 
 app.post('/automation/:name', (req, res) => {
   const target = automations[req.params.name];
   if (!target) return res.status(404).json({ error: 'Unknown automation' });
   enqueue(async () => {
-    await runtime.loadAll();
+    if (target[3]) await runtime.loadOnly(target[3], { force: true });
+    else await runtime.loadAll({ force: true });
     target[0](eventFromBody(req.body, target[1], target[2]));
     await runtime.flush();
   }).then(() => res.json({ ok: true })).catch(error => {
