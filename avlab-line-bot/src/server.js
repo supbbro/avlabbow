@@ -15,6 +15,7 @@ installGlobals(runtime);
 const bot = require('./legacy-bot');
 const internalTeaching = require('./internal-teaching');
 const externalTeaching = require('./external-teaching');
+const teachingSchedule = require('./teaching-schedule');
 const externalGroupSync = require('./external-group-sync');
 const navigation = require('./navigation');
 const app = express();
@@ -22,6 +23,7 @@ const port = Number(process.env.PORT || 3000);
 const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master, ids.externalRegistration, ids.deposit];
 const INTERNAL_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.master];
 const INTERNAL_CERT_WORKBOOKS = [ids.internalAttendance, ids.internalCertification];
+const TEACHING_SCHEDULE_WORKBOOKS = [ids.teachingSchedule, ids.externalResults, ids.master];
 const TASK_QUERY_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.externalClassSchedule, ids.externalResults, ids.assistant, ids.master];
 const LIVE_TASK_WORKBOOKS = [ids.task, ids.externalClassSchedule, ids.externalResults];
 const LIGHTWEIGHT_COMMANDS = new Set(['主選單', '對外學生', '對外更多', '中心助理', '助理更多', '助理排程', '助理工具', '請假選項', '請假', '查詢', '常用連結', '講義區', '講義文件', '講義影片攝影', '講義影片燈光', '講義影片聲音', '講義影片影棚']);
@@ -89,6 +91,7 @@ async function handleLineEvent(event) {
   } else if (event.type === 'leave') {
     await runtime.loadOnly(EXTERNAL_WORKBOOKS);
     externalTeaching.disableGroup(context.chatId);
+    teachingSchedule.disableGroup(context.chatId);
   } else if (event.type === 'postback') {
     const userId = context.userId;
     if (!userId) return;
@@ -111,7 +114,9 @@ async function handleLineEvent(event) {
       const personalQueryIds = personalQueryWorkbooks(text);
       const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
       const identityFlowCommand = text === '繼續使用目前身份' || /^(?:更改身份|更改名字)\s+(?:中心助理|對外學生)$/.test(text);
-      if (bindingCommand || identityFlowCommand) {
+      if (teachingSchedule.isCommand(text)) {
+        await runtime.loadOnly(TEACHING_SCHEDULE_WORKBOOKS, { force: true });
+      } else if (bindingCommand || identityFlowCommand) {
         await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit], { force: true });
       } else if (text === '選擇中心助理') {
         await runtime.loadOnly([ids.master, ids.internalAttendance], { force: true });
@@ -132,7 +137,7 @@ async function handleLineEvent(event) {
         await runtime.loadAll();
       }
       bot.recordUser(userId);
-      reply = internalTeaching.handleCommand(text, context) || externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
+      reply = teachingSchedule.handleCommand(text, context) || internalTeaching.handleCommand(text, context) || externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
       if (!navigationResult.isBack) navigation.remember(runtime.cache, userId, reply?.navigationPage || text, Boolean(reply));
     } else if (event.message.type === 'sticker') {
       await runtime.loadOnly([ids.master]);
@@ -221,6 +226,7 @@ async function schedulerTick() {
   // prevent otherwise valid certification results from being copied.
   jobs.push([`internal-cert-sync:${stamp}`, internalTeaching.syncInternalCertifications, INTERNAL_CERT_WORKBOOKS]);
   jobs.push([`internal-reminders:${stamp}`, internalTeaching.sendInternalReminders, INTERNAL_WORKBOOKS]);
+  jobs.push([`teaching-schedule-groups:${stamp}`, teachingSchedule.sendGroupReminders, [ids.teachingSchedule, ids.externalResults]]);
   jobs.push([`external-examiner-changes:${stamp}`, externalTeaching.processPendingExaminerChanges, [ids.external, ...EXTERNAL_WORKBOOKS]]);
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
   jobs.push([`external-group-sync:${stamp}`, () => externalGroupSync.syncExternalCertificationMatrix(runtime.api, ids.externalResults), []]);

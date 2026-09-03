@@ -573,7 +573,7 @@ function groups() {
 function upsertGroup(context, requestedName) {
   const target = sheet(SHEETS.groups);
   if (!target) throw new Error('找不到 LINE群組設定 工作表');
-  const existing = groups().find(group => group.id === context.chatId);
+  const existing = groups().find(group => group.id === context.chatId && group.scope === '對外教學');
   const now = new Date();
   const name = requestedName || context.groupName || `對外教學群組-${context.chatId.slice(-6)}`;
   if (existing) {
@@ -586,7 +586,7 @@ function upsertGroup(context, requestedName) {
 
 function disableGroup(chatId) {
   const target = sheet(SHEETS.groups);
-  const existing = groups().find(group => group.id === chatId);
+  const existing = groups().find(group => group.id === chatId && group.scope === '對外教學');
   if (target && existing) { target.getRange(existing.row, 4).setValue('否'); target.getRange(existing.row, 10).setValue(new Date()); }
 }
 
@@ -1328,7 +1328,7 @@ function sendExternalReminders(now = new Date()) {
   syncFromSchedule();
   const deposit = processDepositRequirements(now);
   expireExamQualifications(now);
-  const activeGroups = groups().filter(group => group.enabled === '是');
+  const activeGroups = groups().filter(group => group.enabled === '是' && group.scope === '對外教學');
   let sent = 0;
   for (const task of allTasks()) {
     if (!['已排定', '點名中'].includes(task.status)) continue;
@@ -1371,7 +1371,7 @@ function sendExternalReminders(now = new Date()) {
 }
 
 function joinReply() {
-  return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
+  return reply('👋 我可以提供兩種群組提醒：\n\n1️⃣ 對外教學／考試與點名\n輸入「綁定群組 群組名稱」\n\n2️⃣ 1151 教學總排程\n輸入「綁定教學群組 群組名稱」');
 }
 
 module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName } };

@@ -13,6 +13,7 @@ installGlobals(runtime);
 const bot = require('../src/legacy-bot');
 const internalTeaching = require('../src/internal-teaching');
 const externalTeaching = require('../src/external-teaching');
+const teachingSchedule = require('../src/teaching-schedule');
 const externalGroupSync = require('../src/external-group-sync');
 const { parseTeachingSheet, parseExamSheet } = require('../src/external-schedule-parser');
 const { parseInternalTaskWorkbook } = require('../src/internal-task-parser');
@@ -840,6 +841,34 @@ test('internal reminders send on Monday at 09:00 and event day at 09:00 without 
   const direct = internalTeaching.handleCommand('點名', { sourceType: 'user', userId: 'U-INTERNAL' });
   assert.equal(direct.quickReply.items[0].action.type, 'uri');
   assert.match(direct.quickReply.items[0].action.uri, /gid=653206596/);
+});
+
+test('a teaching group receives the 1151 weekly and daily schedule reminders at 09:00', () => {
+  const scheduleBook = runtime.openById(ids.teachingSchedule);
+  const september = scheduleBook.getSheetByName('9月') || scheduleBook.insertSheet('9月');
+  september.getRange(1, 1, 4, 8).setValues([
+    ['', '一', '二', '三', '四', '五', '六', '日'],
+    ['W1', '9/7', '9/8', '9/9', '9/10', '9/11', '9/12', '9/13'],
+    ['對內工作', '暑訓教學', '', '', '', '', '', ''],
+    ['對外工作', '', '報名公告', '', '', '', '', '']
+  ]);
+  const context = { sourceType: 'group', chatId: 'G-TEACHING', userId: 'U-INTERNAL' };
+  const bound = teachingSchedule.handleCommand('綁定教學群組 教學部', context);
+  assert.match(bound.text, /每週一 09:00/);
+  const groupRows = runtime.openById(ids.externalResults).getSheetByName('LINE群組設定').getDataRange().getValues();
+  assert.equal(groupRows.some(row => row[0] === 'G-TEACHING' && row[2] === '教學總排程'), true);
+
+  runtime.httpOperations = [];
+  assert.equal(teachingSchedule.sendGroupReminders(new Date(2026, 8, 7, 8, 59)), 0);
+  assert.equal(teachingSchedule.sendGroupReminders(new Date(2026, 8, 7, 9, 0)), 2);
+  assert.equal(teachingSchedule.sendGroupReminders(new Date(2026, 8, 7, 9, 1)), 0);
+  assert.equal(teachingSchedule.sendGroupReminders(new Date(2026, 8, 8, 9, 0)), 1);
+  const pushes = runtime.httpOperations.map(operation => JSON.parse(operation.options.payload));
+  assert.equal(pushes.length, 3);
+  assert.equal(pushes.every(push => push.to === 'G-TEACHING'), true);
+  assert.equal(pushes.some(push => /本週教學排程/.test(push.messages[0].text)), true);
+  assert.equal(pushes.some(push => /今日教學排程/.test(push.messages[0].text)), true);
+  assert.equal(pushes.some(push => /報名公告/.test(push.messages[0].text)), true);
 });
 
 test('an equipment-specific result updates only that certification when the sheet edit says passed', () => {
