@@ -116,7 +116,7 @@ function syncInternalCertifications() {
 function sheetLinkReply(prefix = '請直接開啟試算表進行對內點名與檢定結果登記。') {
   return reply(prefix, [
     { label: '📋 開啟對內點名表', uri: attendanceUrl() },
-    { label: '🔙 回助理首頁', text: '中心助理' },
+    { label: '🔙 回上一頁', text: '回上一頁' },
     { label: '🏠 回首頁', text: '主選單' }
   ]);
 }
@@ -124,7 +124,7 @@ function sheetLinkReply(prefix = '請直接開啟試算表進行對內點名與�
 function listRecent(context) {
   const name = boundName(context.userId);
   if (!name) return reply('請先輸入「我是 姓名」完成綁定。', [
-    { label: '🔙 回助理首頁', text: '中心助理' }, { label: '🏠 回首頁', text: '主選單' }
+    { label: '🔙 回上一頁', text: '回上一頁' }, { label: '🏠 回首頁', text: '主選單' }
   ]);
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const end = new Date(today); end.setDate(end.getDate() + 14);

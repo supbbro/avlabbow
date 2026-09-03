@@ -16,13 +16,14 @@ const bot = require('./legacy-bot');
 const internalTeaching = require('./internal-teaching');
 const externalTeaching = require('./external-teaching');
 const externalGroupSync = require('./external-group-sync');
+const navigation = require('./navigation');
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master, ids.externalRegistration, ids.deposit];
 const INTERNAL_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.master];
 const TASK_QUERY_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.externalClassSchedule, ids.externalResults, ids.assistant, ids.master];
 const LIVE_TASK_WORKBOOKS = [ids.task, ids.externalClassSchedule, ids.externalResults];
-const LIGHTWEIGHT_COMMANDS = new Set(['主選單', '對外學生', '對外更多', '中心助理', '助理更多', '請假選項', '請假', '查詢', '常用連結']);
+const LIGHTWEIGHT_COMMANDS = new Set(['主選單', '對外學生', '對外更多', '中心助理', '助理更多', '助理排程', '助理工具', '請假選項', '請假', '查詢', '常用連結']);
 const ASSISTANT_PROMPT_COMMANDS = new Set(['查任務', '個人點名統計', '代班查詢', '認證', '認證進度', '考試結果']);
 let serial = Promise.resolve();
 
@@ -95,7 +96,9 @@ async function handleLineEvent(event) {
     if (event.message?.id && runtime.cache.get(`message:${event.message.id}`)) return;
     if (event.message?.id) runtime.cache.put(`message:${event.message.id}`, '1', 60);
     if (event.message.type === 'text') {
-      const text = event.message.text.trim();
+      const originalText = event.message.text.trim();
+      const navigationResult = navigation.resolve(runtime.cache, userId, originalText);
+      const text = navigationResult.command;
       const combinedTaskQuery = externalTeaching.isCombinedTaskQuery(text);
       const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
       if (bindingCommand) {
@@ -116,6 +119,7 @@ async function handleLineEvent(event) {
       }
       bot.recordUser(userId);
       reply = internalTeaching.handleCommand(text, context) || externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
+      if (!navigationResult.isBack) navigation.remember(runtime.cache, userId, text, Boolean(reply));
     } else if (event.message.type === 'sticker') {
       await runtime.loadOnly([ids.master]);
       bot.recordUser(userId);

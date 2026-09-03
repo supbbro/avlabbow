@@ -18,6 +18,7 @@ const { parseTeachingSheet, parseExamSheet } = require('../src/external-schedule
 const { parseInternalTaskWorkbook } = require('../src/internal-task-parser');
 const { parseDepositWorkbook } = require('../src/deposit-parser');
 const { parseRegistrationRows } = require('../src/external-registration-parser');
+const navigation = require('../src/navigation');
 
 test('main menu survives the Apps Script to Node compatibility layer', () => {
   const reply = bot.getReply('主選單', 'U-test');
@@ -38,15 +39,50 @@ test('menus omit retired links and common links only show current 1151 files', (
 });
 
 test('submenu pages consistently provide back and home navigation', () => {
-  for (const [index, command] of ['對外更多', '查詢', '助理更多', '請假選項', '流程'].entries()) {
-    const labels = bot.getReply(command, `U-nav-${index}`).quickReply.items.map(item => item.action.label);
+  for (const [index, command] of ['對外更多', '查詢', '助理排程', '助理工具', '請假選項', '流程'].entries()) {
+    const page = bot.getReply(command, `U-nav-${index}`);
+    const labels = page.quickReply.items.map(item => item.action.label);
     assert.equal(labels.some(label => label.includes('回上一頁')), true, command);
     assert.equal(labels.some(label => label.includes('回首頁')), true, command);
+    const back = page.quickReply.items.find(item => item.action.label.includes('回上一頁'));
+    assert.equal(back.action.text, '回上一頁', command);
   }
   const externalMain = bot.getReply('對外學生', 'U-nav-external').quickReply.items.map(item => item.action.label);
   const internalMain = bot.getReply('中心助理', 'U-nav-internal').quickReply.items.map(item => item.action.label);
   assert.equal(externalMain.some(label => label.includes('回首頁')), true);
   assert.equal(internalMain.some(label => label.includes('回首頁')), true);
+});
+
+test('internal menu groups each feature once without a catch-all more page', () => {
+  const main = bot.getReply('中心助理', 'U-menu').quickReply.items.map(item => item.action);
+  assert.equal(main.some(action => action.text === '助理更多'), false);
+  assert.deepEqual(main.filter(action => ['查詢', '請假選項', '助理排程', '助理工具'].includes(action.text)).map(action => action.text), [
+    '查詢', '請假選項', '助理排程', '助理工具'
+  ]);
+
+  const query = bot.getReply('查詢', 'U-menu-query').quickReply.items.map(item => item.action.text);
+  const leave = bot.getReply('請假選項', 'U-menu-leave').quickReply.items.map(item => item.action.text);
+  const schedule = bot.getReply('助理排程', 'U-menu-schedule').quickReply.items.map(item => item.action.text);
+  assert.equal(query.includes('代班查詢'), false);
+  assert.equal(leave.includes('代班查詢'), true);
+  assert.equal(schedule.includes('常用連結'), false);
+});
+
+test('back navigation returns through the real per-user page history', () => {
+  const cache = new Map();
+  const facade = {
+    get: key => cache.get(key) || null,
+    put: (key, value) => cache.set(key, value)
+  };
+  const userId = 'U-history';
+  for (const command of ['主選單', '中心助理', '查詢', '查任務', '任務 徐嘉翔']) {
+    navigation.remember(facade, userId, command, true);
+  }
+  assert.equal(navigation.resolve(facade, userId, '回上一頁').command, '查任務');
+  assert.equal(navigation.resolve(facade, userId, '回上一頁').command, '查詢');
+  assert.equal(navigation.resolve(facade, userId, '回上一頁').command, '中心助理');
+  navigation.remember(facade, userId, '主選單', true);
+  assert.equal(navigation.resolve(facade, userId, '回上一頁').command, '主選單');
 });
 
 test('Taipei date formatter supports the patterns used by the bot', () => {
