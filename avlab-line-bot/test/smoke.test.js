@@ -189,7 +189,8 @@ test('external commands are routed to the smaller workbook set', () => {
   assert.equal(externalTeaching.isExternalCommand('主選單'), false);
   assert.equal(externalTeaching.requiresFreshData('開始點名 T1'), true);
   assert.equal(externalTeaching.requiresFreshData('點名狀態 T1 S1 到場'), false);
-  assert.equal(externalTeaching.isCombinedTaskQuery('任務 黃忻妤'), true);
+  assert.equal(externalTeaching.isCombinedTaskQuery('我的任務'), true);
+  assert.equal(externalTeaching.isCombinedTaskQuery('任務 黃忻妤'), false);
   assert.equal(externalTeaching.isCombinedTaskQuery('近期任務'), false);
 });
 
@@ -213,6 +214,13 @@ test('my task query includes internal and external assignments', () => {
   assert.match(mine.text, /\[對內\].*導播台/);
   assert.match(mine.text, /\[對外\].*基礎配件課程/);
   assert.match(mine.text, /任務已過期/);
+
+  for (const command of ['個人點名統計', '代班查詢', '認證', '考試結果', '認證 其他人']) {
+    const personal = bot.getReply(command, 'U-COMBINED');
+    assert.match(personal.text, /黃忻妤/, command);
+    assert.doesNotMatch(personal.text, /請輸入.*姓名/, command);
+    assert.doesNotMatch(personal.text, /其他人/, command);
+  }
 });
 
 test('other peoples tasks cannot be queried by name', () => {

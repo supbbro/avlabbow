@@ -1072,7 +1072,7 @@ function requiresFreshData(text) {
 }
 
 function isCombinedTaskQuery(text) {
-  return /^(?:查任務|任務查詢|我的任務|任務)\s+\S/.test(String(text || '').trim());
+  return String(text || '').trim() === '我的任務';
 }
 
 function parseTaskStart(task) {

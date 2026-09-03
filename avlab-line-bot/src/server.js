@@ -25,7 +25,14 @@ const INTERNAL_CERT_WORKBOOKS = [ids.internalAttendance, ids.internalCertificati
 const TASK_QUERY_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.externalClassSchedule, ids.externalResults, ids.assistant, ids.master];
 const LIVE_TASK_WORKBOOKS = [ids.task, ids.externalClassSchedule, ids.externalResults];
 const LIGHTWEIGHT_COMMANDS = new Set(['主選單', '對外學生', '對外更多', '中心助理', '助理更多', '助理排程', '助理工具', '請假選項', '請假', '查詢', '常用連結', '講義區', '講義文件', '講義影片攝影', '講義影片燈光', '講義影片聲音', '講義影片影棚']);
-const ASSISTANT_PROMPT_COMMANDS = new Set(['個人點名統計', '代班查詢', '認證', '認證進度', '考試結果']);
+function personalQueryWorkbooks(text) {
+  const command = String(text || '').trim();
+  if (/^(?:點名統計|個人點名統計|個人點名)(?:\s|$)/.test(command)) return [ids.master, ids.leave];
+  if (/^(?:代班查詢|代班紀錄|代班)(?:\s|$)/.test(command)) return [ids.master, ids.leave, ids.external];
+  if (/^(?:認證進度|認證|缺考|進度)(?:\s|$)/.test(command)) return [ids.master, ids.assistant, ids.internalCertification];
+  if (/^(?:考試結果|成績|結果)(?:\s|$)/.test(command)) return [ids.master];
+  return null;
+}
 let serial = Promise.resolve();
 
 function enqueue(job) {
@@ -101,6 +108,7 @@ async function handleLineEvent(event) {
       const navigationResult = navigation.resolve(runtime.cache, userId, originalText);
       const text = navigationResult.command;
       const combinedTaskQuery = text === '我的任務';
+      const personalQueryIds = personalQueryWorkbooks(text);
       const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
       if (bindingCommand) {
         await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit], { force: true });
@@ -117,8 +125,8 @@ async function handleLineEvent(event) {
         await runtime.loadOnly(EXTERNAL_WORKBOOKS, { force: externalTeaching.requiresFreshData(text) });
       } else if (LIGHTWEIGHT_COMMANDS.has(text)) {
         await runtime.loadOnly([ids.master]);
-      } else if (ASSISTANT_PROMPT_COMMANDS.has(text)) {
-        await runtime.loadOnly([ids.master, ids.assistant]);
+      } else if (personalQueryIds) {
+        await runtime.loadOnly(personalQueryIds, { force: true });
       } else {
         await runtime.loadAll();
       }

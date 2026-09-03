@@ -641,34 +641,14 @@ function matchPrefix(i,p){
   }
   return {matched:false};
 }
-function handleQuery(r,t){
-  if(!r) return {text:'請輸入姓名', quickReply:bA()};
-  var directTask=null;
-  if(t==='task'){
-    directTask=showTasksForName(String(r).trim());
-    if(!directTask.notFound)return directTask;
-  }
-  var all=getAssistantNames(), no=nrm(r), ex=all.find(n=>n===no);
-  if(ex){
-    if(t==='task') return directTask;
-    if(t==='att') return showAttendanceStats(ex);
-    if(t==='sub') return showSubstituteInfo(ex);
-    if(t==='cert') return showCertificationProgress(ex);
-    if(t==='exam') return showExamResults(ex);
-  }
-  var cls=findClosestName(no, all);
-  if(cls.dist<=2){
-    var res;
-    if(t==='task') res=showTasksForName(cls.name);
-    else if(t==='att') res=showAttendanceStats(cls.name);
-    else if(t==='sub') res=showSubstituteInfo(cls.name);
-    else if(t==='cert') res=showCertificationProgress(cls.name);
-    else res=showExamResults(cls.name);
-    res.text='您輸入的是「'+r+'」，已為您查詢最接近的姓名「'+cls.name+'」。\n\n'+res.text;
-    return res;
-  }
-  if(t==='task')return directTask;
-  return {text:'查無「'+r+'」在助理名單中', quickReply:bA()};
+function handleBoundQuery(userId,type){
+  var name=getBoundName(userId);
+  if(!name)return{text:'請先回首頁選擇身份並完成綁定。',quickReply:qr([{label:'🏠 選擇身份',text:'主選單'}])};
+  if(type==='task')return showTasksForName(name);
+  if(type==='att')return showAttendanceStats(name);
+  if(type==='sub')return showSubstituteInfo(name);
+  if(type==='cert')return showCertificationProgress(name);
+  return showExamResults(name);
 }
 
 // ========== 用戶綁定相關函數 ==========
@@ -1223,7 +1203,7 @@ function updateCertificationForPerson(studentName, equipName) {
     if (userId) {
       var message = '🎉 恭喜！您的認證已更新。\n\n' +
                     '📌 通過器材：' + equipName + '\n' +
-                    '請輸入「認證 姓名」查看最新進度。';
+                    '請直接點選「認證進度」查看最新資料。';
       pushMessage(userId, message);
       Logger.log('已發送認證更新通知給：' + studentName);
     }
@@ -3285,8 +3265,7 @@ function getReply(u, i) {
   if(u==='選擇中心助理')return selectIdentity('assistant',i);
   if(u==='選擇對外學生')return selectIdentity('external',i);
   if(u==='我的任務'){
-    var boundTaskName=getBoundName(i);
-    return boundTaskName?showTasksForName(boundTaskName):{text:'請先回首頁選擇身份並完成綁定。',quickReply:qr([{label:'🏠 選擇身份',text:'主選單'}])};
+    return handleBoundQuery(i,'task');
   }
   
   // ===== 排班查詢指令 =====
@@ -3335,34 +3314,26 @@ function getReply(u, i) {
   if (u === '校內吃什麼') return { text: '🏫 校內推薦：' + getRandomFood('校內'), quickReply: bA() };
   
   if (u === '個人點名統計') {
-    var n = getAssistantNames();
-    if (!n.length) return { text: '⚠️ 目前無法讀取助理名單，請確認試算表設定或稍後再試。', quickReply: bA() };
-    return { text: '📊 查詢個人點名統計\n請輸入「點名 姓名」，例如：點名 林宇俊', quickReply: bA() };
+    return handleBoundQuery(i,'att');
   }
   if (u === '代班查詢') {
-    var n = getAssistantNames();
-    if (!n.length) return { text: '⚠️ 目前無法讀取助理名單，請確認試算表設定或稍後再試。', quickReply: bA() };
-    return { text: '📋 查詢代班紀錄\n請輸入「代班 姓名」，例如：代班 林宇俊', quickReply: bA() };
+    return handleBoundQuery(i,'sub');
   }
   if (u === '認證' || u === '認證進度') {
-    var n = getAssistantNames();
-    if (!n.length) return { text: '⚠️ 目前無法讀取助理名單，請確認試算表設定或稍後再試。', quickReply: bA() };
-    return { text: '📋 查詢個人認證進度\n請輸入「認證 姓名」，例如：認證 林宇俊', quickReply: bA() };
+    return handleBoundQuery(i,'cert');
   }
   if (u === '考試結果') {
-    var n = getAssistantNames();
-    if (!n.length) return { text: '⚠️ 目前無法讀取助理名單，請確認試算表設定或稍後再試。', quickReply: bA() };
-    return { text: '📋 查詢考試結果\n請輸入「考試結果 姓名」，例如：考試結果 林宇俊', quickReply: bA() };
+    return handleBoundQuery(i,'exam');
   }
   // ===== 前綴比對（實際查詢）=====
   var ap = ['點名統計', '個人點名', '點名'];
   var sp = ['代班查詢', '代班紀錄', '代班'];
   var cp = ['認證進度', '認證', '缺考', '進度'];
   var ep = ['考試結果', '成績', '結果'];
-  if ((m = matchPrefix(u, ap)).matched) return handleQuery(m.rest, 'att');
-  if ((m = matchPrefix(u, sp)).matched) return handleQuery(m.rest, 'sub');
-  if ((m = matchPrefix(u, cp)).matched) return handleQuery(m.rest, 'cert');
-  if ((m = matchPrefix(u, ep)).matched) return handleQuery(m.rest, 'exam');
+  if ((m = matchPrefix(u, ap)).matched) return handleBoundQuery(i, 'att');
+  if ((m = matchPrefix(u, sp)).matched) return handleBoundQuery(i, 'sub');
+  if ((m = matchPrefix(u, cp)).matched) return handleBoundQuery(i, 'cert');
+  if ((m = matchPrefix(u, ep)).matched) return handleBoundQuery(i, 'exam');
 
   // ===== 導航選單 =====
   var nav = {
