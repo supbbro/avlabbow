@@ -1,4 +1,6 @@
 'use strict';
+var APP_IDS = require('./config').ids;
+var externalIdentity = require('./external-identity');
 var CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 var TASK_SHEET_ID=process.env.INTERNAL_TASK_FILE_ID||'1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z',TASK_SHEET_NAME='1151 對內教學官／考官安排',COL_TASK_DATE=0,COL_TASK_PHASE=1,COL_TASK_LEVEL=2,COL_TASK_ITEM=3,COL_TASK_NAME=4,COL_TASK_LOCATION=5;
 var INTERNAL_ATTENDANCE_SHEET_ID=process.env.INTERNAL_ATTENDANCE_SHEET_ID||'15INDclJDJSXKlXNDh2x50zbfeSi9hsGO8TKaJXjvlWo';
@@ -15,6 +17,7 @@ var BIND_COL_USER_ID = 0;
 var BIND_COL_NAME = 1;
 var BIND_COL_TIME = 2;
 var BIND_COL_STUDENT_NUMBER = 3;
+var BIND_COL_ROLE = 4;
 var PENDING_ROLE_PREFIX = 'pending_role_';
 
 // ========== 補考表單設定 ==========
@@ -590,22 +593,25 @@ function getActiveAssistantRecords(){
   }catch(e){return[];}
 }
 
-// 對外考生也需要綁定 LINE，才能在未通過時收到補考表單。
-// 名單直接讀取已同步的「任務學生」，不另建一份容易過期的名冊。
+// 對外考生在報名後即可綁定。報名回覆為優先來源，三張保證金表為備援來源。
 function getExternalStudents(){
+  var registrations=[],deposits=[];
   try{
-    var s=SpreadsheetApp.openById(EXTERNAL_RESULTS_SHEET_ID).getSheetByName('任務學生');
-    if(!s||s.getLastRow()<2)return[];
-    var rows=s.getRange(2,3,s.getLastRow()-1,2).getValues(), seen={};
-    return rows.map(function(row){ return {name:nrm(row[0]), number:String(row[1]||'').trim()}; })
-      .filter(function(student){
-        if(!student.name)return false;
-        var key=student.name+'|'+nrm(student.number);
-        if(seen[key])return false;
-        seen[key]=true;
-        return true;
-      });
-  }catch(e){return[];}
+    var response=SpreadsheetApp.openById(APP_IDS.externalRegistration).getSheetByName('表單回覆 1');
+    if(response)registrations=externalIdentity.parseRegistrationIdentities(response.getDataRange().getValues());
+  }catch(e){}
+  try{
+    var depositBook=SpreadsheetApp.openById(APP_IDS.deposit),raw={};
+    ['考試週保證金','第一次補考週保證金','第二次補考週保證金'].forEach(function(sheetName){
+      var target=depositBook.getSheetByName(sheetName);
+      if(target)raw[sheetName]=target.getDataRange().getValues();
+    });
+    deposits=externalIdentity.parseDepositIdentities(raw);
+  }catch(e){}
+  return externalIdentity.mergeExternalIdentities(registrations,deposits).map(function(student){
+    student.name=nrm(student.name);
+    return student;
+  });
 }
 function getExternalStudentNames(){
   return[...new Set(getExternalStudents().map(function(student){return student.name;}))].sort();
@@ -671,13 +677,13 @@ function recordUser(userId) {
   var sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
   if (!sheet) {
     sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).insertSheet(USER_BIND_SHEET_NAME);
-    sheet.getRange(1, 1, 1, 4).setValues([['LINE User ID', '姓名', '綁定時間', '學號']]);
+    sheet.getRange(1, 1, 1, 5).setValues([['LINE User ID', '姓名', '綁定時間', '學號', '身分類型']]);
   }
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (data[i][BIND_COL_USER_ID] === userId) return;
   }
-  sheet.appendRow([userId, '', new Date(), '']);
+  sheet.appendRow([userId, '', new Date(), '', '']);
   Logger.log('記錄新用戶：' + userId);
 }
 
@@ -687,7 +693,10 @@ function handleBindName(rest, userId) {
   if (!rest) return { text: pendingRole==='assistant'?'請輸入「我是 姓名」完成中心助理綁定。':'請輸入「我是 姓名 學號」完成對外學生綁定，例如：我是 王小明 112405001。', quickReply: bA() };
   var raw = rest.trim(), parts = raw.split(/[\s　]+/), suppliedNumber = parts.length > 1 ? parts.pop() : '';
   var requestedName = parts.join(''), normalizedName = nrm(requestedName || raw);
-  var externalMatches = getExternalStudents().filter(function(student){ return student.name === normalizedName; });
+  var externalMatches = getExternalStudents().filter(function(student){
+    return externalIdentity.namesMatch(student.name, normalizedName)
+      || (student.aliases||[]).some(function(alias){return externalIdentity.namesMatch(alias,normalizedName);});
+  });
   var activeAssistants=getActiveAssistantRecords();
   var assistantName = activeAssistants.map(function(person){return person.name;}).find(function(candidate){ return candidate === normalizedName; });
   var matchedStudent = null;
@@ -704,9 +713,10 @@ function handleBindName(rest, userId) {
   var sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
   if (!sheet) {
     sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).insertSheet(USER_BIND_SHEET_NAME);
-    sheet.getRange(1, 1, 1, 4).setValues([['LINE User ID', '姓名', '綁定時間', '學號']]);
+    sheet.getRange(1, 1, 1, 5).setValues([['LINE User ID', '姓名', '綁定時間', '學號', '身分類型']]);
   }
   if (sheet.getRange(1, BIND_COL_STUDENT_NUMBER + 1).getValue() !== '學號') sheet.getRange(1, BIND_COL_STUDENT_NUMBER + 1).setValue('學號');
+  if (sheet.getRange(1, BIND_COL_ROLE + 1).getValue() !== '身分類型') sheet.getRange(1, BIND_COL_ROLE + 1).setValue('身分類型');
   var data = sheet.getDataRange().getValues();
   var rowIndex = -1;
   for (var i = 1; i < data.length; i++) {
@@ -715,10 +725,19 @@ function handleBindName(rest, userId) {
       break;
     }
   }
+  var role=pendingRole==='external'?'external':'assistant';
+  for(var duplicateIndex=1;duplicateIndex<data.length;duplicateIndex++){
+    var duplicateRow=duplicateIndex+1;
+    if(duplicateRow===rowIndex)continue;
+    var sameIdentity=role==='external'
+      ? finalNumber&&nrm(data[duplicateIndex][BIND_COL_STUDENT_NUMBER])===nrm(finalNumber)
+      : nrm(data[duplicateIndex][BIND_COL_NAME])===nrm(finalName)&&String(data[duplicateIndex][BIND_COL_ROLE]||'')!=='external';
+    if(sameIdentity)sheet.getRange(duplicateRow,BIND_COL_NAME+1,1,4).setValues([['','','','']]);
+  }
   if (rowIndex === -1) {
-    sheet.appendRow([userId, finalName, new Date(), finalNumber]);
+    sheet.appendRow([userId, finalName, new Date(), finalNumber, role]);
   } else {
-    sheet.getRange(rowIndex, BIND_COL_NAME + 1, 1, 3).setValues([[finalName, new Date(), finalNumber]]);
+    sheet.getRange(rowIndex, BIND_COL_NAME + 1, 1, 4).setValues([[finalName, new Date(), finalNumber, role]]);
   }
   cache.remove(PENDING_ROLE_PREFIX+userId);
   var destination=pendingRole==='external'?'對外學生':'中心助理';
@@ -768,7 +787,7 @@ function selectIdentity(role,userId){
     cache.put(PENDING_ROLE_PREFIX+userId,'assistant',1800);
     return{text:'👩‍💼 中心助理綁定\n\n請輸入「我是 姓名」。\n只有目前名單中的 '+activeAssistants.length+' 位中心助理可以完成綁定。',quickReply:qr([{label:'🏠 回首頁',text:'主選單'}])};
   }
-  var student=getExternalStudents().some(function(person){return bound&&person.name===bound.name&&nrm(person.number)===nrm(bound.number);});
+  var student=getExternalStudents().some(function(person){return bound&&nrm(person.number)===nrm(bound.number);});
   if(student)return Object.assign(getExternalMainMenu(),{navigationPage:'對外學生'});
   cache.put(PENDING_ROLE_PREFIX+userId,'external',1800);
   return{text:'👨‍🎓 對外學生綁定\n\n請輸入「我是 姓名 學號」。\n例如：我是 王小明 112405001',quickReply:qr([{label:'🏠 回首頁',text:'主選單'}])};

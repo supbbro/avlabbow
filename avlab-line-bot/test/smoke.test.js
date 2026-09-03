@@ -18,6 +18,7 @@ const { parseTeachingSheet, parseExamSheet } = require('../src/external-schedule
 const { parseInternalTaskWorkbook } = require('../src/internal-task-parser');
 const { parseDepositWorkbook } = require('../src/deposit-parser');
 const { parseRegistrationRows } = require('../src/external-registration-parser');
+const externalIdentity = require('../src/external-identity');
 const navigation = require('../src/navigation');
 
 test('main menu survives the Apps Script to Node compatibility layer', () => {
@@ -347,17 +348,26 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   const tasks = resultBook.getSheetByName('對外任務');
   const students = resultBook.getSheetByName('任務學生');
   students.appendRow(['EXT-BIND-TEST', 'STU-BIND-TEST', '外部測試生', 'TEST', 1, '未點名', '未記錄', '', '13:00', '13:15', '']);
+  const registrationBook = runtime.openById(ids.externalRegistration);
+  const registrations = registrationBook.getSheetByName('表單回覆 1') || registrationBook.insertSheet('表單回覆 1');
+  registrations.appendRow(['時間戳記','','','','姓名','','學號']);
+  registrations.appendRow(['2026/9/4','','','','外部測試生','','TEST']);
+  const bindingSheet = runtime.openById(ids.master).getSheetByName('用戶綁定');
+  bindingSheet.appendRow(['U-external-student-old','外部測試生','','TEST','external']);
   bot.getReply('選擇對外學生', 'U-external-student-typo-test');
-  const typoResponse = bot.getReply('我是 外部測試身 TEST', 'U-external-student-typo-test');
+  const typoResponse = bot.getReply('我是 完全不同 TEST', 'U-external-student-typo-test');
   assert.match(typoResponse.text, /姓名或學號/);
   assert.doesNotMatch(typoResponse.text, /綁定成功/);
   bot.getReply('選擇對外學生', 'U-external-student-test');
   const missingNumber = bot.getReply('我是 外部測試生', 'U-external-student-test');
   assert.match(missingNumber.text, /學號/);
   assert.doesNotMatch(missingNumber.text, /綁定成功/);
-  const response = bot.getReply('我是 外部測試生 TEST', 'U-external-student-test');
+  const response = bot.getReply('我是 外部測試身 TEST', 'U-external-student-test');
   assert.match(response.text, /綁定成功/);
   assert.match(response.text, /外部測試生/);
+  const bindingRows = bindingSheet.getDataRange().getValues();
+  assert.equal(bindingRows.find(row => row[0] === 'U-external-student-old')[1], '');
+  assert.equal(bindingRows.find(row => row[0] === 'U-external-student-test')[4], 'external');
 
   tasks.appendRow(['EXT-BIND-TEST','1151','考試',new Date('2026-09-20'),'12:00','13:00','H6','401','測試者','','G1','已排定',true,true,'','','','']);
   runtime.httpOperations = [];
@@ -392,11 +402,16 @@ test('assistant identity binding only accepts the active attendance roster', () 
   const rows = [['姓名／項目','學號']];
   for (let index = 1; index <= 53; index++) rows.push([`現役${String(index).padStart(2, '0')}`, `123456${String(index).padStart(3, '0')}`]);
   roster.getRange(1, 1, rows.length, 2).setValues(rows);
+  const bindingSheet = runtime.openById(ids.master).getSheetByName('用戶綁定');
+  bindingSheet.appendRow(['U-active-assistant-old','現役01','','','assistant']);
 
   assert.match(bot.getReply('選擇中心助理', 'U-active-assistant').text, /53 位中心助理/);
   const active = bot.getReply('我是 現役01', 'U-active-assistant');
   assert.match(active.text, /綁定成功/);
   assert.match(active.text, /助理資訊/);
+  const bindingRows = bindingSheet.getDataRange().getValues();
+  assert.equal(bindingRows.find(row => row[0] === 'U-active-assistant-old')[1], '');
+  assert.equal(bindingRows.find(row => row[0] === 'U-active-assistant')[4], 'assistant');
 
   bot.getReply('選擇中心助理', 'U-retired-assistant');
   const retired = bot.getReply('我是 已退助理', 'U-retired-assistant');
@@ -478,6 +493,29 @@ test('registration response is the deposit authority and counts each exam equipm
   const registrations = parseRegistrationRows([headers, row]);
   assert.deepEqual(registrations[0].equipment, ['X160', 'H6']);
   assert.equal(registrations[0].number, '111101017');
+});
+
+test('external binding identities merge both registration branches and deposit-only students by number', () => {
+  const registrationRows = [
+    ['時間戳記','','','','姓名','','學號','','姓名','','學號'],
+    ['','','','','報名優先','','1001','','','',''],
+    ['','','','','','','','','保證金同學','','1002']
+  ];
+  const registrations = externalIdentity.parseRegistrationIdentities(registrationRows);
+  const deposits = externalIdentity.parseDepositIdentities({
+    '考試週保證金': [
+      ['姓名','系級','學號'],
+      ['報名舊名','','1001'],
+      ['只有保證金','','1003']
+    ]
+  });
+  const merged = externalIdentity.mergeExternalIdentities(registrations, deposits);
+  assert.deepEqual(merged.map(person => [person.name, person.number]), [
+    ['報名優先','1001'], ['保證金同學','1002'], ['只有保證金','1003']
+  ]);
+  assert.deepEqual(merged[0].aliases, ['報名優先', '報名舊名']);
+  assert.equal(externalIdentity.namesMatch('外部 測試生', '外部測試身'), true);
+  assert.equal(externalIdentity.namesMatch('外部測試生', '完全不同'), false);
 });
 
 test('group matrix sync derives green and retest colors from cumulative LINE records', () => {

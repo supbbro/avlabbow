@@ -103,11 +103,11 @@ async function handleLineEvent(event) {
       const combinedTaskQuery = text === '我的任務';
       const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
       if (bindingCommand) {
-        await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalResults], { force: true });
+        await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit], { force: true });
       } else if (text === '選擇中心助理') {
         await runtime.loadOnly([ids.master, ids.internalAttendance], { force: true });
       } else if (text === '選擇對外學生') {
-        await runtime.loadOnly([ids.master, ids.externalResults], { force: true });
+        await runtime.loadOnly([ids.master, ids.externalRegistration, ids.deposit], { force: true });
       } else if (internalTeaching.isInternalCommand(text)) {
         await runtime.loadOnly(INTERNAL_WORKBOOKS, { force: internalTeaching.requiresFreshData(text) });
       } else if (combinedTaskQuery) {
