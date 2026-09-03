@@ -10,7 +10,7 @@ const ids = {
   internalCertification: process.env.INTERNAL_CERTIFICATION_SHEET_ID || '1vUnpcRVsQmUH9zjqic8KFf5IlGk0E5GSH-rkhBGE7bk',
   master: '1iqzwP74yZtlxcy2qnJ8y1NvMCUdlNDP73CaQECVZodY',
   leave: '1A0wZWctAbihNzNi3Ji0CVW6at024QQQDnNzdQP1K2XI',
-  external: '1UGoTWRq59rNatZn5ZUYRu-reiYiRquI2GREeWDsf5sU',
+  external: process.env.EXTERNAL_EXAMINER_CHANGE_RESPONSE_ID || '1sk5uQakzuqKzU97hxgCMtJKpwAL1eBTfWW0gN_oNCO8',
   assistant: '1n5-GLLMxCORCwNqne2nLzplC16n9YPfbKlU2oxzuCp0',
   cert: '1R-3NyQ24se2jWE-YunOGXKu2sc4bpBHzE7tmI4RCWD0',
   retest: '1H5kVv2AOtasMvS-YBBtjG_TYyiV09b3al586jbeB8Zc',

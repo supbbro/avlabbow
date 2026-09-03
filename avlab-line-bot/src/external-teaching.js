@@ -31,6 +31,25 @@ const externalNav = (items = [], parentText = '對外學生', parentLabel = '回
   { label: '🏠 回首頁', text: '主選單' }
 ];
 const norm = value => String(value ?? '').replace(/[（(][^）)]*[）)]/g, '').replace(/\s+/g, '');
+function editDistance(left, right) {
+  const a = norm(left).toLowerCase(), b = norm(right).toLowerCase();
+  const row = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    let previous = row[0]; row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const current = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, previous + (a[i - 1] === b[j - 1] ? 0 : 1));
+      previous = current;
+    }
+  }
+  return row[b.length];
+}
+function namesSimilar(left, right) {
+  const a = norm(left).toLowerCase(), b = norm(right).toLowerCase();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return Math.min(a.length, b.length) >= 3 && editDistance(a, b) <= 1;
+}
 function equipmentKey(value) {
   const key = String(value || '').toLowerCase().replace(/考試|課程|器材|無線追焦|無線追/g, match => match.startsWith('無線追') ? '無線追' : '').replace(/[^a-z0-9\u3400-\u9fff]/g, '');
   if (/par.*200|200.*par/.test(key)) return 'par200w';
@@ -46,14 +65,16 @@ function dateKey(value) {
 }
 function replaceExaminerName(value, originalName, substituteName) {
   const current = String(value || '').trim();
-  if (norm(current) === norm(originalName)) return substituteName;
+  if (norm(current) === norm(substituteName)) return current;
+  if (namesSimilar(current, originalName)) return substituteName;
   const pieces = current.split(/([,，、/&+＋])/);
   let changed = false;
   const replaced = pieces.map(piece => {
-    if (norm(piece) !== norm(originalName)) return piece;
+    if (!namesSimilar(piece, originalName)) return piece;
     changed = true;
     return substituteName;
   }).join('');
+  if (!changed && pieces.some(piece => norm(piece) === norm(substituteName))) return current;
   return changed ? replaced : '';
 }
 const isExam = task => task.phase !== '教學';
@@ -81,6 +102,16 @@ function userIdForName(name, number = '') {
     return String(rows[i][0] || '');
   }
   return '';
+}
+
+function userIdForExaminerName(name) {
+  const bindSheet = SpreadsheetApp.openById(ids.master).getSheetByName('用戶綁定');
+  if (!bindSheet || !name) return '';
+  const rows = bindSheet.getDataRange().getValues().slice(1).filter(row => row[0] && row[1]);
+  const exact = rows.find(row => norm(row[1]) === norm(name));
+  if (exact) return String(exact[0]);
+  const candidates = rows.filter(row => namesSimilar(row[1], name));
+  return candidates.length === 1 ? String(candidates[0][0]) : '';
 }
 
 function taskFromRow(row, rowNumber) {
@@ -300,7 +331,7 @@ function syncFromSchedule() {
     const status = !scheduleChanged && ['點名中', '已完成'].includes(currentStatus) ? currentStatus : '已排定';
     const oneHourSentAt = !scheduleChanged && !examinerChanged && reminderBelongsToSchedule(existing?.task.twoHoursSentAt, incoming.date, incoming.start)
       ? existing.task.twoHoursSentAt : '';
-    const incomingExaminerUserId = userIdForName(incoming.examiner);
+    const incomingExaminerUserId = userIdForExaminerName(incoming.examiner);
     const desired = [incoming.id, incoming.term, incoming.phase, incoming.date, incoming.start, incoming.end, incoming.equipment, incoming.location,
       incoming.examiner, incomingExaminerUserId || (!examinerChanged ? existing?.task.examinerUserId : '') || '', existing?.task.groupId || '', status,
       existing ? existing.task.dayBefore : true, existing ? existing.task.twoHours : true,
@@ -463,6 +494,21 @@ function replaceExternalExaminer(submission) {
   return changes;
 }
 
+function finishExaminerChange(event, outcome) {
+  const row = Number(event?.range?.getRow?.() || 0);
+  const responseSheet = event?.range?.getSheet?.();
+  if (responseSheet && row > 1) {
+    const status = outcome.updated
+      ? `已同步（${outcome.updated} 格／${outcome.tasks || 0} 任務）`
+      : outcome.reason === 'no-substitute' ? '略過：未提供代班人'
+        : outcome.reason === 'substitute-not-certified' ? '略過：代班人未通過認證'
+          : '失敗：找不到對應場次';
+    responseSheet.getRange(1, 8, 1, 2).setValues([['同步狀態', '同步時間']]);
+    responseSheet.getRange(row, 8, 1, 2).setValues([[status, new Date()]]);
+  }
+  return outcome;
+}
+
 function onExaminerChangeFormSubmit(event) {
   const values = event?.values || [];
   const submission = {
@@ -473,13 +519,13 @@ function onExaminerChangeFormSubmit(event) {
     substituteName: String(values[5] || '').trim(),
     certified: String(values[6] || '').trim()
   };
-  if (!submission.substituteName || /^(?:無|沒有|否)$/.test(submission.hasSubstitute)) return { updated: 0, skipped: true, reason: 'no-substitute' };
-  if (/^(?:無|沒有|否|未通過)$/.test(submission.certified)) return { updated: 0, skipped: true, reason: 'substitute-not-certified' };
+  if (!submission.substituteName || /^(?:無|沒有|否)$/.test(submission.hasSubstitute)) return finishExaminerChange(event, { updated: 0, skipped: true, reason: 'no-substitute' });
+  if (/^(?:無|沒有|否|未通過)$/.test(submission.certified)) return finishExaminerChange(event, { updated: 0, skipped: true, reason: 'substitute-not-certified' });
   const changes = replaceExternalExaminer(submission);
-  const originalUserId = userIdForName(submission.originalName);
+  const originalUserId = userIdForExaminerName(submission.originalName);
   if (!changes.length) {
     if (originalUserId) queuePush(originalUserId, reply(`⚠️ 找不到可更動的對外任務\n\n日期：${String(submission.date || '')}\n器材：${submission.equipment}\n原考官：${submission.originalName}\n請檢查表單內容是否與分班表一致。`));
-    return { updated: 0, skipped: false, reason: 'task-not-found' };
+    return finishExaminerChange(event, { updated: 0, skipped: false, reason: 'task-not-found' });
   }
   syncFromSchedule();
   const changedSheets = new Set(changes.map(change => change.sheetName));
@@ -487,7 +533,7 @@ function onExaminerChangeFormSubmit(event) {
     && dateKey(task.date) === dateKey(submission.date)
     && equipmentKey(task.equipment) === equipmentKey(submission.equipment)
     && norm(task.examiner) === norm(submission.substituteName));
-  const substituteUserId = userIdForName(submission.substituteName);
+  const substituteUserId = userIdForExaminerName(submission.substituteName);
   if (substituteUserId) for (const task of tasks) {
     queuePush(substituteUserId, reply(`🔔 你已接下一項對外代班任務\n\n原考官：${submission.originalName}\n${taskText(task)}\n\n已替你更新分班表，可直接由下方開始點名。`, [
       { label: '開始聊天室點名', text: `開始點名 ${task.id}` },
@@ -495,7 +541,24 @@ function onExaminerChangeFormSubmit(event) {
     ]));
   }
   if (originalUserId) queuePush(originalUserId, reply(`✅ 對外考官更動已完成\n\n日期：${String(submission.date || '')}\n器材：${submission.equipment}\n新考官：${submission.substituteName}${substituteUserId ? '\n已將點名入口傳給新考官。' : '\n⚠️ 新考官尚未綁定 LINE，目前無法傳送點名入口。'}`));
-  return { updated: changes.length, tasks: tasks.length, notified: Boolean(substituteUserId) };
+  return finishExaminerChange(event, { updated: changes.length, tasks: tasks.length, notified: Boolean(substituteUserId) });
+}
+
+function processPendingExaminerChanges() {
+  const responseSheet = SpreadsheetApp.openById(ids.external).getSheetByName('表單回覆 1');
+  if (!responseSheet) return 0;
+  responseSheet.getRange(1, 8, 1, 2).setValues([['同步狀態', '同步時間']]);
+  const rows = responseSheet.getDataRange().getValues();
+  let processed = 0;
+  for (let index = 1; index < rows.length; index++) {
+    if (!rows[index][0] || String(rows[index][7] || '').trim()) continue;
+    onExaminerChangeFormSubmit({
+      values: rows[index].slice(0, 7),
+      range: responseSheet.getRange(index + 1, 1)
+    });
+    processed++;
+  }
+  return processed;
 }
 
 function groups() {
@@ -1311,4 +1374,4 @@ function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, onExaminerChangeFormSubmit, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, replaceExaminerName, replaceExternalExaminer } };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName } };

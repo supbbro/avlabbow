@@ -604,7 +604,7 @@ test('exam assignments propagate merged date headers and choose the correct exam
   assert.equal(tasks[0].date.getFullYear(), 2027);
 });
 
-test('external examiner change updates the schedule and immediately sends the attendance entry to the substitute', () => {
+test('external examiner change polling tolerates a one-character name typo and sends the attendance entry once', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);
   try {
@@ -631,18 +631,26 @@ test('external examiner change updates the schedule and immediately sends the at
     bindings.appendRow(['U-ORIGINAL','原考官','','']);
     bindings.appendRow(['U-SUBSTITUTE','新考官','','']);
 
+    const responses = isolated.openById(ids.external).insertSheet('表單回覆 1');
+    responses.appendRow(['時間戳記','原考官','日期','器材','找到代班','代班考官','通過認證','同步狀態','同步時間']);
+    responses.appendRow(['2026/9/3 12:00:00','原考宮','2026/9/10','H6','有','新考官','有','','']);
+
     isolated.httpOperations = [];
-    const outcome = externalTeaching.onExaminerChangeFormSubmit({ values: ['2026/9/3 12:00:00','原考官','2026/9/10','H6','有','新考官','有'] });
-    assert.deepEqual(outcome, { updated: 1, tasks: 1, notified: true });
+    assert.equal(externalTeaching.processPendingExaminerChanges(), 1);
     assert.equal(schedule.getRange(6, 2).getValue(), '新考官');
     assert.equal(tasks.getRange(2, 9).getValue(), '新考官');
     assert.equal(tasks.getRange(2, 10).getValue(), 'U-SUBSTITUTE');
+    assert.match(responses.getRange(2, 8).getValue(), /^已同步/);
     const pushes = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload));
     const substitutePush = pushes.find(push => push.to === 'U-SUBSTITUTE');
     assert.ok(substitutePush);
     assert.match(substitutePush.messages[0].text, /已接下一項對外代班任務/);
     assert.match(substitutePush.messages[0].quickReply.items[0].action.text, /^開始點名 EXT-/);
     assert.equal(pushes.some(push => push.to === 'U-ORIGINAL'), true);
+    assert.equal(externalTeaching.processPendingExaminerChanges(), 0);
+    assert.equal(isolated.httpOperations.length, pushes.length);
+    assert.equal(externalTeaching._test.namesSimilar('黃忻妤', '黃忻瑜'), true);
+    assert.equal(externalTeaching._test.replaceExaminerName('新考官', '原考官', '新考官'), '新考官');
   } finally {
     installGlobals(runtime);
   }
