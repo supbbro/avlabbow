@@ -203,20 +203,27 @@ async function schedulerTick() {
   const time = stamp.slice(11);
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: process.env.TZ || 'Asia/Taipei', weekday: 'short' }).format(new Date());
   const jobs = [];
-  jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
+  // 認證同步獨立且優先執行，避免其他排程失敗時連帶阻斷對內認證更新。
+  jobs.push([`internal-cert-sync:${stamp}`, internalTeaching.syncInternalCertifications, INTERNAL_WORKBOOKS]);
   jobs.push([`internal-reminders:${stamp}`, internalTeaching.sendInternalReminders, INTERNAL_WORKBOOKS]);
+  jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
   jobs.push([`external-group-sync:${stamp}`, () => externalGroupSync.syncExternalCertificationMatrix(runtime.api, ids.externalResults), []]);
   if (time === '20:00') jobs.push([`daily:${date}`, bot.sendTomorrowTaskReminders, null]);
   if (weekday === 'Mon' && time === '01:00') jobs.push([`weekly:${date}`, bot.calculateWeeklyGodOfGamblers, null]);
   for (const [key, fn, workbookIds] of jobs) {
     if (completedSchedules.has(key)) continue;
-    await enqueue(async () => {
-      if (workbookIds) await runtime.loadOnly(workbookIds, { force: true });
-      else await runtime.loadAll({ force: true });
-      await fn();
-      await runtime.flush();
-    });
-    completedSchedules.add(key);
+    try {
+      await enqueue(async () => {
+        if (workbookIds) await runtime.loadOnly(workbookIds, { force: true });
+        else await runtime.loadAll({ force: true });
+        await fn();
+        await runtime.flush();
+      });
+      completedSchedules.add(key);
+    } catch (error) {
+      // 同一分鐘內保留未完成狀態供下個 tick 重試，並繼續執行其他獨立工作。
+      console.error(`Scheduled job failed (${key}):`, error);
+    }
   }
   if (completedSchedules.size > 5000) completedSchedules.clear();
 }

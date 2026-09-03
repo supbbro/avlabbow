@@ -138,8 +138,14 @@ function listRecent(context) {
 
 function handleCommand(text, context) {
   const command = clean(text);
-  if (command === '點名') return sheetLinkReply();
-  if (command === '對內近期任務') return listRecent(context);
+  if (command === '點名') {
+    syncInternalCertifications();
+    return sheetLinkReply();
+  }
+  if (command === '對內近期任務') {
+    syncInternalCertifications();
+    return listRecent(context);
+  }
   const match = command.match(/^對內任務\s+(\S+)$/);
   if (match) {
     const task = findTask(match[1]);
