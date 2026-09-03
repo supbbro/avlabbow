@@ -377,8 +377,8 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   assert.equal(bindingRows.find(row => row[0] === 'U-external-student-old')[1], '');
   assert.equal(bindingRows.find(row => row[0] === 'U-external-student-test')[4], 'external');
   const confirmation = bot.getReply('選擇中心助理', 'U-external-student-test');
-  assert.match(confirmation.text, /目前已綁定/);
-  assert.match(confirmation.text, /是否要繼續使用目前身分/);
+  assert.match(confirmation.text, /目前已綁定為「對外學生」/);
+  assert.match(confirmation.text, /這次選擇的是「中心助理」/);
   assert.deepEqual(confirmation.quickReply.items.slice(0, 2).map(item => item.action.text), ['繼續使用目前身份', '更改身份 中心助理']);
   assert.match(bot.getReply('繼續使用目前身份', 'U-external-student-test').text, /對外學生資訊/);
   assert.match(bot.getReply('更改身份 中心助理', 'U-external-student-test').text, /請輸入：我是 姓名/);
@@ -418,6 +418,17 @@ test('assistant identity binding only accepts the active attendance roster', () 
   roster.getRange(1, 1, rows.length, 2).setValues(rows);
   const bindingSheet = runtime.openById(ids.master).getSheetByName('用戶綁定');
   bindingSheet.appendRow(['U-active-assistant-old','現役01','','','assistant']);
+  bindingSheet.appendRow(['U-active-assistant-confirm','現役02','','','assistant','']);
+
+  const initialConfirmation = bot.getReply('選擇中心助理', 'U-active-assistant-confirm');
+  assert.match(initialConfirmation.text, /更改名字/);
+  assert.deepEqual(initialConfirmation.quickReply.items.slice(0, 2).map(item => item.action.text), ['繼續使用目前身份', '更改名字 中心助理']);
+  assert.match(bot.getReply('更改名字 中心助理', 'U-active-assistant-confirm').text, /請輸入：我是 姓名/);
+  const renamed = bot.getReply('我是 現役02', 'U-active-assistant-confirm');
+  assert.match(renamed.text, /綁定成功/);
+  const directMenu = bot.getReply('選擇中心助理', 'U-active-assistant-confirm');
+  assert.match(directMenu.text, /助理資訊/);
+  assert.doesNotMatch(directMenu.text, /已找到您的綁定/);
 
   assert.match(bot.getReply('選擇中心助理', 'U-active-assistant').text, /53 位中心助理/);
   const active = bot.getReply('我是 現役01', 'U-active-assistant');

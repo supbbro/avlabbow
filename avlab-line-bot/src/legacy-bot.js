@@ -18,6 +18,7 @@ var BIND_COL_NAME = 1;
 var BIND_COL_TIME = 2;
 var BIND_COL_STUDENT_NUMBER = 3;
 var BIND_COL_ROLE = 4;
+var BIND_COL_CONFIRMED = 5;
 var PENDING_ROLE_PREFIX = 'pending_role_';
 
 // ========== 補考表單設定 ==========
@@ -657,13 +658,13 @@ function recordUser(userId) {
   var sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
   if (!sheet) {
     sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).insertSheet(USER_BIND_SHEET_NAME);
-    sheet.getRange(1, 1, 1, 5).setValues([['LINE User ID', '姓名', '綁定時間', '學號', '身分類型']]);
+    sheet.getRange(1, 1, 1, 6).setValues([['LINE User ID', '姓名', '綁定時間', '學號', '身分類型', '身分確認時間']]);
   }
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (data[i][BIND_COL_USER_ID] === userId) return;
   }
-  sheet.appendRow([userId, '', new Date(), '', '']);
+  sheet.appendRow([userId, '', new Date(), '', '', '']);
   Logger.log('記錄新用戶：' + userId);
 }
 
@@ -693,10 +694,11 @@ function handleBindName(rest, userId) {
   var sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
   if (!sheet) {
     sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).insertSheet(USER_BIND_SHEET_NAME);
-    sheet.getRange(1, 1, 1, 5).setValues([['LINE User ID', '姓名', '綁定時間', '學號', '身分類型']]);
+    sheet.getRange(1, 1, 1, 6).setValues([['LINE User ID', '姓名', '綁定時間', '學號', '身分類型', '身分確認時間']]);
   }
   if (sheet.getRange(1, BIND_COL_STUDENT_NUMBER + 1).getValue() !== '學號') sheet.getRange(1, BIND_COL_STUDENT_NUMBER + 1).setValue('學號');
   if (sheet.getRange(1, BIND_COL_ROLE + 1).getValue() !== '身分類型') sheet.getRange(1, BIND_COL_ROLE + 1).setValue('身分類型');
+  if (sheet.getRange(1, BIND_COL_CONFIRMED + 1).getValue() !== '身分確認時間') sheet.getRange(1, BIND_COL_CONFIRMED + 1).setValue('身分確認時間');
   var data = sheet.getDataRange().getValues();
   var rowIndex = -1;
   for (var i = 1; i < data.length; i++) {
@@ -712,12 +714,13 @@ function handleBindName(rest, userId) {
     var sameIdentity=role==='external'
       ? finalNumber&&nrm(data[duplicateIndex][BIND_COL_STUDENT_NUMBER])===nrm(finalNumber)
       : nrm(data[duplicateIndex][BIND_COL_NAME])===nrm(finalName)&&String(data[duplicateIndex][BIND_COL_ROLE]||'')!=='external';
-    if(sameIdentity)sheet.getRange(duplicateRow,BIND_COL_NAME+1,1,4).setValues([['','','','']]);
+    if(sameIdentity)sheet.getRange(duplicateRow,BIND_COL_NAME+1,1,5).setValues([['','','','','']]);
   }
+  var confirmedAt=new Date();
   if (rowIndex === -1) {
-    sheet.appendRow([userId, finalName, new Date(), finalNumber, role]);
+    sheet.appendRow([userId, finalName, confirmedAt, finalNumber, role, confirmedAt]);
   } else {
-    sheet.getRange(rowIndex, BIND_COL_NAME + 1, 1, 4).setValues([[finalName, new Date(), finalNumber, role]]);
+    sheet.getRange(rowIndex, BIND_COL_NAME + 1, 1, 5).setValues([[finalName, confirmedAt, finalNumber, role, confirmedAt]]);
   }
   cache.remove(PENDING_ROLE_PREFIX+userId);
   var destination=pendingRole==='external'?'對外學生':'中心助理';
@@ -754,7 +757,7 @@ function getBoundRecord(userId){
   var sheet=SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
   if(!sheet)return null;
   var data=sheet.getDataRange().getValues();
-  for(var i=1;i<data.length;i++)if(data[i][BIND_COL_USER_ID]===userId)return{name:nrm(data[i][BIND_COL_NAME]),number:String(data[i][BIND_COL_STUDENT_NUMBER]||'').trim(),role:String(data[i][BIND_COL_ROLE]||'').trim()};
+  for(var i=1;i<data.length;i++)if(data[i][BIND_COL_USER_ID]===userId)return{name:nrm(data[i][BIND_COL_NAME]),number:String(data[i][BIND_COL_STUDENT_NUMBER]||'').trim(),role:String(data[i][BIND_COL_ROLE]||'').trim(),confirmed:data[i][BIND_COL_CONFIRMED]||''};
   return null;
 }
 
@@ -776,6 +779,12 @@ function identityBindingPrompt(role){
 function continueBoundIdentity(userId){
   var bound=getBoundRecord(userId),role=identityRole(bound);
   if(!role)return{text:'目前沒有有效綁定，請回首頁重新選擇身分。',quickReply:qr([{label:'🏠 選擇身份',text:'主選單'}])};
+  var sheet=SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
+  if(sheet){
+    if(sheet.getRange(1,BIND_COL_CONFIRMED+1).getValue()!=='身分確認時間')sheet.getRange(1,BIND_COL_CONFIRMED+1).setValue('身分確認時間');
+    var data=sheet.getDataRange().getValues();
+    for(var i=1;i<data.length;i++)if(data[i][BIND_COL_USER_ID]===userId){sheet.getRange(i+1,BIND_COL_CONFIRMED+1).setValue(new Date());break;}
+  }
   return Object.assign(identityMenu(role),{navigationPage:identityRoleLabel(role)});
 }
 function beginIdentityChange(role,userId){
@@ -786,13 +795,19 @@ function beginIdentityChange(role,userId){
 function selectIdentity(role,userId){
   var bound=getBoundRecord(userId),cache=CacheService.getScriptCache();
   if(bound&&bound.name){
-    var currentRole=identityRole(bound),currentLabel=currentRole?identityRoleLabel(currentRole):'已綁定使用者';
+    var currentRole=identityRole(bound),currentLabel=currentRole?identityRoleLabel(currentRole):'已失效的舊身分';
     var targetLabel=identityRoleLabel(role);
-    return{text:'✅ 目前已綁定\n\n姓名：'+bound.name+(bound.number?'\n學號：'+bound.number:'')+'\n身分：'+currentLabel+'\n\n是否要繼續使用目前身分，或更改為「'+targetLabel+'」？',quickReply:qr([
-      {label:'✅ 繼續使用',text:'繼續使用目前身份'},
-      {label:'🔄 更改身份',text:'更改身份 '+targetLabel},
+    if(currentRole===role&&bound.confirmed)return Object.assign(identityMenu(role),{navigationPage:targetLabel});
+    if(currentRole===role)return{text:'✅ 已找到您的綁定\n\n姓名：'+bound.name+(bound.number?'\n學號：'+bound.number:'')+'\n身分：'+currentLabel+'\n\n資料正確可直接繼續；若姓名有變動，請選擇「更改名字」。',quickReply:qr([
+      {label:'✅ 資料正確',text:'繼續使用目前身份'},
+      {label:'✏️ 更改名字',text:'更改名字 '+targetLabel},
       {label:'🏠 回首頁',text:'主選單'}
     ])};
+    var choices=[];
+    if(currentRole)choices.push({label:'✅ 保持'+currentLabel,text:'繼續使用目前身份'});
+    choices.push({label:'🔄 更改身份',text:'更改身份 '+targetLabel});
+    choices.push({label:'🏠 回首頁',text:'主選單'});
+    return{text:'⚠️ 您目前已綁定為「'+currentLabel+'」\n\n姓名：'+bound.name+(bound.number?'\n學號：'+bound.number:'')+'\n\n您這次選擇的是「'+targetLabel+'」。若確定身分已改變，再按「更改身份」。',quickReply:qr(choices)};
   }
   if(role==='assistant'){
     var activeAssistants=getActiveAssistantRecords();
@@ -3203,13 +3218,14 @@ function handleDragonCommand(userId, text) {
   var cmd = text.trim();
   var now = Date.now();
   var cache = CacheService.getScriptCache();
+  var isIdentityCommand=/^(?:選擇中心助理|選擇對外學生|繼續使用目前身份|更改身份\s+|更改名字\s+|我是(?:\s|$)|綁定(?:\s|$))/.test(cmd);
   
   // 防抖：1秒內相同指令忽略（使用快取，不再依賴全域物件）
   var antiSpamKey = 'spam_' + userId + '_' + cmd;
-  if (cache.get(antiSpamKey)) {
+  if (!isIdentityCommand&&cache.get(antiSpamKey)) {
     return { text: "" }; // 靜默丟棄
   }
-  cache.put(antiSpamKey, '1', 1); // 鎖定1秒
+  if(!isIdentityCommand)cache.put(antiSpamKey, '1', 1); // 鎖定1秒
 
   // ===== 處理二次確認指令 =====
   if (cmd === '確認開始') {
@@ -3298,6 +3314,7 @@ function getReply(u, i) {
   if ((m = matchPrefix(u, bindPrefixes)).matched) return handleBindName(m.rest, i);
   if(u==='繼續使用目前身份')return continueBoundIdentity(i);
   if((m=u.match(/^更改身份\s+(中心助理|對外學生)$/)))return beginIdentityChange(m[1]==='對外學生'?'external':'assistant',i);
+  if((m=u.match(/^更改名字\s+(中心助理|對外學生)$/)))return beginIdentityChange(m[1]==='對外學生'?'external':'assistant',i);
   if(u==='選擇中心助理')return selectIdentity('assistant',i);
   if(u==='選擇對外學生')return selectIdentity('external',i);
   if(u==='我的任務'){
