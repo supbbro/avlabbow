@@ -24,7 +24,7 @@ const INTERNAL_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertif
 const TASK_QUERY_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.externalClassSchedule, ids.externalResults, ids.assistant, ids.master];
 const LIVE_TASK_WORKBOOKS = [ids.task, ids.externalClassSchedule, ids.externalResults];
 const LIGHTWEIGHT_COMMANDS = new Set(['主選單', '對外學生', '對外更多', '中心助理', '助理更多', '助理排程', '助理工具', '請假選項', '請假', '查詢', '常用連結']);
-const ASSISTANT_PROMPT_COMMANDS = new Set(['查任務', '個人點名統計', '代班查詢', '認證', '認證進度', '考試結果']);
+const ASSISTANT_PROMPT_COMMANDS = new Set(['個人點名統計', '代班查詢', '認證', '認證進度', '考試結果']);
 let serial = Promise.resolve();
 
 function enqueue(job) {
@@ -99,7 +99,7 @@ async function handleLineEvent(event) {
       const originalText = event.message.text.trim();
       const navigationResult = navigation.resolve(runtime.cache, userId, originalText);
       const text = navigationResult.command;
-      const combinedTaskQuery = text === '我的任務' || externalTeaching.isCombinedTaskQuery(text);
+      const combinedTaskQuery = text === '我的任務';
       const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
       if (bindingCommand) {
         await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalResults], { force: true });

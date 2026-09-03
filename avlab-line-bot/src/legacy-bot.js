@@ -779,7 +779,7 @@ function getInternalMainMenu(){
     quickReply:qr([
       {label:'📋 點名', text:'點名'},
       {label:'⏰ 我的對內／對外任務', text:'我的任務'},
-      {label:'🔍 個人／任務查詢', text:'查詢'},
+      {label:'🔍 個人查詢', text:'查詢'},
       {label:'📝 請假與代班', text:'請假選項'},
       {label:'📅 時程與排班', text:'助理排程'},
       {label:'📖 認證與補考', text:'越級考'},
@@ -792,7 +792,6 @@ function getQueryTypeMenu(){
   return{
     text:'請選擇您想查詢的項目：',
     quickReply:qr([
-      {label:'📋 查他人任務', text:'查任務'},
       {label:'📊 個人點名統計', text:'個人點名統計'},
       {label:'📋 認證進度', text:'認證'},
       {label:'📋 考試結果', text:'考試結果'},
@@ -834,7 +833,7 @@ var UNIFIED={
   額滿:'【報名額滿怎麼辦】\n選項消失代表該時段已額滿。基礎配件課程限額 10 名，其他項目限額 6-8 名，請選擇其他時段。若所有時段皆無法配合，請私訊粉專。',
   器材練習:'【器材練習借用說明】\n\n本實驗室開放同學於參加考試前，至影音實驗室現場借用器材練習。由於器材與場地數量有限，請務必遵守以下規定：\n\n📌 預約方式\n• 可預約未來兩週內的練習時段（最晚須於練習「前一天」完成預約，不接受當天預約）。\n• 每人每天「僅能預約一個時段」，每時段至多 2 小時。\n• 每個時段可練習 1～2 項器材。\n\n⏰ 預約限制\n• 為確保公平使用機會，若無提前預約，現場無法保證能使用到器材。\n• 練習時間以兩小時為上限，逾時將影響其他同學權益。\n\n📝 請至影音實驗室填寫紙本報名表',
   對內請假:'【對內請假規定與表單】\n\n⏳ 請假死線：\n正常請假死線為「星期三 23:59」。逾期緩衝死線為「星期四 18:00」，超過此時間皆視為曠職並扣考核分。\n\n📝 對內請假表單：\nhttps://forms.gle/BoZnX4fnerBNbf4T7\n\n⚠️ (若是對外學生要改考試時間，請輸入「學生請假」)',
-  越級考:'【越級考/補考說明】\n\n1️⃣ 若要申請越級考，請提前私訊對內教學組長「蔡季妍」，等候他協助安排考官。\n2️⃣ 由考生與考官自行約時間考試。\n3️⃣ 考試時由考官填寫認證表單，若登記為通過，兩個工作天內經理會開啟權限。\n\n【補考說明】\n若教學部已為同級助理開設統一考試時段，考試未過或未參與考試者，須於該年度完成補考：\n• 原開設時段考試未過：請找原考官補考。\n• 原開設時段未參與考試：請找原考官（若有兩位擇一即可）。\n• 若原考官已不在中心，請找對內教學組長「李慈恩」安排，流程同越級考。\n\n【越級考/加開申請表單】\nhttps://forms.gle/MgWKkzpQWheo8GMv9',
+  越級考:'【越級考/補考說明】\n\n1️⃣ 若要申請越級考，請提前私訊對內教學組長「李慈恩」，等候他協助安排考官。\n2️⃣ 由考生與考官自行約時間考試。\n3️⃣ 考試時由考官填寫認證表單，若登記為通過，兩個工作天內經理會開啟權限。\n\n【補考說明】\n若教學部已為同級助理開設統一考試時段，考試未過或未參與考試者，須於該年度完成補考：\n• 原開設時段考試未過：請找原考官補考。\n• 原開設時段未參與考試：請找原考官（若有兩位擇一即可）。\n• 若原考官已不在中心，請找對內教學組長「李慈恩」安排，流程同越級考。\n\n【越級考/加開申請表單】\nhttps://forms.gle/MgWKkzpQWheo8GMv9',
   對外考官更動:'【對外教學考官更動表單 (中心助理專用)】\n當您擔任對外考官卻無法出席時，請務必找好代班人後再填寫此表單！\n\nhttps://forms.gle/RRdeUaH43QYFYwaPA\n\n⚠️ 備註：對外考官若無法出席，「一定要找代班」！請找好代班人後再填寫此表單。',
   對內考官:'【1151 對內考官安排】\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit\n\n⚠️ 備註：對內考官若需請假，請務必尋找「代班人」，並填寫對內請假表單：\nhttps://forms.gle/KbXjTfp4EYh3SJGc8',
   對內時程:'【1151 對內教學／檢定時程】\n\n📚 9/6 暑訓教學\n📝 9/18 暑訓檢定\n📚 10/16 期中教學\n📝 10/30 期中檢定\n📚 11/6 期末教學\n📝 12/4 期末檢定\n\n完整器材與考官安排：\nhttps://docs.google.com/spreadsheets/d/1MDIpAfU2LYiv9LAduSDRDlh4vkgL6e5z/edit',
@@ -3215,11 +3214,6 @@ function getReply(u, i) {
   if (u === '甜點吃什麼') return { text: '🍰 甜點推薦：' + getRandomFood('甜點'), quickReply: bA() };
   if (u === '校內吃什麼') return { text: '🏫 校內推薦：' + getRandomFood('校內'), quickReply: bA() };
   
-  if (u === '查任務') {
-    var n = getAssistantNames();
-    if (!n.length) return { text: '⚠️ 目前無法讀取助理名單，請確認試算表設定或稍後再試。', quickReply: bA() };
-    return { text: '🔍 查詢教學/考官任務\n請輸入「任務 姓名」，例如：任務 林宇俊', quickReply: bA() };
-  }
   if (u === '個人點名統計') {
     var n = getAssistantNames();
     if (!n.length) return { text: '⚠️ 目前無法讀取助理名單，請確認試算表設定或稍後再試。', quickReply: bA() };
@@ -3241,12 +3235,10 @@ function getReply(u, i) {
     return { text: '📋 查詢考試結果\n請輸入「考試結果 姓名」，例如：考試結果 林宇俊', quickReply: bA() };
   }
   // ===== 前綴比對（實際查詢）=====
-  var tp = ['查任務', '任務查詢', '我的任務', '任務'];
   var ap = ['點名統計', '個人點名', '點名'];
   var sp = ['代班查詢', '代班紀錄', '代班'];
   var cp = ['認證進度', '認證', '缺考', '進度'];
   var ep = ['考試結果', '成績', '結果'];
-  if ((m = matchPrefix(u, tp)).matched) return handleQuery(m.rest, 'task');
   if ((m = matchPrefix(u, ap)).matched) return handleQuery(m.rest, 'att');
   if ((m = matchPrefix(u, sp)).matched) return handleQuery(m.rest, 'sub');
   if ((m = matchPrefix(u, cp)).matched) return handleQuery(m.rest, 'cert');

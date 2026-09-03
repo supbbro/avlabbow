@@ -65,6 +65,7 @@ test('internal menu groups each feature once without a catch-all more page', () 
   const leave = bot.getReply('請假選項', 'U-menu-leave').quickReply.items.map(item => item.action.text);
   const schedule = bot.getReply('助理排程', 'U-menu-schedule').quickReply.items.map(item => item.action.text);
   assert.equal(query.includes('代班查詢'), false);
+  assert.equal(query.includes('查任務'), false);
   assert.equal(leave.includes('代班查詢'), true);
   assert.equal(leave.includes('找代班'), false);
   assert.equal(schedule.includes('常用連結'), false);
@@ -79,10 +80,10 @@ test('back navigation returns through the real per-user page history', () => {
     put: (key, value) => cache.set(key, value)
   };
   const userId = 'U-history';
-  for (const command of ['主選單', '中心助理', '查詢', '查任務', '任務 徐嘉翔']) {
+  for (const command of ['主選單', '中心助理', '查詢', '認證', '認證 徐嘉翔']) {
     navigation.remember(facade, userId, command, true);
   }
-  assert.equal(navigation.resolve(facade, userId, '回上一頁').command, '查任務');
+  assert.equal(navigation.resolve(facade, userId, '回上一頁').command, '認證');
   assert.equal(navigation.resolve(facade, userId, '回上一頁').command, '查詢');
   assert.equal(navigation.resolve(facade, userId, '回上一頁').command, '中心助理');
   navigation.remember(facade, userId, '主選單', true);
@@ -167,7 +168,7 @@ test('external commands are routed to the smaller workbook set', () => {
   assert.equal(externalTeaching.isCombinedTaskQuery('近期任務'), false);
 });
 
-test('name task query includes assignments synchronized from the external schedule', () => {
+test('my task query includes internal and external assignments', () => {
   const assistantBook = runtime.openById(ids.assistant);
   const assistants = assistantBook.getSheetByName('助理名單') || assistantBook.insertSheet('助理名單');
   if (!assistants.getLastRow()) assistants.appendRow(['姓名']);
@@ -179,27 +180,22 @@ test('name task query includes assignments synchronized from the external schedu
   const internalTasks = runtime.openById(ids.task).getSheetByName('1151 對內教學官／考官安排') || runtime.openById(ids.task).insertSheet('1151 對內教學官／考官安排');
   if (!internalTasks.getLastRow()) internalTasks.appendRow(['日期','階段','級別','項目','教學官／考官','地點']);
   internalTasks.appendRow([new Date('2026-03-18'),'期中教學','二級','導播台','黃忻妤','新棚']);
-  const response = bot.getReply('任務 黃忻妤', 'U-test');
-  assert.match(response.text, /黃忻妤 的對內＋對外教學官／考官任務/);
-  assert.match(response.text, /\[對外\].*基礎配件課程/);
-  assert.match(response.text, /\[對內\].*導播台/);
-
   const binds = runtime.openById(ids.master).getSheetByName('用戶綁定') || runtime.openById(ids.master).insertSheet('用戶綁定');
   if (!binds.getLastRow()) binds.appendRow(['LINE User ID','姓名','綁定時間','學號']);
   binds.appendRow(['U-COMBINED','黃忻妤','','112703005']);
   const mine = bot.getReply('我的任務', 'U-COMBINED');
+  assert.match(mine.text, /黃忻妤 的對內＋對外教學官／考官任務/);
   assert.match(mine.text, /\[對內\].*導播台/);
   assert.match(mine.text, /\[對外\].*基礎配件課程/);
-  assert.match(response.text, /任務已過期/);
+  assert.match(mine.text, /任務已過期/);
 });
 
-test('task query can find an examiner who is not in the assistant roster', () => {
+test('other peoples tasks cannot be queried by name', () => {
   const tasks = runtime.openById(ids.externalResults).getSheetByName('對外任務');
   tasks.appendRow(['EXT-TEMP-EXAMINER','1151','教學',new Date('2026-03-19'),'12:00','13:00','聲音工作區','聲音工作區','真假','','','已排定']);
   const response = bot.getReply('任務 真假', 'U-test');
-  assert.match(response.text, /真假 的對內＋對外教學官／考官任務/);
-  assert.match(response.text, /\[對外\].*聲音工作區/);
-  assert.doesNotMatch(response.text, /助理名單/);
+  assert.doesNotMatch(response.text, /真假 的對內＋對外教學官／考官任務/);
+  assert.doesNotMatch(response.text, /\[對外\].*聲音工作區/);
 });
 
 test('group attendance writes a normalized record and completes the task', () => {
