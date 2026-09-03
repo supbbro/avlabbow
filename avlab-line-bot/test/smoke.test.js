@@ -81,8 +81,9 @@ test('assistant resource library groups official documents and all teaching vide
     '講義文件', '講義影片攝影', '講義影片燈光', '講義影片聲音', '講義影片影棚'
   ]);
   const documents = bot.getReply('講義文件', 'U-resources').text;
-  assert.match(documents, /1-4XPVE68GlFzydhFJObxXhXJCILBe7D4/);
+  assert.match(documents, /1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X/);
   assert.match(documents, /PageDownload\?fid=10553/);
+  assert.doesNotMatch(documents, /1-4XPVE68GlFzydhFJObxXhXJCILBe7D4|1tS-W8F87FkowayUkafvHK_YLhHG214HC/);
   const pages = ['講義影片攝影', '講義影片燈光', '講義影片聲音', '講義影片影棚'].map(command => bot.getReply(command, 'U-resources').text);
   assert.equal(pages.join('\n').match(/https:\/\/youtu\.be\//g).length, 15);
   assert.match(pages[0], /X160/);

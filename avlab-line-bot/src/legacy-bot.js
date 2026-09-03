@@ -879,7 +879,7 @@ function getInternalResourcesMenu(){return{
 };}
 
 function getInternalDocuments(){return{
-  text:'📁【文件／講義資源】\n\n📚 講義、題庫資料夾\nhttps://drive.google.com/drive/folders/1-4XPVE68GlFzydhFJObxXhXJCILBe7D4\n\n🗂️ 教學部完整資料夾\nhttps://drive.google.com/drive/folders/1tS-W8F87FkowayUkafvHK_YLhHG214HC\n\n📖 官網器材教學手冊\nhttps://avlab.nccu.edu.tw/PageDownload?fid=10553',
+  text:'📁【文件／講義資源】\n\n📚 題庫資料夾\nhttps://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X\n\n📖 官網器材教學手冊\nhttps://avlab.nccu.edu.tw/PageDownload?fid=10553',
   quickReply:qr(resourceNavigation())
 };}
 
