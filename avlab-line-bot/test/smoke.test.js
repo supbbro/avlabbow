@@ -418,6 +418,7 @@ test('assistant identity binding only accepts the active attendance roster', () 
   const roster = attendanceBook.getSheetByName('教學考試點名和通過情況總表') || attendanceBook.insertSheet('教學考試點名和通過情況總表');
   const rows = [['姓名／項目','學號']];
   for (let index = 1; index <= 53; index++) rows.push([`現役${String(index).padStart(2, '0')}`, `123456${String(index).padStart(3, '0')}`]);
+  rows.push(['林宇俊', '助教']);
   roster.getRange(1, 1, rows.length, 2).setValues(rows);
   const bindingSheet = runtime.openById(ids.master).getSheetByName('用戶綁定');
   bindingSheet.appendRow(['U-active-assistant-old','現役01','','','assistant']);
@@ -433,13 +434,18 @@ test('assistant identity binding only accepts the active attendance roster', () 
   assert.match(directMenu.text, /助理資訊/);
   assert.doesNotMatch(directMenu.text, /已找到您的綁定/);
 
-  assert.match(bot.getReply('選擇中心助理', 'U-active-assistant').text, /53 位中心助理/);
+  assert.match(bot.getReply('選擇中心助理', 'U-active-assistant').text, /54 位中心助理/);
   const active = bot.getReply('我是 現役01', 'U-active-assistant');
   assert.match(active.text, /綁定成功/);
   assert.match(active.text, /助理資訊/);
   const bindingRows = bindingSheet.getDataRange().getValues();
   assert.equal(bindingRows.find(row => row[0] === 'U-active-assistant-old')[1], '');
   assert.equal(bindingRows.find(row => row[0] === 'U-active-assistant')[4], 'assistant');
+
+  bot.getReply('選擇中心助理', 'U-teaching-assistant');
+  const teachingAssistant = bot.getReply('我是 林宇俊', 'U-teaching-assistant');
+  assert.match(teachingAssistant.text, /綁定成功/);
+  assert.match(teachingAssistant.text, /林宇俊/);
 
   bot.getReply('選擇中心助理', 'U-retired-assistant');
   const retired = bot.getReply('我是 已退助理', 'U-retired-assistant');

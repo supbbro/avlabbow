@@ -583,14 +583,14 @@ function getAssistantNames(){
   return n;
 }
 
-// 身份入口只以目前對內點名表 A、B 欄的現役 53 人為準；群組標題沒有學號，會自動略過。
+// 身份入口以目前對內點名表 A、B 欄為準；一般助理須有 9 位學號，助教則在 B 欄標記「助教」。
 function getActiveAssistantRecords(){
   try{
     var s=SpreadsheetApp.openById(INTERNAL_ATTENDANCE_SHEET_ID).getSheetByName(ATTENDANCE_SHEET_NAME);
     if(!s||s.getLastRow()<2)return[];
     return s.getRange(2,1,s.getLastRow()-1,2).getValues().map(function(row){
       return{name:nrm(row[0]),number:String(row[1]||'').trim()};
-    }).filter(function(person){return person.name&&/^\d{9}$/.test(person.number);});
+    }).filter(function(person){return person.name&&(/^\d{9}$/.test(person.number)||nrm(person.number)==='助教');});
   }catch(e){return[];}
 }
 
