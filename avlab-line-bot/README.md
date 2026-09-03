@@ -89,6 +89,7 @@ Railway 可取代 Apps Script 的 LINE webhook 和時間排程，但 Google Shee
    - `AUTOMATION_SECRET`：與 Railway 完全相同
 3. 安裝觸發條件：
    - `onLeaveFormSubmit`：請假回覆表，提交表單時
+   - `onExternalExaminerChangeFormSubmit`：對外考官更動回覆表，提交表單時
    - `onRetestFormSubmit`：補考回覆表，提交表單時
    - `onAvailabilityFormSubmit`：可用時間回覆表，提交表單時
    - `onMasterSheetEdit`：點名總表，編輯時

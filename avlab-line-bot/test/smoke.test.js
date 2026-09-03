@@ -604,6 +604,50 @@ test('exam assignments propagate merged date headers and choose the correct exam
   assert.equal(tasks[0].date.getFullYear(), 2027);
 });
 
+test('external examiner change updates the schedule and immediately sends the attendance entry to the substitute', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  try {
+    const schedule = isolated.openById(ids.externalClassSchedule).insertSheet('教學週分班表I');
+    [
+      ['', '教學週I'],
+      ['', '9/10（四）'],
+      ['時間', '18:55-20:00'],
+      ['項目', 'H6'],
+      ['地點', '401'],
+      ['教學官', '原考官'],
+      ['學生', '測試學生']
+    ].forEach(row => schedule.appendRow(row));
+
+    const resultBook = isolated.openById(ids.externalResults);
+    const tasks = resultBook.insertSheet('對外任務');
+    tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','教學官／考官','考官LINE User ID','LINE群組ID','任務狀態','前一天提醒','兩小時前提醒','前一天提醒時間','兩小時前提醒時間','來源分頁','來源位置']);
+    const students = resultBook.insertSheet('任務學生');
+    students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間','個別開始時間','個別結束時間','考生提醒時間','來源儲存格']);
+    resultBook.insertSheet('1151修課名單').appendRow(['姓名','學號']);
+
+    const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
+    bindings.appendRow(['LINE User ID','姓名','綁定時間','學號']);
+    bindings.appendRow(['U-ORIGINAL','原考官','','']);
+    bindings.appendRow(['U-SUBSTITUTE','新考官','','']);
+
+    isolated.httpOperations = [];
+    const outcome = externalTeaching.onExaminerChangeFormSubmit({ values: ['2026/9/3 12:00:00','原考官','2026/9/10','H6','有','新考官','有'] });
+    assert.deepEqual(outcome, { updated: 1, tasks: 1, notified: true });
+    assert.equal(schedule.getRange(6, 2).getValue(), '新考官');
+    assert.equal(tasks.getRange(2, 9).getValue(), '新考官');
+    assert.equal(tasks.getRange(2, 10).getValue(), 'U-SUBSTITUTE');
+    const pushes = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload));
+    const substitutePush = pushes.find(push => push.to === 'U-SUBSTITUTE');
+    assert.ok(substitutePush);
+    assert.match(substitutePush.messages[0].text, /已接下一項對外代班任務/);
+    assert.match(substitutePush.messages[0].quickReply.items[0].action.text, /^開始點名 EXT-/);
+    assert.equal(pushes.some(push => push.to === 'U-ORIGINAL'), true);
+  } finally {
+    installGlobals(runtime);
+  }
+});
+
 test('unpaid registered students are canceled at the deadline, struck from schedule, and hidden from attendance', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);

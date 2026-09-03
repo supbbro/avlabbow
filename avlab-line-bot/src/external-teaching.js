@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 const { ids } = require('./config');
-const { parseWorkbook } = require('./external-schedule-parser');
+const { parseWorkbook, parseDateCell } = require('./external-schedule-parser');
 const { parseRegistrationRows } = require('./external-registration-parser');
 
 const SHEETS = {
@@ -35,6 +35,26 @@ function equipmentKey(value) {
   const key = String(value || '').toLowerCase().replace(/考試|課程|器材|無線追焦|無線追/g, match => match.startsWith('無線追') ? '無線追' : '').replace(/[^a-z0-9\u3400-\u9fff]/g, '');
   if (/par.*200|200.*par/.test(key)) return 'par200w';
   return key;
+}
+function dateKey(value) {
+  const date = value instanceof Date ? new Date(value) : (() => {
+    const raw = String(value || '').trim();
+    const full = raw.match(/(\d{4})\s*[/-]\s*(\d{1,2})\s*[/-]\s*(\d{1,2})/);
+    return full ? new Date(Number(full[1]), Number(full[2]) - 1, Number(full[3])) : parseDateCell(raw, process.env.ACADEMIC_TERM || '1151');
+  })();
+  return date && !Number.isNaN(date.getTime()) ? Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd') : '';
+}
+function replaceExaminerName(value, originalName, substituteName) {
+  const current = String(value || '').trim();
+  if (norm(current) === norm(originalName)) return substituteName;
+  const pieces = current.split(/([,，、/&+＋])/);
+  let changed = false;
+  const replaced = pieces.map(piece => {
+    if (norm(piece) !== norm(originalName)) return piece;
+    changed = true;
+    return substituteName;
+  }).join('');
+  return changed ? replaced : '';
 }
 const isExam = task => task.phase !== '教學';
 const isTemplate = value => String(value || '').startsWith('_TEMPLATE');
@@ -276,11 +296,13 @@ function syncFromSchedule() {
       [existing.task.start, incoming.start, 4],
       [existing.task.end, incoming.end, 5]
     ].some(([current, desired, index]) => comparable(current, index) !== comparable(desired, index));
+    const examinerChanged = Boolean(existing) && norm(existing.task.examiner) !== norm(incoming.examiner);
     const status = !scheduleChanged && ['點名中', '已完成'].includes(currentStatus) ? currentStatus : '已排定';
-    const oneHourSentAt = !scheduleChanged && reminderBelongsToSchedule(existing?.task.twoHoursSentAt, incoming.date, incoming.start)
+    const oneHourSentAt = !scheduleChanged && !examinerChanged && reminderBelongsToSchedule(existing?.task.twoHoursSentAt, incoming.date, incoming.start)
       ? existing.task.twoHoursSentAt : '';
+    const incomingExaminerUserId = userIdForName(incoming.examiner);
     const desired = [incoming.id, incoming.term, incoming.phase, incoming.date, incoming.start, incoming.end, incoming.equipment, incoming.location,
-      incoming.examiner, userIdForName(incoming.examiner) || existing?.task.examinerUserId || '', existing?.task.groupId || '', status,
+      incoming.examiner, incomingExaminerUserId || (!examinerChanged ? existing?.task.examinerUserId : '') || '', existing?.task.groupId || '', status,
       existing ? existing.task.dayBefore : true, existing ? existing.task.twoHours : true,
       existing?.task.dayBeforeSentAt || '', oneHourSentAt, incoming.sourceSheet, incoming.sourceRange];
     if (!existing) { taskSheet.appendRow(desired); tasksAdded++; }
@@ -406,6 +428,74 @@ function syncFromSchedule() {
   }
   const depositRegistration = syncDepositFromRegistrations(registrations);
   return { tasks: parsed.length, tasksAdded, tasksUpdated, students: [...activeStudentsByTask.values()].reduce((sum, set) => sum + set.size, 0), studentsAdded, studentsUpdated, duplicateStudentsCleared, staleStudentsCleared, registrationStudentsAdded, bindingsBackfilled, depositRegistration };
+}
+
+function replaceExternalExaminer(submission) {
+  const targetDate = dateKey(submission.date);
+  if (!targetDate || !norm(submission.originalName) || !norm(submission.substituteName) || !equipmentKey(submission.equipment)) return [];
+  const sourceBook = SpreadsheetApp.openById(ids.externalClassSchedule);
+  const changes = [];
+  for (const sheetName of SOURCE_TABS) {
+    const sourceSheet = sourceBook.getSheetByName(sheetName);
+    if (!sourceSheet) continue;
+    const data = sourceSheet.getDataRange().getValues();
+    const dateHeaders = [];
+    let currentDate = null;
+    const width = data.reduce((max, row) => Math.max(max, row?.length || 0), 0);
+    for (let column = 1; column < width; column++) {
+      const candidate = parseDateCell(data[1]?.[column], process.env.ACADEMIC_TERM || '1151');
+      if (candidate) currentDate = candidate;
+      dateHeaders[column] = currentDate;
+    }
+    for (let itemRow = 0; itemRow < data.length; itemRow++) {
+      if (String(data[itemRow]?.[0] || '').trim() !== '項目') continue;
+      const examinerRow = itemRow + 2;
+      for (let column = 1; column < width; column++) {
+        if (dateKey(dateHeaders[column]) !== targetDate || equipmentKey(data[itemRow]?.[column]) !== equipmentKey(submission.equipment)) continue;
+        const replacement = replaceExaminerName(data[examinerRow]?.[column], submission.originalName, submission.substituteName);
+        if (!replacement) continue;
+        sourceSheet.getRange(examinerRow + 1, column + 1).setValue(replacement);
+        data[examinerRow][column] = replacement;
+        changes.push({ sheetName, itemRow, column, equipment: data[itemRow][column] });
+      }
+    }
+  }
+  return changes;
+}
+
+function onExaminerChangeFormSubmit(event) {
+  const values = event?.values || [];
+  const submission = {
+    originalName: String(values[1] || '').trim(),
+    date: values[2],
+    equipment: String(values[3] || '').trim(),
+    hasSubstitute: String(values[4] || '').trim(),
+    substituteName: String(values[5] || '').trim(),
+    certified: String(values[6] || '').trim()
+  };
+  if (!submission.substituteName || /^(?:無|沒有|否)$/.test(submission.hasSubstitute)) return { updated: 0, skipped: true, reason: 'no-substitute' };
+  if (/^(?:無|沒有|否|未通過)$/.test(submission.certified)) return { updated: 0, skipped: true, reason: 'substitute-not-certified' };
+  const changes = replaceExternalExaminer(submission);
+  const originalUserId = userIdForName(submission.originalName);
+  if (!changes.length) {
+    if (originalUserId) queuePush(originalUserId, reply(`⚠️ 找不到可更動的對外任務\n\n日期：${String(submission.date || '')}\n器材：${submission.equipment}\n原考官：${submission.originalName}\n請檢查表單內容是否與分班表一致。`));
+    return { updated: 0, skipped: false, reason: 'task-not-found' };
+  }
+  syncFromSchedule();
+  const changedSheets = new Set(changes.map(change => change.sheetName));
+  const tasks = allTasks().filter(task => changedSheets.has(task.sourceSheet)
+    && dateKey(task.date) === dateKey(submission.date)
+    && equipmentKey(task.equipment) === equipmentKey(submission.equipment)
+    && norm(task.examiner) === norm(submission.substituteName));
+  const substituteUserId = userIdForName(submission.substituteName);
+  if (substituteUserId) for (const task of tasks) {
+    queuePush(substituteUserId, reply(`🔔 你已接下一項對外代班任務\n\n原考官：${submission.originalName}\n${taskText(task)}\n\n已替你更新分班表，可直接由下方開始點名。`, [
+      { label: '開始聊天室點名', text: `開始點名 ${task.id}` },
+      { label: '查看任務', text: `查看任務 ${task.id}` }
+    ]));
+  }
+  if (originalUserId) queuePush(originalUserId, reply(`✅ 對外考官更動已完成\n\n日期：${String(submission.date || '')}\n器材：${submission.equipment}\n新考官：${submission.substituteName}${substituteUserId ? '\n已將點名入口傳給新考官。' : '\n⚠️ 新考官尚未綁定 LINE，目前無法傳送點名入口。'}`));
+  return { updated: changes.length, tasks: tasks.length, notified: Boolean(substituteUserId) };
 }
 
 function groups() {
@@ -1221,4 +1311,4 @@ function joinReply() {
   return reply('👋 我可以在群組中提醒對外教學／考試任務並完成點名。\n請由管理員輸入「綁定群組 群組名稱」。');
 }
 
-module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor } };
+module.exports = { handleCommand, sendExternalReminders, disableGroup, joinReply, syncFromSchedule, onExaminerChangeFormSubmit, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, replaceExaminerName, replaceExternalExaminer } };

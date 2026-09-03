@@ -180,6 +180,7 @@ function eventFromBody(body, spreadsheetId, sheetName) {
 
 const automations = {
   'leave-submit': [bot.onLeaveFormSubmit, ids.leave, '表單回覆 1'],
+  'external-examiner-change-submit': [externalTeaching.onExaminerChangeFormSubmit, ids.external, '表單回覆 1', [ids.external, ...EXTERNAL_WORKBOOKS]],
   'retest-submit': [bot.onRetestFormSubmit, ids.retest, '表單回覆 1'],
   'availability-submit': [bot.onAvailabilityFormSubmit, ids.schedule, '表單回覆 1'],
   'master-edit': [bot.onMasterSheetEdit, ids.internalAttendance, '教學考試點名和通過情況總表', [ids.internalAttendance, ids.internalCertification, ids.master]]

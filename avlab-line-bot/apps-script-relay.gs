@@ -14,6 +14,9 @@ function relay_(path, body) {
 function onLeaveFormSubmit(e) {
   relay_('leave-submit', { sheetName: e.range.getSheet().getName(), values: e.values });
 }
+function onExternalExaminerChangeFormSubmit(e) {
+  relay_('external-examiner-change-submit', { sheetName: e.range.getSheet().getName(), values: e.values });
+}
 function onRetestFormSubmit(e) {
   relay_('retest-submit', { sheetName: e.range.getSheet().getName(), values: e.values });
 }
