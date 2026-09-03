@@ -825,7 +825,7 @@ function selectIdentity(role,userId){
 // ========== 選單 ==========
 function getMainMenu(){return{text:'🤖 歡迎使用影音實驗室教學部機器人！\n\n請選擇您的身份並完成綁定：',quickReply:qr([{label:'👨‍🎓 對外學生',text:'選擇對外學生'},{label:'👩‍💼 中心助理',text:'選擇中心助理'}])};}
 function getExternalMainMenu(){return{text:'請選擇您想查詢的對外學生資訊：',quickReply:qr([{label:'📋 流程',text:'流程'},{label:'📅 時程',text:'對外時程'},{label:'📚 題庫/講義',text:'題庫講義'},{label:'💰 保證金',text:'保證金'},{label:'🚫 學生請假',text:'學生請假'},{label:'🔑 借器材',text:'借用規定'},{label:'🔧 器材練習',text:'器材練習'},{label:'🔍 更多',text:'對外更多'},{label:'🏠 回首頁',text:'主選單'}])};}
-function getExternalMoreMenu(){return{text:'更多對外學生資訊：',quickReply:qr([{label:'📘 講義',text:'講義'},{label:'⏰ 營業時間',text:'營業時間'},{label:'🚫 額滿',text:'額滿'},{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};}
+function getExternalMoreMenu(){return{text:'更多對外學生資訊：',quickReply:qr([{label:'⏰ 營業時間',text:'營業時間'},{label:'🚫 額滿',text:'額滿'},{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getInternalMainMenu(){
   return {
     text:'請選擇您想查詢的助理資訊：',

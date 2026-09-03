@@ -38,6 +38,9 @@ test('menus omit retired links and common links only show current 1151 files', (
   assert.equal(internalLabels.some(label => /統整表|認證狀況|各級認證項目/.test(label)), false);
   const externalLabels = bot.getReply('對外更多', 'U-test').quickReply.items.map(item => item.action.label);
   assert.equal(externalLabels.some(label => /考試項目/.test(label)), false);
+  assert.equal(externalLabels.some(label => /講義|題庫/.test(label)), false);
+  const externalMain = bot.getReply('對外學生', 'U-test').quickReply.items.map(item => item.action.text);
+  assert.equal(externalMain.filter(command => command === '題庫講義').length, 1);
 });
 
 test('submenu pages consistently provide back and home navigation', () => {
