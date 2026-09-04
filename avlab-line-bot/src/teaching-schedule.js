@@ -12,6 +12,8 @@ const CATEGORIES = new Set([
   '中心、特定節日', '工作提醒', '行政', '行政工作提醒',
   '對內工作', '對內工作提醒', '對外工作', '對外工作提醒'
 ]);
+let scheduleLinks = new Map();
+let linksLoadedAt = 0;
 
 const clean = value => String(value ?? '').trim();
 const sheet = (id, name) => SpreadsheetApp.openById(id).getSheetByName(name);
@@ -37,13 +39,61 @@ function parseDate(value) {
   return new Date(baseYear(), Number(match[1]) - 1, Number(match[2]));
 }
 
+function extractCellLinks(cell = {}) {
+  const text = clean(cell.formattedValue);
+  const links = [];
+  if (cell.hyperlink) links.push({ label: text || '開啟連結', url: cell.hyperlink });
+  const textRuns = cell.textFormatRuns || [];
+  textRuns.forEach((run, index) => {
+    const url = run.format?.link?.uri;
+    if (!url) return;
+    const end = textRuns[index + 1]?.startIndex ?? text.length;
+    links.push({ label: clean(text.slice(run.startIndex || 0, end)) || '開啟連結', url });
+  });
+  const chipRuns = cell.chipRuns || [];
+  chipRuns.forEach((run, index) => {
+    const url = run.chip?.richLinkProperties?.uri;
+    if (!url) return;
+    const end = chipRuns[index + 1]?.startIndex ?? text.length;
+    links.push({ label: clean(text.slice(run.startIndex || 0, end)) || '開啟附件', url });
+  });
+  return [...new Map(links.filter(link => /^https?:\/\//i.test(link.url)).map(link => [link.url, link])).values()];
+}
+
+async function loadLinks(api, { force = false } = {}) {
+  if (!api || (!force && Date.now() - linksLoadedAt < 55000)) return scheduleLinks.size;
+  const response = await api.spreadsheets.get({
+    spreadsheetId: ids.teachingSchedule,
+    ranges: MONTH_TABS.map(tab => `'${tab}'!A1:I100`),
+    includeGridData: true,
+    fields: 'sheets(properties(title),data(startRow,startColumn,rowData(values(formattedValue,hyperlink,textFormatRuns(startIndex,format(link(uri))),chipRuns(startIndex,chip(richLinkProperties(uri)))))))'
+  });
+  const next = new Map();
+  for (const tab of response.data.sheets || []) {
+    for (const grid of tab.data || []) {
+      const startRow = grid.startRow || 0, startColumn = grid.startColumn || 0;
+      (grid.rowData || []).forEach((row, rowOffset) => {
+        (row.values || []).forEach((cell, columnOffset) => {
+          const links = extractCellLinks(cell);
+          if (links.length) next.set(`${tab.properties.title}|${startRow + rowOffset}|${startColumn + columnOffset}`, links);
+        });
+      });
+    }
+  }
+  scheduleLinks = next;
+  linksLoadedAt = Date.now();
+  return scheduleLinks.size;
+}
+
 function allEvents() {
   const events = [];
   for (const tab of MONTH_TABS) {
     const target = sheet(ids.teachingSchedule, tab);
     if (!target) continue;
     let dates = [];
-    for (const row of target.getDataRange().getValues()) {
+    const rows = target.getDataRange().getValues();
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex];
       const possibleDates = row.slice(1, 8).map(parseDate);
       if (possibleDates.filter(Boolean).length >= 1) {
         dates = possibleDates;
@@ -54,7 +104,9 @@ function allEvents() {
       row.slice(1, 8).forEach((value, index) => {
         const text = clean(value);
         if (!dates[index] || !text || text === '-') return;
-        events.push({ date: dates[index], category, text, tab });
+        const columnIndex = index + 1;
+        events.push({ date: dates[index], category, text, tab, rowIndex, columnIndex,
+          links: scheduleLinks.get(`${tab}|${rowIndex}|${columnIndex}`) || [] });
       });
     }
   }
@@ -136,6 +188,7 @@ function formatEvents(events, weekly) {
       lines.push(`\n📅 ${displayDate(event.date)}`);
     }
     lines.push(`${weekly ? '' : '• '}${event.category}｜${event.text}`);
+    for (const link of event.links || []) lines.push(`  🔗 ${link.label}\n  ${link.url}`);
   }
   return lines.join('\n').trim();
 }
@@ -206,6 +259,6 @@ function handleCommand(text, context) {
 }
 
 module.exports = {
-  isCommand: text => COMMAND.test(clean(text)), handleCommand, sendGroupReminders, disableGroup,
-  _test: { allEvents, eventsForDay, eventsForWeek, mondayOf, reminderDue, formatEvents }
+  isCommand: text => COMMAND.test(clean(text)), handleCommand, sendGroupReminders, disableGroup, loadLinks,
+  _test: { allEvents, eventsForDay, eventsForWeek, mondayOf, reminderDue, formatEvents, extractCellLinks }
 };

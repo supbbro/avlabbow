@@ -843,7 +843,7 @@ test('internal reminders send on Monday at 09:00 and event day at 09:00 without 
   assert.match(direct.quickReply.items[0].action.uri, /gid=653206596/);
 });
 
-test('a teaching group receives the 1151 weekly and daily schedule reminders at 09:00', () => {
+test('a teaching group receives the 1151 weekly and daily schedule reminders with cell links at 09:00', async () => {
   assert.doesNotMatch(externalTeaching.joinReply().text, /綁定群組 群組名稱/);
   assert.match(externalTeaching.joinReply().text, /綁定教學群組 群組名稱/);
   assert.equal(externalTeaching.isExternalCommand('綁定群組 測試群組'), false);
@@ -855,6 +855,12 @@ test('a teaching group receives the 1151 weekly and daily schedule reminders at 
     ['對內工作', '暑訓教學', '', '', '', '', '', ''],
     ['對外工作', '', '報名公告', '', '', '', '', '']
   ]);
+  await teachingSchedule.loadLinks({ spreadsheets: { get: async () => ({ data: { sheets: [{
+    properties: { title: '9月' }, data: [{ startRow: 2, startColumn: 1, rowData: [{ values: [{
+      formattedValue: '暑訓教學',
+      chipRuns: [{ startIndex: 0, chip: { richLinkProperties: { uri: 'https://docs.google.com/document/d/TEST/edit' } } }, { startIndex: 4 }]
+    }] }] }]
+  }] } }) } }, { force: true });
   const context = { sourceType: 'group', chatId: 'G-TEACHING', userId: 'U-INTERNAL' };
   const bound = teachingSchedule.handleCommand('綁定教學群組 教學部', context);
   assert.match(bound.text, /每週一 09:00/);
@@ -872,6 +878,11 @@ test('a teaching group receives the 1151 weekly and daily schedule reminders at 
   assert.equal(pushes.some(push => /本週教學排程/.test(push.messages[0].text)), true);
   assert.equal(pushes.some(push => /今日教學排程/.test(push.messages[0].text)), true);
   assert.equal(pushes.some(push => /報名公告/.test(push.messages[0].text)), true);
+  assert.equal(pushes.some(push => /https:\/\/docs\.google\.com\/document\/d\/TEST\/edit/.test(push.messages[0].text)), true);
+  assert.deepEqual(teachingSchedule._test.extractCellLinks({
+    formattedValue: '請看教學文件',
+    textFormatRuns: [{ startIndex: 2, format: { link: { uri: 'https://example.com/guide' } } }, { startIndex: 6 }]
+  }), [{ label: '教學文件', url: 'https://example.com/guide' }]);
 });
 
 test('an equipment-specific result updates only that certification when the sheet edit says passed', () => {

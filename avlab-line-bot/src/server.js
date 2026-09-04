@@ -115,6 +115,7 @@ async function handleLineEvent(event) {
       const identityFlowCommand = text === '繼續使用目前身份' || /^(?:更改身份|更改名字)\s+(?:中心助理|對外學生)$/.test(text);
       if (teachingSchedule.isCommand(text)) {
         await runtime.loadOnly(TEACHING_SCHEDULE_WORKBOOKS, { force: true });
+        await teachingSchedule.loadLinks(runtime.api, { force: true });
       } else if (bindingCommand || identityFlowCommand) {
         await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit], { force: true });
       } else if (text === '選擇中心助理') {
@@ -225,7 +226,10 @@ async function schedulerTick() {
   // prevent otherwise valid certification results from being copied.
   jobs.push([`internal-cert-sync:${stamp}`, internalTeaching.syncInternalCertifications, INTERNAL_CERT_WORKBOOKS]);
   jobs.push([`internal-reminders:${stamp}`, internalTeaching.sendInternalReminders, INTERNAL_WORKBOOKS]);
-  jobs.push([`teaching-schedule-groups:${stamp}`, teachingSchedule.sendGroupReminders, [ids.teachingSchedule, ids.externalResults]]);
+  jobs.push([`teaching-schedule-groups:${stamp}`, async () => {
+    await teachingSchedule.loadLinks(runtime.api);
+    return teachingSchedule.sendGroupReminders();
+  }, [ids.teachingSchedule, ids.externalResults]]);
   jobs.push([`external-examiner-changes:${stamp}`, externalTeaching.processPendingExaminerChanges, [ids.external, ...EXTERNAL_WORKBOOKS]]);
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
   jobs.push([`external-group-sync:${stamp}`, () => externalGroupSync.syncExternalCertificationMatrix(runtime.api, ids.externalResults), []]);
