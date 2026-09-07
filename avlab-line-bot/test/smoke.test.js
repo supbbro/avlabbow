@@ -843,7 +843,7 @@ test('internal reminders send on Monday at 09:00 and event day at 09:00 without 
   assert.match(direct.quickReply.items[0].action.uri, /gid=653206596/);
 });
 
-test('a teaching group receives the 1151 weekly and daily schedule reminders at 09:00 without cell links', () => {
+test('a teaching group replaces schedule file names with bare links at 09:00', async () => {
   assert.equal(externalTeaching.isExternalCommand('綁定群組 測試群組'), false);
   assert.equal(teachingSchedule.isCommand('主選單'), false);
   assert.equal(teachingSchedule.isCommand('我是 王小明'), false);
@@ -854,9 +854,18 @@ test('a teaching group receives the 1151 weekly and daily schedule reminders at 
   september.getRange(1, 1, 4, 8).setValues([
     ['', '一', '二', '三', '四', '五', '六', '日'],
     ['W1', '9/7', '9/8', '9/9', '9/10', '9/11', '9/12', '9/13'],
-    ['對內工作', '暑訓教學', '', '', '', '', '', ''],
+    ['對內工作', '暑訓教學\n（未改）1142 課程器材支援一覽表.docx 的副本', '', '', '', '', '', ''],
     ['對外工作', '', '報名公告', '', '', '', '', '']
   ]);
+  await teachingSchedule.loadLinks({ spreadsheets: { get: async () => ({ data: { sheets: [{
+    properties: { title: '9月' }, data: [{ startRow: 2, startColumn: 1, rowData: [{ values: [{
+      formattedValue: '暑訓教學\n（未改）1142 課程器材支援一覽表.docx 的副本',
+      chipRuns: [
+        { startIndex: 5, chip: { richLinkProperties: { uri: 'https://docs.google.com/document/d/TEST/edit' } } },
+        { startIndex: 32 }
+      ]
+    }] }] }]
+  }] } }) } }, { force: true });
   const context = { sourceType: 'group', chatId: 'G-TEACHING', userId: 'U-INTERNAL' };
   const bound = teachingSchedule.handleCommand('綁定教學群組 教學部', context);
   assert.match(bound.text, /每週一 09:00/);
@@ -874,7 +883,10 @@ test('a teaching group receives the 1151 weekly and daily schedule reminders at 
   assert.equal(pushes.some(push => /本週教學排程/.test(push.messages[0].text)), true);
   assert.equal(pushes.some(push => /今日教學排程/.test(push.messages[0].text)), true);
   assert.equal(pushes.some(push => /報名公告/.test(push.messages[0].text)), true);
-  assert.equal(pushes.some(push => /https:\/\//.test(push.messages[0].text)), false);
+  const linkedReminder = pushes.find(push => /https:\/\/docs\.google\.com\/document\/d\/TEST\/edit/.test(push.messages[0].text));
+  assert.ok(linkedReminder);
+  assert.doesNotMatch(linkedReminder.messages[0].text, /1142 課程器材支援一覽表/);
+  assert.equal(teachingSchedule._test.replaceLinkLabels('工作\n文件名稱', [{ label: '文件名稱', url: 'https://example.com/doc' }]), '工作\nhttps://example.com/doc');
 });
 
 test('an equipment-specific result updates only that certification when the sheet edit says passed', () => {

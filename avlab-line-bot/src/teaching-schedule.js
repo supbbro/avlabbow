@@ -12,6 +12,8 @@ const CATEGORIES = new Set([
   '中心、特定節日', '工作提醒', '行政', '行政工作提醒',
   '對內工作', '對內工作提醒', '對外工作', '對外工作提醒'
 ]);
+let scheduleLinks = new Map();
+let linksLoadedAt = 0;
 
 const clean = value => String(value ?? '').trim();
 const sheet = (id, name) => SpreadsheetApp.openById(id).getSheetByName(name);
@@ -37,6 +39,58 @@ function parseDate(value) {
   return new Date(baseYear(), Number(match[1]) - 1, Number(match[2]));
 }
 
+function extractCellLinks(cell = {}) {
+  const text = String(cell.formattedValue ?? '');
+  const links = [];
+  if (cell.hyperlink) links.push({ label: clean(text) || cell.hyperlink, url: cell.hyperlink });
+  const collectRuns = (runs, urlForRun) => {
+    runs.forEach((run, index) => {
+      const url = urlForRun(run);
+      if (!url) return;
+      const start = run.startIndex || 0;
+      const end = runs[index + 1]?.startIndex ?? text.length;
+      links.push({ label: clean(text.slice(start, end)) || url, url });
+    });
+  };
+  collectRuns(cell.textFormatRuns || [], run => run.format?.link?.uri);
+  collectRuns(cell.chipRuns || [], run => run.chip?.richLinkProperties?.uri);
+  return [...new Map(links.filter(link => /^https?:\/\//i.test(link.url)).map(link => [link.url, link])).values()];
+}
+
+function replaceLinkLabels(text, links = []) {
+  let output = clean(text);
+  for (const link of links) {
+    if (link.label && output.includes(link.label)) output = output.split(link.label).join(link.url);
+    else if (!output.includes(link.url)) output += `${output ? '\n' : ''}${link.url}`;
+  }
+  return output;
+}
+
+async function loadLinks(api, { force = false } = {}) {
+  if (!api || (!force && Date.now() - linksLoadedAt < 55000)) return scheduleLinks.size;
+  const response = await api.spreadsheets.get({
+    spreadsheetId: ids.teachingSchedule,
+    ranges: MONTH_TABS.map(tab => `'${tab}'!A1:I100`),
+    includeGridData: true,
+    fields: 'sheets(properties(title),data(startRow,startColumn,rowData(values(formattedValue,hyperlink,textFormatRuns(startIndex,format(link(uri))),chipRuns(startIndex,chip(richLinkProperties(uri)))))))'
+  });
+  const next = new Map();
+  for (const tab of response.data.sheets || []) {
+    for (const grid of tab.data || []) {
+      const startRow = grid.startRow || 0, startColumn = grid.startColumn || 0;
+      (grid.rowData || []).forEach((row, rowOffset) => {
+        (row.values || []).forEach((cell, columnOffset) => {
+          const links = extractCellLinks(cell);
+          if (links.length) next.set(`${tab.properties.title}|${startRow + rowOffset}|${startColumn + columnOffset}`, links);
+        });
+      });
+    }
+  }
+  scheduleLinks = next;
+  linksLoadedAt = Date.now();
+  return scheduleLinks.size;
+}
+
 function allEvents() {
   const events = [];
   for (const tab of MONTH_TABS) {
@@ -56,7 +110,9 @@ function allEvents() {
       row.slice(1, 8).forEach((value, index) => {
         const text = clean(value);
         if (!dates[index] || !text || text === '-') return;
-        events.push({ date: dates[index], category, text, tab });
+        const columnIndex = index + 1;
+        events.push({ date: dates[index], category, text, tab,
+          links: scheduleLinks.get(`${tab}|${rowIndex}|${columnIndex}`) || [] });
       });
     }
   }
@@ -137,7 +193,7 @@ function formatEvents(events, weekly) {
       current = key;
       lines.push(`\n📅 ${displayDate(event.date)}`);
     }
-    lines.push(`${weekly ? '' : '• '}${event.category}｜${event.text}`);
+    lines.push(`${weekly ? '' : '• '}${event.category}｜${replaceLinkLabels(event.text, event.links)}`);
   }
   return lines.join('\n').trim();
 }
@@ -208,6 +264,6 @@ function handleCommand(text, context) {
 }
 
 module.exports = {
-  isCommand: text => COMMAND.test(clean(text)), handleCommand, sendGroupReminders, disableGroup,
-  _test: { allEvents, eventsForDay, eventsForWeek, mondayOf, reminderDue, formatEvents }
+  isCommand: text => COMMAND.test(clean(text)), handleCommand, sendGroupReminders, disableGroup, loadLinks,
+  _test: { allEvents, eventsForDay, eventsForWeek, mondayOf, reminderDue, formatEvents, extractCellLinks, replaceLinkLabels }
 };
