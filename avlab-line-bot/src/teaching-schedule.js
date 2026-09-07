@@ -12,6 +12,8 @@ const CATEGORIES = new Set([
   '中心、特定節日', '工作提醒', '行政', '行政工作提醒',
   '對內工作', '對內工作提醒', '對外工作', '對外工作提醒'
 ]);
+let linkedDocumentLabels = new Map();
+let labelsLoadedAt = 0;
 
 const clean = value => String(value ?? '').trim();
 const sheet = (id, name) => SpreadsheetApp.openById(id).getSheetByName(name);
@@ -37,6 +39,52 @@ function parseDate(value) {
   return new Date(baseYear(), Number(match[1]) - 1, Number(match[2]));
 }
 
+function extractLinkedLabels(cell = {}) {
+  const text = String(cell.formattedValue ?? '');
+  const labels = [];
+  const collectRuns = (runs, isLinked) => runs.forEach((run, index) => {
+    if (!isLinked(run)) return;
+    const end = runs[index + 1]?.startIndex ?? text.length;
+    const label = clean(text.slice(run.startIndex || 0, end));
+    if (label) labels.push(label);
+  });
+  if (cell.hyperlink && clean(text)) labels.push(clean(text));
+  collectRuns(cell.textFormatRuns || [], run => Boolean(run.format?.link?.uri));
+  collectRuns(cell.chipRuns || [], run => Boolean(run.chip?.richLinkProperties?.uri));
+  return [...new Set(labels)];
+}
+
+function stripDocumentNames(text, labels = []) {
+  let output = clean(text);
+  for (const label of [...labels].sort((a, b) => b.length - a.length)) output = output.split(label).join('');
+  return output.split(/\r?\n/).map(line => clean(line))
+    .filter(line => line && !/^https?:\/\//i.test(line)
+      && !/\.(?:docx?|pptx?|pdf|xlsx?|pages|key)(?:\s|$|[）)])/i.test(line)
+      && !/的副本\s*$/.test(line))
+    .join('\n');
+}
+
+async function loadDocumentLabels(api, { force = false } = {}) {
+  if (!api || (!force && Date.now() - labelsLoadedAt < 55000)) return linkedDocumentLabels.size;
+  const response = await api.spreadsheets.get({
+    spreadsheetId: ids.teachingSchedule,
+    ranges: MONTH_TABS.map(tab => `'${tab}'!A1:I100`),
+    includeGridData: true,
+    fields: 'sheets(properties(title),data(startRow,startColumn,rowData(values(formattedValue,hyperlink,textFormatRuns(startIndex,format(link(uri))),chipRuns(startIndex,chip(richLinkProperties(uri)))))))'
+  });
+  const next = new Map();
+  for (const tab of response.data.sheets || []) for (const grid of tab.data || []) {
+    const startRow = grid.startRow || 0, startColumn = grid.startColumn || 0;
+    (grid.rowData || []).forEach((row, rowOffset) => (row.values || []).forEach((cell, columnOffset) => {
+      const labels = extractLinkedLabels(cell);
+      if (labels.length) next.set(`${tab.properties.title}|${startRow + rowOffset}|${startColumn + columnOffset}`, labels);
+    }));
+  }
+  linkedDocumentLabels = next;
+  labelsLoadedAt = Date.now();
+  return linkedDocumentLabels.size;
+}
+
 function allEvents() {
   const events = [];
   for (const tab of MONTH_TABS) {
@@ -56,7 +104,9 @@ function allEvents() {
       row.slice(1, 8).forEach((value, index) => {
         const text = clean(value);
         if (!dates[index] || !text || text === '-') return;
-        events.push({ date: dates[index], category, text, tab });
+        const columnIndex = index + 1;
+        events.push({ date: dates[index], category, text, tab,
+          documentLabels: linkedDocumentLabels.get(`${tab}|${rowIndex}|${columnIndex}`) || [] });
       });
     }
   }
@@ -129,15 +179,17 @@ function ensureLogSheet() {
 }
 
 function formatEvents(events, weekly) {
-  if (!events.length) return weekly ? '本週沒有登記教學排程。' : '今天沒有登記教學排程。';
+  const visibleEvents = events.map(event => ({ ...event, visibleText: stripDocumentNames(event.text, event.documentLabels) }))
+    .filter(event => event.visibleText);
+  if (!visibleEvents.length) return weekly ? '本週沒有登記教學排程。' : '今天沒有登記教學排程。';
   let current = '', lines = [];
-  for (const event of events) {
+  for (const event of visibleEvents) {
     const key = dateKey(event.date);
     if (weekly && key !== current) {
       current = key;
       lines.push(`\n📅 ${displayDate(event.date)}`);
     }
-    lines.push(`${weekly ? '' : '• '}${event.category}｜${event.text}`);
+    lines.push(`${weekly ? '' : '• '}${event.category}｜${event.visibleText}`);
   }
   return lines.join('\n').trim();
 }
@@ -208,6 +260,6 @@ function handleCommand(text, context) {
 }
 
 module.exports = {
-  isCommand: text => COMMAND.test(clean(text)), handleCommand, sendGroupReminders, disableGroup,
-  _test: { allEvents, eventsForDay, eventsForWeek, mondayOf, reminderDue, formatEvents }
+  isCommand: text => COMMAND.test(clean(text)), handleCommand, sendGroupReminders, disableGroup, loadDocumentLabels,
+  _test: { allEvents, eventsForDay, eventsForWeek, mondayOf, reminderDue, formatEvents, extractLinkedLabels, stripDocumentNames }
 };

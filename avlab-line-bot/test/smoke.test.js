@@ -843,7 +843,7 @@ test('internal reminders send on Monday at 09:00 and event day at 09:00 without 
   assert.match(direct.quickReply.items[0].action.uri, /gid=653206596/);
 });
 
-test('a teaching group shows schedule titles without file links at 09:00', () => {
+test('a teaching group hides linked document names and URLs from schedule reminders', async () => {
   assert.equal(externalTeaching.isExternalCommand('綁定群組 測試群組'), false);
   assert.equal(teachingSchedule.isCommand('主選單'), false);
   assert.equal(teachingSchedule.isCommand('我是 王小明'), false);
@@ -854,9 +854,19 @@ test('a teaching group shows schedule titles without file links at 09:00', () =>
   september.getRange(1, 1, 4, 8).setValues([
     ['', '一', '二', '三', '四', '五', '六', '日'],
     ['W1', '9/7', '9/8', '9/9', '9/10', '9/11', '9/12', '9/13'],
-    ['對內工作', '暑訓教學\n（未改）1142 課程器材支援一覽表.docx 的副本', '', '', '', '', '', ''],
+    ['對內工作', '暑訓教學\n教學PPT A版\n教學PPT B版', '', '', '', '', '', ''],
     ['對外工作', '', '報名公告', '', '', '', '', '']
   ]);
+  await teachingSchedule.loadDocumentLabels({ spreadsheets: { get: async () => ({ data: { sheets: [{
+    properties: { title: '9月' }, data: [{ startRow: 2, startColumn: 1, rowData: [{ values: [{
+      formattedValue: '暑訓教學\n教學PPT A版\n教學PPT B版',
+      chipRuns: [
+        { startIndex: 5, chip: { richLinkProperties: { uri: 'https://example.com/a' } } },
+        { startIndex: 14, chip: { richLinkProperties: { uri: 'https://example.com/b' } } },
+        { startIndex: 22 }
+      ]
+    }] }] }]
+  }] } }) } }, { force: true });
   const context = { sourceType: 'group', chatId: 'G-TEACHING', userId: 'U-INTERNAL' };
   const bound = teachingSchedule.handleCommand('綁定教學群組 教學部', context);
   assert.match(bound.text, /每週一 09:00/);
@@ -874,8 +884,9 @@ test('a teaching group shows schedule titles without file links at 09:00', () =>
   assert.equal(pushes.some(push => /本週教學排程/.test(push.messages[0].text)), true);
   assert.equal(pushes.some(push => /今日教學排程/.test(push.messages[0].text)), true);
   assert.equal(pushes.some(push => /報名公告/.test(push.messages[0].text)), true);
-  assert.equal(pushes.some(push => /1142 課程器材支援一覽表/.test(push.messages[0].text)), true);
-  assert.equal(pushes.some(push => /https:\/\/docs\.google\.com\/document/.test(push.messages[0].text)), false);
+  assert.equal(pushes.some(push => /暑訓教學/.test(push.messages[0].text)), true);
+  assert.equal(pushes.some(push => /教學PPT [AB]版|https:\/\//.test(push.messages[0].text)), false);
+  assert.equal(teachingSchedule._test.stripDocumentNames('寄信給教授\n（未改）1142 信件範例.docx 的副本'), '寄信給教授');
 });
 
 test('an equipment-specific result updates only that certification when the sheet edit says passed', () => {
