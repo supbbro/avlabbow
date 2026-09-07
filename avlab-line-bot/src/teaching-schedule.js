@@ -58,12 +58,14 @@ function extractCellLinks(cell = {}) {
 }
 
 function replaceLinkLabels(text, links = []) {
-  let output = clean(text);
-  for (const link of links) {
-    if (link.label && output.includes(link.label)) output = output.split(link.label).join(link.url);
-    else if (!output.includes(link.url)) output += `${output ? '\n' : ''}${link.url}`;
+  const usable = [...new Map(links.filter(link => /^https?:\/\//i.test(link.url)).map(link => [link.url, link])).values()];
+  let description = clean(text);
+  for (const link of usable) {
+    if (link.label) description = description.split(link.label).join('');
   }
-  return output;
+  description = description.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const linkBlock = usable.map(link => link.url).join('\n──────────\n');
+  return [description, linkBlock].filter(Boolean).join('\n');
 }
 
 async function loadLinks(api, { force = false } = {}) {
