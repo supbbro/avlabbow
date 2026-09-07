@@ -1339,8 +1339,4 @@ function sendExternalReminders(now = new Date()) {
   return sent + deposit.reminders;
 }
 
-function joinReply() {
-  return reply('👋 我可以在群組中提醒 1151 教學總排程。\n請輸入「綁定教學群組 群組名稱」。');
-}
-
-module.exports = { handleCommand, sendExternalReminders, joinReply, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName } };
+module.exports = { handleCommand, sendExternalReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName } };

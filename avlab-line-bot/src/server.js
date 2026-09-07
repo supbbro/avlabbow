@@ -87,7 +87,8 @@ async function handleLineEvent(event) {
   if (event.type === 'follow') {
     reply = bot.getMainMenu();
   } else if (event.type === 'join') {
-    reply = externalTeaching.joinReply();
+    // 群組採安靜模式：加入時不主動發話，只有排程推播或明確的群組指令才回覆。
+    reply = null;
   } else if (event.type === 'leave') {
     await runtime.loadOnly(EXTERNAL_WORKBOOKS);
     teachingSchedule.disableGroup(context.chatId);
@@ -107,6 +108,8 @@ async function handleLineEvent(event) {
     if (event.message?.id) runtime.cache.put(`message:${event.message.id}`, '1', 60);
     if (event.message.type === 'text') {
       const originalText = event.message.text.trim();
+      const isGroupChat = ['group', 'room'].includes(sourceType);
+      if (isGroupChat && !teachingSchedule.isCommand(originalText)) return;
       const navigationResult = navigation.resolve(runtime.cache, userId, originalText);
       const text = navigationResult.command;
       const combinedTaskQuery = text === '我的任務';
@@ -115,7 +118,6 @@ async function handleLineEvent(event) {
       const identityFlowCommand = text === '繼續使用目前身份' || /^(?:更改身份|更改名字)\s+(?:中心助理|對外學生)$/.test(text);
       if (teachingSchedule.isCommand(text)) {
         await runtime.loadOnly(TEACHING_SCHEDULE_WORKBOOKS, { force: true });
-        await teachingSchedule.loadLinks(runtime.api, { force: true });
       } else if (bindingCommand || identityFlowCommand) {
         await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit], { force: true });
       } else if (text === '選擇中心助理') {
@@ -136,10 +138,11 @@ async function handleLineEvent(event) {
       } else {
         await runtime.loadAll();
       }
-      bot.recordUser(userId);
+      if (!isGroupChat) bot.recordUser(userId);
       reply = teachingSchedule.handleCommand(text, context) || internalTeaching.handleCommand(text, context) || externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
       if (!navigationResult.isBack) navigation.remember(runtime.cache, userId, reply?.navigationPage || text, Boolean(reply));
     } else if (event.message.type === 'sticker') {
+      if (['group', 'room'].includes(sourceType)) return;
       await runtime.loadOnly([ids.master]);
       bot.recordUser(userId);
       reply = { text: '怎說', quickReply: { items: [
@@ -226,10 +229,7 @@ async function schedulerTick() {
   // prevent otherwise valid certification results from being copied.
   jobs.push([`internal-cert-sync:${stamp}`, internalTeaching.syncInternalCertifications, INTERNAL_CERT_WORKBOOKS]);
   jobs.push([`internal-reminders:${stamp}`, internalTeaching.sendInternalReminders, INTERNAL_WORKBOOKS]);
-  jobs.push([`teaching-schedule-groups:${stamp}`, async () => {
-    await teachingSchedule.loadLinks(runtime.api);
-    return teachingSchedule.sendGroupReminders();
-  }, [ids.teachingSchedule, ids.externalResults]]);
+  jobs.push([`teaching-schedule-groups:${stamp}`, teachingSchedule.sendGroupReminders, [ids.teachingSchedule, ids.externalResults]]);
   jobs.push([`external-examiner-changes:${stamp}`, externalTeaching.processPendingExaminerChanges, [ids.external, ...EXTERNAL_WORKBOOKS]]);
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
   jobs.push([`external-group-sync:${stamp}`, () => externalGroupSync.syncExternalCertificationMatrix(runtime.api, ids.externalResults), []]);
