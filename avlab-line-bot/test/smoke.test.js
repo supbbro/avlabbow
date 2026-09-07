@@ -887,10 +887,10 @@ test('a teaching group replaces schedule file names with bare links at 09:00', a
   assert.ok(linkedReminder);
   assert.doesNotMatch(linkedReminder.messages[0].text, /1142 課程器材支援一覽表/);
   assert.equal(teachingSchedule._test.replaceLinkLabels('工作\n文件名稱', [{ label: '文件名稱', url: 'https://example.com/doc' }]), '工作\nhttps://example.com/doc');
-  assert.equal(teachingSchedule._test.replaceLinkLabels('工作\n文件一\n文件二', [
-    { label: '文件一', url: 'https://example.com/one' },
-    { label: '文件二', url: 'https://example.com/two' }
-  ]), '工作\nhttps://example.com/one\n──────────\nhttps://example.com/two');
+  assert.equal(teachingSchedule._test.replaceLinkLabels('教學PPT A\n教學PPT B', [
+    { label: '教學PPT A', url: 'https://example.com/a' },
+    { label: '教學PPT B', url: 'https://example.com/b' }
+  ]), 'https://example.com/a\n────────\nhttps://example.com/b');
 });
 
 test('an equipment-specific result updates only that certification when the sheet edit says passed', () => {
