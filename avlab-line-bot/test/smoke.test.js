@@ -784,6 +784,41 @@ test('external examiner change polling tolerates a one-character name typo and s
   }
 });
 
+test('deposit payment reminders begin on September 28 and skip paid students', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  try {
+    const results = isolated.openById(ids.externalResults);
+    results.insertSheet('對外任務').appendRow(['任務ID', '學期', '階段']);
+    results.insertSheet('任務學生').appendRow(['任務ID', '學生ID', '學生姓名', '學號']);
+    const deposits = isolated.openById(ids.deposit).insertSheet('考試週保證金');
+    deposits.appendRow(['姓名', '系級', '學號', '項目', '項數', '應繳', '已繳']);
+    deposits.appendRow(['說明']);
+    deposits.appendRow(['範例']);
+    deposits.appendRow(['未繳學生', '', '111101021', 'H6', 1, 50, false]);
+    deposits.appendRow(['已繳學生', '', '111101022', 'H6', 1, 50, true]);
+    const response = isolated.openById(ids.externalRegistration).insertSheet('表單回覆 1');
+    response.appendRow(['姓名', '學號', 'H6考試']);
+    response.appendRow(['未繳學生', '111101021', '是']);
+    response.appendRow(['已繳學生', '111101022', '是']);
+    const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
+    bindings.appendRow(['LINE User ID', '姓名', '綁定時間', '學號', '身分類型']);
+    bindings.appendRow(['U-UNPAID', '未繳學生', '', '111101021', 'external']);
+    bindings.appendRow(['U-PAID', '已繳學生', '', '111101022', 'external']);
+
+    assert.equal(externalTeaching._test.processDepositRequirements(new Date('2026-09-27T23:59:00+08:00')).reminders, 0);
+    assert.equal(isolated.httpOperations.length, 0);
+    assert.equal(externalTeaching._test.processDepositRequirements(new Date('2026-09-28T00:00:00+08:00')).reminders, 1);
+    const push = JSON.parse(isolated.httpOperations[0].options.payload);
+    assert.equal(push.to, 'U-UNPAID');
+    assert.match(push.messages[0].text, /應繳保證金：50 元/);
+    assert.equal(externalTeaching._test.processDepositRequirements(new Date('2026-09-28T00:01:00+08:00')).reminders, 0);
+    assert.equal(isolated.httpOperations.length, 1);
+  } finally {
+    installGlobals(runtime);
+  }
+});
+
 test('unpaid registered students are canceled at the deadline, struck from schedule, and hidden from attendance', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);

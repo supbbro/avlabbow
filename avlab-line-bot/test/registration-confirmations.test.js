@@ -36,7 +36,7 @@ test('pre-registered students are notified once when their registration appears'
   assert.equal((await sendRegistrationConfirmations(runtime, { fetchImpl })).sent, 0);
   assert.equal(calls.length, 1);
   assert.match(JSON.parse(calls[0].body).messages[0].text, /報名成功/);
-  assert.match(JSON.parse(calls[0].body).messages[0].text, /50 元/);
+  assert.doesNotMatch(JSON.parse(calls[0].body).messages[0].text, /保證金|繳費|50 元/);
   assert.match(calls[0].headers['X-Line-Retry-Key'], /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
 });
 

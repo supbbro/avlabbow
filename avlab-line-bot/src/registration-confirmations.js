@@ -32,7 +32,7 @@ function confirmationCandidates(runtime) {
 }
 
 function confirmationText(registration) {
-  return `✅ 對外教學報名成功！\n\n${registration.name}（${registration.number}）的報名資料已收到。\n報名項目：${registration.equipment.join('、')}\n應繳保證金：${registration.equipment.length * 50} 元\n\n報名成功不代表已繳費；實際繳費狀態仍以保證金對帳表為準。`;
+  return `✅ 對外教學報名成功！\n\n${registration.name}（${registration.number}）的報名資料已收到。\n報名項目：${registration.equipment.join('、')}\n\n後續教學與考試資訊會再由機器人通知。`;
 }
 
 async function sendOne(candidate, fetchImpl) {

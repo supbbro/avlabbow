@@ -1184,6 +1184,7 @@ function earliestInitialExams() {
 }
 
 function depositReminderText(kind, task, student, deadline) {
+  if (kind === 'start') return `【保證金繳費提醒】\n${student.name}你好，保證金繳費提醒自 9/28 開始。目前對帳表顯示你尚未繳交。\n\n報名項目：${student.equipment.join('、')}\n應繳保證金：${student.equipment.length * 50} 元\n繳費期限：${formatDate(deadline)}\n\n若已繳費但對帳表尚未更新，請稍後再確認；逾期未繳將影響考試資格。`;
   if (kind === 'deadline') return `【考試保證金提醒】\n${student.name}你好，目前對帳表仍顯示尚未繳交考試保證金。\n\n繳費期限：${formatDate(deadline)}\n最早考試：${formatDate(task.date)} ${formatTime(student.scheduledStart || task.start)}｜${task.equipment}\n\n請於期限內完成繳費；未繳者將取消考試資格。`;
   return `【考試前保證金提醒】\n${student.name}你好，目前對帳表仍顯示尚未繳交考試保證金。\n\n你的最早考試：${formatDate(task.date)} ${formatTime(student.scheduledStart || task.start)}｜${task.equipment}\n請最遲於考試前一天完成繳費；若考試開始前仍未繳交，將取消考試資格。`;
 }
@@ -1226,6 +1227,8 @@ function processDepositRequirements(now = new Date()) {
   const deadlineValue = !configuredDeadline || configuredDeadline === '2026-09-03' ? '2026-10-09' : configuredDeadline;
   const deadline = dateAtTaipeiMidnight(deadlineValue);
   if (!deadline) return { reminders: 0, canceled: 0 };
+  const reminderStart = dateAtTaipeiMidnight(process.env.EXTERNAL_DEPOSIT_REMINDER_START || '2026-09-28');
+  if (!reminderStart) throw new Error('Invalid EXTERNAL_DEPOSIT_REMINDER_START; expected YYYY-MM-DD');
   const registrations = registrationRows();
   // A newly connected/temporarily empty response sheet must never wipe or
   // disqualify current students.
@@ -1242,7 +1245,32 @@ function processDepositRequirements(now = new Date()) {
   let reminders = 0, canceled = 0;
   const restored = restorePaidDepositCancellations(records, logSheet, logged, now);
 
-  for (const entry of earliestInitialExams()) {
+  const firstExams = earliestInitialExams();
+  if (now >= reminderStart && now < deadline) for (const registration of registrations) {
+    const record = depositRecordFor(registration, '考試', records);
+    if (record?.paid) continue;
+    const personKey = norm(registration.number);
+    const initialKey = `DEPOSIT-START:${personKey}:${taipeiDate(reminderStart)}`;
+    if (!personKey || logged.has(initialKey)) continue;
+    const studentUserId = userIdForName(registration.name, registration.number);
+    if (!studentUserId) continue;
+    const entry = firstExams.find(candidate => norm(candidate.student.number) === personKey);
+    const sameDayDue = [];
+    if (entry && today === dayBeforeDate(deadline)) sameDayDue.push(['deadline', `DEPOSIT-DEADLINE:${personKey}:${taipeiDate(deadline)}`]);
+    if (entry && today === dayBeforeDate(entry.start)) sameDayDue.push(['exam-day-before', `DEPOSIT-EXAM:${personKey}:${taipeiDate(entry.start)}`]);
+    const pendingDue = sameDayDue.filter(([, key]) => !logged.has(key));
+    const kind = pendingDue.some(([type]) => type === 'exam-day-before') ? 'exam-day-before' : pendingDue.length ? 'deadline' : 'start';
+    queuePush(studentUserId, reply(depositReminderText(kind, entry?.task, kind === 'start' ? registration : entry.student, deadline)));
+    logDepositAction(logSheet, initialKey, '開始繳費提醒', registration, entry?.task, now, '已合併推播');
+    logged.add(initialKey);
+    for (const [type, key] of pendingDue) {
+      logDepositAction(logSheet, key, type, registration, entry?.task, now, '已合併推播');
+      logged.add(key);
+    }
+    reminders++;
+  }
+
+  if (now >= reminderStart && now < deadline) for (const entry of firstExams) {
     const { task, student, start } = entry;
     if (!isRegistered(student)) continue;
     const record = depositRecordFor(student, '考試', records);
