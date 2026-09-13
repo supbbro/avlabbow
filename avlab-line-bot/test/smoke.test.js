@@ -44,6 +44,23 @@ test('menus omit retired links and common links only show current 1151 files', (
   assert.equal(externalMain.filter(command => command === '題庫講義').length, 1);
 });
 
+test('both identity menus link to the AV Lab platform and external resources stay together', () => {
+  const platform = 'https://avlol.nccu.edu.tw/';
+  const externalActions = bot.getReply('對外學生', 'U-links-external').quickReply.items.map(item => item.action);
+  const internalActions = bot.getReply('中心助理', 'U-links-internal').quickReply.items.map(item => item.action);
+  assert.equal(externalActions.filter(action => action.uri === platform).length, 1);
+  assert.equal(internalActions.filter(action => action.uri === platform).length, 1);
+  assert.equal(externalActions.filter(action => action.uri === 'https://www.facebook.com/nccuavlab').length, 1);
+  assert.equal(internalActions.some(action => action.uri === 'https://www.facebook.com/nccuavlab'), false);
+  assert.ok(externalActions.length <= 13);
+  assert.ok(internalActions.length <= 13);
+  const materials = bot.getReply('題庫講義', 'U-links-materials');
+  assert.match(materials.text, /1u-2wqepFnNYsmo3T77yb5qqHdyoTnphH\/edit\?slide=id\.p22#slide=id\.p22/);
+  assert.match(materials.text, /1WdS6Qp6205Jp5eIVvnn5KfkBLn4VGJVB\/edit\?slide=id\.p16#slide=id\.p16/);
+  assert.equal(materials.quickReply.items.some(item => item.action.text === '回上一頁'), true);
+  assert.equal(materials.quickReply.items.some(item => item.action.text === '主選單'), true);
+});
+
 test('submenu pages consistently provide back and home navigation', () => {
   for (const [index, command] of ['對外更多', '查詢', '助理排程', '助理工具', '請假選項', '流程'].entries()) {
     const page = bot.getReply(command, `U-nav-${index}`);
