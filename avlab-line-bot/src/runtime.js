@@ -284,6 +284,7 @@ class GoogleSheetsRuntime {
       if (op.kind === 'addSheet') {
         const response = await this.api.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [{ addSheet: { properties: { title: op.sheet.name } } }] } });
         op.sheet.sheetId = response.data.replies?.[0]?.addSheet?.properties?.sheetId;
+        if (op.sheet.sheetId != null) this.metadata.get(spreadsheetId)?.set(op.sheet.name, op.sheet.sheetId);
       } else if (op.kind === 'clear') {
         await this.api.spreadsheets.values.clear({ spreadsheetId, range: a1(op.sheet.name) });
       } else if (op.kind === 'append') {

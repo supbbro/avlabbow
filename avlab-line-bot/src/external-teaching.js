@@ -94,11 +94,14 @@ function boundName(userId) {
 
 function userIdForName(name, number = '') {
   const bindSheet = SpreadsheetApp.openById(ids.master).getSheetByName('用戶綁定');
-  if (!bindSheet || !name) return '';
+  if (!bindSheet || (!name && !number)) return '';
   const rows = bindSheet.getDataRange().getValues();
+  if (number) {
+    const matches = rows.slice(1).filter(row => row[0] && row[1] && norm(row[3]) === norm(number) && row[4] !== 'assistant' && (!name || namesSimilar(row[1], name)));
+    return matches.length === 1 ? String(matches[0][0]) : '';
+  }
   for (let i = 1; i < rows.length; i++) {
     if (norm(rows[i][1]) !== norm(name)) continue;
-    if (number && norm(rows[i][3]) !== norm(number)) continue;
     return String(rows[i][0] || '');
   }
   return '';
@@ -1339,4 +1342,4 @@ function sendExternalReminders(now = new Date()) {
   return sent + deposit.reminders;
 }
 
-module.exports = { handleCommand, sendExternalReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName } };
+module.exports = { handleCommand, sendExternalReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };

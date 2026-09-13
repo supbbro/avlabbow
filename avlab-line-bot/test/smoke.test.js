@@ -152,6 +152,15 @@ test('forced value refresh reuses cached spreadsheet metadata', async () => {
   assert.equal(valueLoads, 2);
 });
 
+test('a newly created log sheet stays visible on the next forced refresh', async () => {
+  const cached = new GoogleSheetsRuntime();
+  cached.metadata.set(ids.externalResults, new Map());
+  cached.api = { spreadsheets: { batchUpdate: async () => ({ data: { replies: [{ addSheet: { properties: { sheetId: 345 } } }] } }) } };
+  cached.openById(ids.externalResults).insertSheet('報名成功通知紀錄');
+  await cached.flush();
+  assert.equal(cached.metadata.get(ids.externalResults).get('報名成功通知紀錄'), 345);
+});
+
 test('selected workbook refresh leaves the other cached workbooks untouched', async () => {
   const cached = new GoogleSheetsRuntime();
   const loads = new Map();
@@ -429,6 +438,35 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   assert.match(push.messages[0].text, /上機/);
   assert.match(push.messages[0].text, /報名連結：https:\/\/docs\.google\.com\/forms/);
   assert.equal(push.messages[0].quickReply.items[0].action.uri, 'https://docs.google.com/forms/d/FAKE/viewform');
+});
+
+test('an external student can bind before registering and remain bound', () => {
+  const userId = 'U-EARLY-REGISTRATION';
+  const prompt = bot.getReply('選擇對外學生', userId);
+  assert.match(prompt.text, /報名前就可以先綁定/);
+  const invalid = bot.getReply('我是 早綁學生 123', userId);
+  assert.doesNotMatch(invalid.text, /綁定成功/);
+  const bound = bot.getReply('我是 早綁學生 111109999', userId);
+  assert.match(bound.text, /綁定成功/);
+  assert.match(bound.text, /尚未查到這個學號的報名資料/);
+  assert.match(bot.getReply('選擇對外學生', userId).text, /對外學生資訊/);
+});
+
+test('an external student can still bind after appearing in the deposit sheet', () => {
+  const deposits = runtime.openById(ids.deposit).getSheetByName('考試週保證金') || runtime.openById(ids.deposit).insertSheet('考試週保證金');
+  if (!deposits.getLastRow()) deposits.appendRow(['姓名', '系級', '學號']);
+  deposits.appendRow(['已報名學生', '', '111107777']);
+  bot.getReply('選擇對外學生', 'U-DEPOSIT-REGISTRATION');
+  const bound = bot.getReply('我是 已報名學生 111107777', 'U-DEPOSIT-REGISTRATION');
+  assert.match(bound.text, /綁定成功/);
+  assert.doesNotMatch(bound.text, /尚未查到這個學號/);
+});
+
+test('external reminders find a bound student by number even if the registered name varies', () => {
+  const bindings = runtime.openById(ids.master).getSheetByName('用戶綁定');
+  bindings.appendRow(['U-BY-NUMBER', '王佳怡', '', '111109998', 'external']);
+  assert.equal(externalTeaching._test.userIdForName('王佳儀', '111109998'), 'U-BY-NUMBER');
+  assert.equal(externalTeaching._test.userIdForName('其他同學', '111109998'), '');
 });
 
 test('assistant identity binding only accepts the active attendance roster', () => {

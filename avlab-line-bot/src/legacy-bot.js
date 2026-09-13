@@ -594,7 +594,7 @@ function getActiveAssistantRecords(){
   }catch(e){return[];}
 }
 
-// 對外考生在報名後即可綁定。報名回覆為優先來源，三張保證金表為備援來源。
+// 已報名者可用報名回覆或保證金表核對；尚未報名者也可先綁定姓名與學號。
 function getExternalStudents(){
   var registrations=[],deposits=[];
   try{
@@ -674,7 +674,8 @@ function handleBindName(rest, userId) {
   if (!rest) return { text: pendingRole==='assistant'?'請輸入「我是 姓名」完成中心助理綁定。':'請輸入「我是 姓名 學號」完成對外學生綁定，例如：我是 王小明 112405001。', quickReply: bA() };
   var raw = rest.trim(), parts = raw.split(/[\s　]+/), suppliedNumber = parts.length > 1 ? parts.pop() : '';
   var requestedName = parts.join(''), normalizedName = nrm(requestedName || raw);
-  var externalMatches = getExternalStudents().filter(function(student){
+  var externalStudents=getExternalStudents();
+  var externalMatches = externalStudents.filter(function(student){
     return externalIdentity.namesMatch(student.name, normalizedName)
       || (student.aliases||[]).some(function(alias){return externalIdentity.namesMatch(alias,normalizedName);});
   });
@@ -684,12 +685,13 @@ function handleBindName(rest, userId) {
   if(pendingRole==='external'){
     if (!suppliedNumber) return { text: '請連同學號一起輸入，格式為「我是 姓名 學號」。\n例如：我是 王小明 112405001', quickReply: bA() };
     matchedStudent = externalMatches.find(function(student){ return nrm(student.number) === nrm(suppliedNumber); });
-    if (!matchedStudent) return { text: '姓名或學號與任務學生／修課名單不一致，請確認後再輸入「我是 姓名 學號」。', quickReply: bA() };
+    if (!matchedStudent && externalStudents.some(function(student){return nrm(student.number)===nrm(suppliedNumber);})) return { text: '姓名或學號與已有的報名資料不一致，請確認後再輸入「我是 姓名 學號」。', quickReply: bA() };
+    if (!matchedStudent && (!/^\d{9}$/.test(suppliedNumber) || normalizedName.length < 2)) return { text: '尚未找到報名資料。若要先綁定，請輸入完整姓名與 9 位數學號：我是 姓名 學號。', quickReply: bA() };
   }else if(!assistantName){
     return{text:'查無「'+requestedName+'」在目前 '+activeAssistants.length+' 位中心助理名單中，請確認姓名後再試。',quickReply:bA()};
   }
-  var finalName = matchedStudent ? matchedStudent.name : assistantName;
-  var finalNumber = matchedStudent ? matchedStudent.number : '';
+  var finalName = matchedStudent ? matchedStudent.name : pendingRole==='external' ? normalizedName : assistantName;
+  var finalNumber = matchedStudent ? matchedStudent.number : pendingRole==='external' ? suppliedNumber : '';
   
   var sheet = SpreadsheetApp.openById(MASTER_SHEET_ID).getSheetByName(USER_BIND_SHEET_NAME);
   if (!sheet) {
@@ -725,7 +727,8 @@ function handleBindName(rest, userId) {
   cache.remove(PENDING_ROLE_PREFIX+userId);
   var destination=pendingRole==='external'?'對外學生':'中心助理';
   var menu=pendingRole==='external'?getExternalMainMenu():getInternalMainMenu();
-  return { text: '✅ 綁定成功！您已綁定為：' + finalName + (finalNumber ? '（' + finalNumber + '）' : '')+'\n\n'+menu.text, quickReply: menu.quickReply, navigationPage:destination };
+  var pendingNotice=pendingRole==='external'&&!matchedStudent?'\n目前尚未查到這個學號的報名資料；報名成功後會再用 LINE 通知你。\n':' ';
+  return { text: '✅ 綁定成功！您已綁定為：' + finalName + (finalNumber ? '（' + finalNumber + '）' : '')+'\n'+pendingNotice+'\n'+menu.text, quickReply: menu.quickReply, navigationPage:destination };
 }
 
 function isUserBound(userId) {
@@ -763,9 +766,9 @@ function getBoundRecord(userId){
 
 function identityRole(bound){
   if(!bound||!bound.name)return'';
+  if(bound.role==='external'&&bound.number)return'external';
   var external=getExternalStudents().some(function(person){return bound.number&&nrm(person.number)===nrm(bound.number);});
   var assistant=getActiveAssistantRecords().some(function(person){return person.name===bound.name;});
-  if(bound.role==='external'&&external)return'external';
   if(bound.role==='assistant'&&assistant)return'assistant';
   if(external)return'external';
   return assistant?'assistant':'';
@@ -819,7 +822,7 @@ function selectIdentity(role,userId){
   var student=getExternalStudents().some(function(person){return bound&&nrm(person.number)===nrm(bound.number);});
   if(student)return Object.assign(getExternalMainMenu(),{navigationPage:'對外學生'});
   cache.put(PENDING_ROLE_PREFIX+userId,'external',1800);
-  return{text:'👨‍🎓 對外學生綁定\n\n請輸入「我是 姓名 學號」。\n例如：我是 王小明 112405001',quickReply:qr([{label:'🏠 回首頁',text:'主選單'}])};
+  return{text:'👨‍🎓 對外學生綁定\n\n報名前就可以先綁定；報名成功後會依學號通知你。請填與報名表相同的姓名，以免無法確認身份。\n請輸入「我是 姓名 學號」。\n例如：我是 王小明 112405001',quickReply:qr([{label:'🏠 回首頁',text:'主選單'}])};
 }
 
 // ========== 選單 ==========

@@ -17,6 +17,7 @@ const internalTeaching = require('./internal-teaching');
 const externalTeaching = require('./external-teaching');
 const teachingSchedule = require('./teaching-schedule');
 const externalGroupSync = require('./external-group-sync');
+const { sendRegistrationConfirmations } = require('./registration-confirmations');
 const navigation = require('./navigation');
 const { WorkQueue } = require('./work-queue');
 const app = express();
@@ -246,6 +247,7 @@ async function schedulerTick() {
   }
   jobs.push([`external-examiner-changes:${stamp}`, externalTeaching.processPendingExaminerChanges, [ids.external, ...EXTERNAL_WORKBOOKS]]);
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
+  jobs.push([`registration-confirmations:${stamp}`, () => sendRegistrationConfirmations(runtime), [ids.master, ids.externalRegistration, ids.externalResults]]);
   jobs.push([`external-group-sync:${stamp}`, () => externalGroupSync.syncExternalCertificationMatrix(runtime.api, ids.externalResults), []]);
   if (time === '20:00') jobs.push([`daily:${date}`, bot.sendTomorrowTaskReminders, null]);
   if (weekday === 'Mon' && time === '01:00') jobs.push([`weekly:${date}`, bot.calculateWeeklyGodOfGamblers, null]);
