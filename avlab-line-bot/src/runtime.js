@@ -195,14 +195,14 @@ class GoogleSheetsRuntime {
     return this.loadOnly(Object.keys(workbooks).filter(id => ![ids.deposit, ids.externalRegistration].includes(id)), options);
   }
 
-  async loadOnly(spreadsheetIds, { force = false, forceIds = [], forceMetadata = false } = {}) {
+  async loadOnly(spreadsheetIds, { force = false, forceIds = [], forceMetadata = false, maxAgeMs = this.cacheTtlMs } = {}) {
     this.operations = []; this.httpOperations = [];
     const uniqueIds = [...new Set(spreadsheetIds)].filter(id => workbooks[id]);
     const forcedIds = new Set(forceIds);
     const now = Date.now();
     await Promise.all(uniqueIds.map(spreadsheetId => {
       const shouldForce = force || forcedIds.has(spreadsheetId);
-      const isFresh = this.sheets.has(spreadsheetId) && now - (this.loadedAt.get(spreadsheetId) || 0) < this.cacheTtlMs;
+      const isFresh = this.sheets.has(spreadsheetId) && now - (this.loadedAt.get(spreadsheetId) || 0) < maxAgeMs;
       if (!shouldForce && isFresh) return null;
       if (!shouldForce && this.loading.has(spreadsheetId)) return this.loading.get(spreadsheetId);
       const pending = this.loadWorkbook(spreadsheetId, workbooks[spreadsheetId], { forceMetadata })

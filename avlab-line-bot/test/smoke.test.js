@@ -165,6 +165,21 @@ test('selected workbook refresh leaves the other cached workbooks untouched', as
   assert.equal(loads.get(ids.master), 1);
 });
 
+test('identity binding can share a three-second cache without changing the general TTL', async () => {
+  const cached = new GoogleSheetsRuntime();
+  let loads = 0;
+  cached.loadWorkbook = async spreadsheetId => {
+    loads++;
+    cached.sheets.set(spreadsheetId, new Map());
+  };
+  await cached.loadOnly([ids.master], { maxAgeMs: 3000 });
+  await cached.loadOnly([ids.master], { maxAgeMs: 3000 });
+  assert.equal(loads, 1);
+  cached.loadedAt.set(ids.master, Date.now() - 3001);
+  await cached.loadOnly([ids.master], { maxAgeMs: 3000 });
+  assert.equal(loads, 2);
+});
+
 test('schedule sync treats timestamps on the same Taipei calendar day as the same task date', () => {
   const current = Array(18).fill('');
   const desired = Array(18).fill('');
@@ -280,8 +295,10 @@ test('retest preserves the passed written result and only asks for the practical
   const students = resultBook.getSheetByName('任務學生');
   const attendance = resultBook.getSheetByName('LINE點名紀錄');
   const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
+  const futureExam = new Date(); futureExam.setDate(futureExam.getDate() + 7);
+  const futureRetest = new Date(); futureRetest.setDate(futureRetest.getDate() + 14);
 
-  tasks.appendRow(['T-EXAM-CUM','1151','考試',new Date('2026-09-12'),'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
+  tasks.appendRow(['T-EXAM-CUM','1151','考試',futureExam,'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
   students.appendRow(['T-EXAM-CUM','S-EXAM-CUM','補考學生','999',1,'未點名','未記錄','']);
   const examMenu = externalTeaching.handleCommand('開始點名 T-EXAM-CUM', context);
   assert.deepEqual(examMenu.lineMessage.template.columns[0].actions.map(action => action.label), ['考生已到', '查看／評分']);
@@ -301,7 +318,7 @@ test('retest preserves the passed written result and only asks for the practical
   assert.match(failed.text, /未通過項目：上機/);
   assert.match(failed.text, /考生尚未完成 LINE 姓名綁定/);
 
-  tasks.appendRow(['T-RETEST-CUM','1151','第一次補考',new Date('2026-09-19'),'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
+  tasks.appendRow(['T-RETEST-CUM','1151','第一次補考',futureRetest,'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
   students.appendRow(['T-RETEST-CUM','S-RETEST-CUM','補考學生','999',1,'未點名','未記錄','']);
   externalTeaching.handleCommand('開始點名 T-RETEST-CUM', context);
   const retestPrompt = externalTeaching.handleCommand('點名狀態 T-RETEST-CUM S-RETEST-CUM 到場', context);

@@ -18,6 +18,7 @@ const externalTeaching = require('./external-teaching');
 const teachingSchedule = require('./teaching-schedule');
 const externalGroupSync = require('./external-group-sync');
 const navigation = require('./navigation');
+const { WorkQueue } = require('./work-queue');
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master, ids.externalRegistration, ids.deposit];
@@ -35,13 +36,9 @@ function personalQueryWorkbooks(text) {
   if (/^(?:考試結果|成績|結果)(?:\s|$)/.test(command)) return [ids.master];
   return null;
 }
-let serial = Promise.resolve();
+const workQueue = new WorkQueue(error => console.error('Queued job failed:', error));
 
-function enqueue(job) {
-  const next = serial.then(job, job);
-  serial = next.catch(error => console.error('Queued job failed:', error));
-  return next;
-}
+function enqueue(job, priority = 'interactive') { return workQueue.enqueue(job, priority); }
 
 function validLineSignature(buffer, signature) {
   if (!signature) return false;
@@ -120,11 +117,13 @@ async function handleLineEvent(event) {
         await runtime.loadOnly(TEACHING_SCHEDULE_WORKBOOKS, { force: true });
         await teachingSchedule.loadDocumentLabels(runtime.api, { force: true });
       } else if (bindingCommand || identityFlowCommand) {
-        await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit], { force: true });
+        // A short shared window absorbs bursts of new students without making
+        // identity checks depend on the general 60-second sheet cache.
+        await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit], { maxAgeMs: 3000 });
       } else if (text === '選擇中心助理') {
-        await runtime.loadOnly([ids.master, ids.internalAttendance], { force: true });
+        await runtime.loadOnly([ids.master, ids.internalAttendance]);
       } else if (text === '選擇對外學生') {
-        await runtime.loadOnly([ids.master, ids.externalRegistration, ids.deposit], { force: true });
+        await runtime.loadOnly([ids.master, ids.externalRegistration, ids.deposit]);
       } else if (internalTeaching.isInternalCommand(text)) {
         await runtime.loadOnly(INTERNAL_WORKBOOKS, { force: internalTeaching.requiresFreshData(text) });
       } else if (combinedTaskQuery) {
@@ -175,7 +174,11 @@ app.post('/webhook', express.raw({ type: 'application/json', limit: '1mb' }), (r
   try { payload = JSON.parse(req.body.toString('utf8')); }
   catch { return res.status(400).send('Invalid JSON'); }
   res.status(200).send('OK');
-  for (const event of payload.events || []) enqueue(() => handleLineEvent(event));
+  for (const event of payload.events || []) {
+    // WorkQueue already logs failures; consume the rejected promise so one
+    // bad event cannot terminate the Node process with an unhandled rejection.
+    void enqueue(() => handleLineEvent(event)).catch(() => {});
+  }
 });
 
 app.use('/automation', express.json({ limit: '1mb' }));
@@ -218,10 +221,13 @@ app.post('/automation/:name', (req, res) => {
 });
 
 const completedSchedules = new Set();
+const pendingScheduleKinds = new Set();
 async function schedulerTick() {
   const stamp = formatDate(new Date(), 'yyyy-MM-dd HH:mm');
   const date = stamp.slice(0, 10);
   const time = stamp.slice(11);
+  const minute = Number(time.slice(3));
+  const hour = Number(time.slice(0, 2));
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: process.env.TZ || 'Asia/Taipei', weekday: 'short' }).format(new Date());
   const jobs = [];
   // 認證同步獨立且優先執行，避免其他排程失敗時連帶阻斷對內認證更新。
@@ -229,29 +235,37 @@ async function schedulerTick() {
   // the task workbook or binding workbook here made an unrelated read failure
   // prevent otherwise valid certification results from being copied.
   jobs.push([`internal-cert-sync:${stamp}`, internalTeaching.syncInternalCertifications, INTERNAL_CERT_WORKBOOKS]);
-  jobs.push([`internal-reminders:${stamp}`, internalTeaching.sendInternalReminders, INTERNAL_WORKBOOKS]);
-  jobs.push([`teaching-schedule-groups:${stamp}`, async () => {
-    await teachingSchedule.loadDocumentLabels(runtime.api);
-    return teachingSchedule.sendGroupReminders();
-  }, [ids.teachingSchedule, ids.externalResults]]);
+  // These reminders only become due at 09:00. Recheck every five minutes
+  // afterwards for late sheet edits without rereading their workbooks 24/7.
+  if (hour >= 9 && minute % 5 === 0) {
+    jobs.push([`internal-reminders:${stamp}`, internalTeaching.sendInternalReminders, INTERNAL_WORKBOOKS]);
+    jobs.push([`teaching-schedule-groups:${stamp}`, async () => {
+      await teachingSchedule.loadDocumentLabels(runtime.api);
+      return teachingSchedule.sendGroupReminders();
+    }, [ids.teachingSchedule, ids.externalResults]]);
+  }
   jobs.push([`external-examiner-changes:${stamp}`, externalTeaching.processPendingExaminerChanges, [ids.external, ...EXTERNAL_WORKBOOKS]]);
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
   jobs.push([`external-group-sync:${stamp}`, () => externalGroupSync.syncExternalCertificationMatrix(runtime.api, ids.externalResults), []]);
   if (time === '20:00') jobs.push([`daily:${date}`, bot.sendTomorrowTaskReminders, null]);
   if (weekday === 'Mon' && time === '01:00') jobs.push([`weekly:${date}`, bot.calculateWeeklyGodOfGamblers, null]);
   for (const [key, fn, workbookIds] of jobs) {
-    if (completedSchedules.has(key)) continue;
+    const kind = key.split(':', 1)[0];
+    if (completedSchedules.has(key) || pendingScheduleKinds.has(kind)) continue;
+    pendingScheduleKinds.add(kind);
     try {
       await enqueue(async () => {
         if (workbookIds) await runtime.loadOnly(workbookIds, { force: true });
         else await runtime.loadAll({ force: true });
         await fn();
         await runtime.flush();
-      });
+      }, 'background');
       completedSchedules.add(key);
     } catch (error) {
       // 同一分鐘內保留未完成狀態供下個 tick 重試，並繼續執行其他獨立工作。
       console.error(`Scheduled job failed (${key}):`, error);
+    } finally {
+      pendingScheduleKinds.delete(kind);
     }
   }
   if (completedSchedules.size > 5000) completedSchedules.clear();
