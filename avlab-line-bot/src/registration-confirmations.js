@@ -32,7 +32,8 @@ function confirmationCandidates(runtime) {
 }
 
 function confirmationText(registration) {
-  return `✅ 對外教學報名成功！\n\n${registration.name}（${registration.number}）的報名資料已收到。\n報名項目：${registration.equipment.join('、')}\n\n後續教學與考試資訊會再由機器人通知。`;
+  const items = registration.registeredItems?.length ? registration.registeredItems : registration.equipment;
+  return `✅ 對外教學報名成功！\n${registration.name}（${registration.number}）\n\n報名項目：\n${items.map(item => `• ${item}`).join('\n')}\n\n後續時程會再通知你。`;
 }
 
 async function sendOne(candidate, fetchImpl) {

@@ -727,8 +727,8 @@ function handleBindName(rest, userId) {
   cache.remove(PENDING_ROLE_PREFIX+userId);
   var destination=pendingRole==='external'?'對外學生':'中心助理';
   var menu=pendingRole==='external'?getExternalMainMenu():getInternalMainMenu();
-  var pendingNotice=pendingRole==='external'&&!matchedStudent?'\n目前尚未查到這個學號的報名資料；報名成功後會再用 LINE 通知你。\n':' ';
-  return { text: '✅ 綁定成功！您已綁定為：' + finalName + (finalNumber ? '（' + finalNumber + '）' : '')+'\n'+pendingNotice+'\n'+menu.text, quickReply: menu.quickReply, navigationPage:destination };
+  var pendingNotice=pendingRole==='external'&&!matchedStudent?'\n報名成功後會再通知你。':'';
+  return { text: '✅ 綁定成功：' + finalName + (finalNumber ? '（' + finalNumber + '）' : '')+'\n身分：'+destination+pendingNotice, quickReply: menu.quickReply, navigationPage:destination };
 }
 
 function isUserBound(userId) {
@@ -801,7 +801,7 @@ function selectIdentity(role,userId){
     var currentRole=identityRole(bound),currentLabel=currentRole?identityRoleLabel(currentRole):'已失效的舊身分';
     var targetLabel=identityRoleLabel(role);
     if(currentRole===role&&bound.confirmed)return Object.assign(identityMenu(role),{navigationPage:targetLabel});
-    if(currentRole===role)return{text:'✅ 已找到您的綁定\n\n姓名：'+bound.name+(bound.number?'\n學號：'+bound.number:'')+'\n身分：'+currentLabel+'\n\n資料正確可直接繼續；若姓名有變動，請選擇「更改名字」。',quickReply:qr([
+    if(currentRole===role)return{text:'✅ 已綁定：'+bound.name+(bound.number?'（'+bound.number+'）':'')+'\n身分：'+currentLabel+'\n正確就繼續，需更正請按「更改名字」。',quickReply:qr([
       {label:'✅ 資料正確',text:'繼續使用目前身份'},
       {label:'✏️ 更改名字',text:'更改名字 '+targetLabel},
       {label:'🏠 回首頁',text:'主選單'}
@@ -810,24 +810,24 @@ function selectIdentity(role,userId){
     if(currentRole)choices.push({label:'✅ 保持'+currentLabel,text:'繼續使用目前身份'});
     choices.push({label:'🔄 更改身份',text:'更改身份 '+targetLabel});
     choices.push({label:'🏠 回首頁',text:'主選單'});
-    return{text:'⚠️ 您目前已綁定為「'+currentLabel+'」\n\n姓名：'+bound.name+(bound.number?'\n學號：'+bound.number:'')+'\n\n您這次選擇的是「'+targetLabel+'」。若確定身分已改變，再按「更改身份」。',quickReply:qr(choices)};
+    return{text:'⚠️ 目前已綁定為「'+currentLabel+'」：'+bound.name+(bound.number?'（'+bound.number+'）':'')+'\n這次選擇的是「'+targetLabel+'」。要更改嗎？',quickReply:qr(choices)};
   }
   if(role==='assistant'){
     var activeAssistants=getActiveAssistantRecords();
     var active=activeAssistants.some(function(person){return bound&&person.name===bound.name;});
     if(active)return Object.assign(getInternalMainMenu(),{navigationPage:'中心助理'});
     cache.put(PENDING_ROLE_PREFIX+userId,'assistant',1800);
-    return{text:'👩‍💼 中心助理綁定\n\n請輸入「我是 姓名」。\n只有目前名單中的 '+activeAssistants.length+' 位中心助理可以完成綁定。',quickReply:qr([{label:'🏠 回首頁',text:'主選單'}])};
+    return{text:'👩‍💼 中心助理綁定\n請輸入：我是 姓名',quickReply:qr([{label:'🏠 回首頁',text:'主選單'}])};
   }
   var student=getExternalStudents().some(function(person){return bound&&nrm(person.number)===nrm(bound.number);});
   if(student)return Object.assign(getExternalMainMenu(),{navigationPage:'對外學生'});
   cache.put(PENDING_ROLE_PREFIX+userId,'external',1800);
-  return{text:'👨‍🎓 對外學生綁定\n\n報名前就可以先綁定；報名成功後會依學號通知你。請填與報名表相同的姓名，以免無法確認身份。\n請輸入「我是 姓名 學號」。\n例如：我是 王小明 112405001',quickReply:qr([{label:'🏠 回首頁',text:'主選單'}])};
+  return{text:'👨‍🎓 對外學生綁定\n報名前就可以先綁定。\n請輸入：我是 姓名 學號',quickReply:qr([{label:'🏠 回首頁',text:'主選單'}])};
 }
 
 // ========== 選單 ==========
 function getMainMenu(){return{text:'🤖 歡迎使用影音實驗室教學部機器人！\n\n請選擇您的身份並完成綁定：',quickReply:qr([{label:'👨‍🎓 對外學生',text:'選擇對外學生'},{label:'👩‍💼 中心助理',text:'選擇中心助理'}])};}
-function getExternalMainMenu(){return{text:'請選擇您想查詢的對外學生資訊：',quickReply:qr([{label:'📋 流程',text:'流程'},{label:'📅 時程',text:'對外時程'},{label:'📚 題庫/講義',text:'題庫講義'},{label:'💰 保證金',text:'保證金'},{label:'🚫 學生請假',text:'學生請假'},{label:'🔑 借器材',text:'借用規定'},{label:'🔧 器材練習',text:'器材練習'},{label:'🌐 影音實驗室平台',uri:'https://avlol.nccu.edu.tw/'},{label:'📣 臉書粉專',uri:'https://www.facebook.com/nccuavlab'},{label:'🔍 更多',text:'對外更多'},{label:'🏠 回首頁',text:'主選單'}])};}
+function getExternalMainMenu(){return{text:'請選擇您想查詢的對外學生資訊：',quickReply:qr([{label:'📋 流程',text:'流程'},{label:'📅 時程',text:'對外時程'},{label:'📚 題庫/講義',text:'題庫講義'},{label:'📊 工作坊簡報',text:'對外工作坊簡報'},{label:'💰 保證金',text:'保證金'},{label:'🚫 學生請假',text:'學生請假'},{label:'🔑 借器材',text:'借用規定'},{label:'🔧 器材練習',text:'器材練習'},{label:'🌐 影音實驗室平台',uri:'https://avlol.nccu.edu.tw/'},{label:'📣 臉書粉專',uri:'https://www.facebook.com/nccuavlab'},{label:'🔍 更多',text:'對外更多'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getExternalMoreMenu(){return{text:'更多對外學生資訊：',quickReply:qr([{label:'⏰ 營業時間',text:'營業時間'},{label:'🚫 額滿',text:'額滿'},{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getInternalMainMenu(){
   return {
@@ -946,7 +946,8 @@ function getInternalVideoResources(command){
 var UNIFIED={
   流程:'🗺️【對外教學與認證流程說明】\n\n想取得影音實驗室的器材借用權限嗎？請跟著以下步驟通關：\n\n1️⃣ 【報名與繳交保證金】\n留意粉專報名表單，搶到名額後，務必於死線(10/9)前至中心繳交保證金。\n\n2️⃣ 【參加教學與預約練習】\n準時出席教學工作坊！課後可利用中心開放時間預約練習（每次上限2小時 / 2項器材）。\n\n3️⃣ 【參加考試】\n包含上機實作與簡答題。簡答題請務必熟讀題庫，缺席皆不可退保證金喔！\n\n4️⃣ 【取得借用權限】\n注意：器材是以「組」為單位，整組的「所有組員」都必須通過該項認證，才會正式開放借用權限！\n\n💡 溫馨提醒：【基礎配件課程】是所有進階器材的先修，一定要先考過才能報名其他的喔！',
   對外時程:'🗓️【對外教學工作坊 - 重要時程表】\n\n📝 對外報名時間 (第2、3週)\n9/14 (一) － 9/25 (五)\n\n📚 教學週 (第4、5週)\n9/28 (一) － 10/9 (五)\n\n📝 考試週 (第6、7週)\n10/12 (一) － 10/23 (五)\n\n🔄 第一次補考 (第8週)\n10/27 (二) － 10/30 (五)\n\n🔄 第二次補考 (第9週)\n11/2 (一) － 11/6 (五)\n\n⚠️ 請密切注意各階段的報名與保證金繳交死線(10/9)喔！',
-  題庫講義:'【考試內容與題庫 + 上課講義】\n\n📚 題庫：\n👉 《影音實驗室對外教學工作坊-簡答題題庫》：\nhttps://docs.google.com/document/d/1pKjK2uqPmtcXIYRzyW87Ll7vvKFtcfzL/edit?usp=sharing&ouid=106559454873395212671&rtpof=true&sd=true\n\n📘 講義：\n👉 對外教學工作坊上課講義：\nhttps://avlab.nccu.edu.tw/PageDoc/Detail?fid=10543&id=18228\n\n📊 對外工作坊簡報（一）：\nhttps://docs.google.com/presentation/d/1u-2wqepFnNYsmo3T77yb5qqHdyoTnphH/edit?slide=id.p22#slide=id.p22\n\n📊 對外工作坊簡報（二）：\nhttps://docs.google.com/presentation/d/1WdS6Qp6205Jp5eIVvnn5KfkBLn4VGJVB/edit?slide=id.p16#slide=id.p16',
+  題庫講義:'【考試題庫與上課講義】\n\n📚 簡答題題庫：\nhttps://docs.google.com/document/d/1pKjK2uqPmtcXIYRzyW87Ll7vvKFtcfzL/edit?usp=sharing&ouid=106559454873395212671&rtpof=true&sd=true\n\n📘 上課講義：\nhttps://avlab.nccu.edu.tw/PageDoc/Detail?fid=10543&id=18228',
+  對外工作坊簡報:'【對外工作坊簡報】\n\n📊 簡報（一）\nhttps://docs.google.com/presentation/d/1u-2wqepFnNYsmo3T77yb5qqHdyoTnphH/edit?slide=id.p22#slide=id.p22\n\n📊 簡報（二）\nhttps://docs.google.com/presentation/d/1WdS6Qp6205Jp5eIVvnn5KfkBLn4VGJVB/edit?slide=id.p16#slide=id.p16',
   保證金:'【保證金制度說明】\n\n✅ 同一項器材的「簡答題」與「上機考」都通過，才符合退還保證金資格。\n\n🔄 補考採累計制：已通過的項目會保留。例如簡答題已通過、上機未通過，補考只需重考上機；上機通過後即顯示可退保證金。\n\n❌ 若補考後仍有任一項未通過，保證金狀態會顯示「不可退」。\n\n完整規定：\nhttps://drive.google.com/file/d/1cSVpcW5allLz6_tImqg2KEd7A2Jfu101/view',
   學生請假:'【請假與更改時間規定 (對外學生)】\n\n⚠️ 對外考生「不可請假」，但可透過「對外考試時間異動表單」申請更改時間或取消報名。⚠️\n\n❗ 取消報名仍「不予退費」，請確定報名項目後再繳交保證金。\n\n若測驗當天未出席將視同放棄資格，且已繳交之保證金一律「不予退費」。\n\n⚠️ 更改時間表單：https://forms.gle/ek1ApLGp3g6cAeLB9',
   借用規定:'【器材借用權限說明】\n器材借用有兩大前提：\n1. 必須先上過「基礎配件課程」並取得權限。\n2. 器材是以「組」為單位，整組的「所有組員」都必須通過該項認證，才能開放借用權限！請督促隊友。',
@@ -963,7 +964,7 @@ var UNIFIED={
 };
 function getUnifiedReply(k){
   var t = UNIFIED[k];
-  if (k === '流程' || k === '對外時程' || k === '題庫講義' || k === '保證金' || 
+  if (k === '流程' || k === '對外時程' || k === '題庫講義' || k === '對外工作坊簡報' || k === '保證金' ||
       k === '學生請假' || k === '借用規定' || k === '講義' || 
       k === '營業時間' || k === '額滿' || k === '器材練習') {
     return t ? { text: t, quickReply: bE() } : null;

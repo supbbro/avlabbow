@@ -8,7 +8,7 @@ process.env.LINE_CHANNEL_ACCESS_TOKEN ||= 'test-token';
 
 const { GoogleSheetsRuntime } = require('../src/runtime');
 const { ids } = require('../src/config');
-const { sendRegistrationConfirmations, retryUuid } = require('../src/registration-confirmations');
+const { sendRegistrationConfirmations, confirmationText, retryUuid } = require('../src/registration-confirmations');
 const { parseRegistrationRows } = require('../src/external-registration-parser');
 
 test('registration parser accepts the second form branch', () => {
@@ -18,6 +18,17 @@ test('registration parser accepts the second form branch', () => {
   ]);
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].number, '111101020');
+});
+
+test('registration confirmation lists every selected teaching and exam item', () => {
+  const [registration] = parseRegistrationRows([
+    ['時間戳記', '姓名', '學號', '基礎配件課程', 'CX350 考試', '新聞館影棚 燈盤教學', '新聞館影棚 燈盤考試', 'Teradek無線追焦組'],
+    ['2026/9/14 13:00:00', '測試學生', '115100001', '10/1 12:00', '10/5 18:00', '10/6 18:00', '10/7 18:00', '10/8 18:00']
+  ]);
+  assert.deepEqual(registration.registeredItems, ['基礎配件課程', 'CX350 考試', '新聞館影棚 燈盤教學', '新聞館影棚 燈盤考試', 'Teradek無線追焦組']);
+  assert.deepEqual(registration.equipment, ['CX350', '新聞館影棚 燈盤', 'Teradek無線追焦組']);
+  const message = confirmationText(registration);
+  for (const item of registration.registeredItems) assert.match(message, new RegExp(item));
 });
 
 test('pre-registered students are notified once when their registration appears', async () => {

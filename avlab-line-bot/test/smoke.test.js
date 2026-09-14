@@ -54,11 +54,14 @@ test('both identity menus link to the AV Lab platform and external resources sta
   assert.equal(internalActions.some(action => action.uri === 'https://www.facebook.com/nccuavlab'), false);
   assert.ok(externalActions.length <= 13);
   assert.ok(internalActions.length <= 13);
+  assert.equal(externalActions.filter(action => action.text === '對外工作坊簡報').length, 1);
   const materials = bot.getReply('題庫講義', 'U-links-materials');
-  assert.match(materials.text, /1u-2wqepFnNYsmo3T77yb5qqHdyoTnphH\/edit\?slide=id\.p22#slide=id\.p22/);
-  assert.match(materials.text, /1WdS6Qp6205Jp5eIVvnn5KfkBLn4VGJVB\/edit\?slide=id\.p16#slide=id\.p16/);
+  assert.doesNotMatch(materials.text, /docs\.google\.com\/presentation/);
   assert.equal(materials.quickReply.items.some(item => item.action.text === '回上一頁'), true);
   assert.equal(materials.quickReply.items.some(item => item.action.text === '主選單'), true);
+  const slides = bot.getReply('對外工作坊簡報', 'U-links-slides');
+  assert.match(slides.text, /1u-2wqepFnNYsmo3T77yb5qqHdyoTnphH\/edit\?slide=id\.p22#slide=id\.p22/);
+  assert.match(slides.text, /1WdS6Qp6205Jp5eIVvnn5KfkBLn4VGJVB\/edit\?slide=id\.p16#slide=id\.p16/);
 });
 
 test('submenu pages consistently provide back and home navigation', () => {
@@ -465,7 +468,8 @@ test('an external student can bind before registering and remain bound', () => {
   assert.doesNotMatch(invalid.text, /綁定成功/);
   const bound = bot.getReply('我是 早綁學生 111109999', userId);
   assert.match(bound.text, /綁定成功/);
-  assert.match(bound.text, /尚未查到這個學號的報名資料/);
+  assert.match(bound.text, /報名成功後會再通知你/);
+  assert.ok(bound.text.length < 80);
   assert.match(bot.getReply('選擇對外學生', userId).text, /對外學生資訊/);
 });
 
@@ -507,10 +511,11 @@ test('assistant identity binding only accepts the active attendance roster', () 
   assert.match(directMenu.text, /助理資訊/);
   assert.doesNotMatch(directMenu.text, /已找到您的綁定/);
 
-  assert.match(bot.getReply('選擇中心助理', 'U-active-assistant').text, /54 位中心助理/);
+  assert.match(bot.getReply('選擇中心助理', 'U-active-assistant').text, /請輸入：我是 姓名/);
   const active = bot.getReply('我是 現役01', 'U-active-assistant');
   assert.match(active.text, /綁定成功/);
-  assert.match(active.text, /助理資訊/);
+  assert.match(active.text, /身分：中心助理/);
+  assert.ok(active.text.length < 80);
   const bindingRows = bindingSheet.getDataRange().getValues();
   assert.equal(bindingRows.find(row => row[0] === 'U-active-assistant-old')[1], '');
   assert.equal(bindingRows.find(row => row[0] === 'U-active-assistant')[4], 'assistant');

@@ -218,7 +218,7 @@ function syncDepositFromRegistrations(registrations) {
   const existingFor = registration => existing.find(row => norm(row.number) === norm(registration.number))
     || (existing.filter(row => norm(row.name) === norm(registration.name)).length === 1
       ? existing.find(row => norm(row.name) === norm(registration.name)) : null);
-  const desired = registrations.map(registration => {
+  const desired = registrations.filter(registration => registration.equipment.length).map(registration => {
     const current = existingFor(registration);
     return [registration.name, registration.department, registration.number, registration.equipment.join('、'),
       registration.equipment.length, registration.equipment.length * 50, current?.paidRaw ?? false,
