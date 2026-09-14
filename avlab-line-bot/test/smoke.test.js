@@ -602,6 +602,15 @@ test('registration response is the deposit authority and counts each exam equipm
   assert.equal(registrations[0].number, '111101017');
 });
 
+test('external data reset excludes dates before September 14, 2026', () => {
+  const current = externalTeaching._test.isCurrentExternalData;
+  assert.equal(current(new Date('2026-09-13T23:59:59+08:00')), false);
+  assert.equal(current(new Date('2026-09-14T00:00:00+08:00')), true);
+  assert.equal(current('2026/9/14 上午 9:00:00'), true);
+  assert.equal(current('2026/9/4 上午 10:00:00'), false);
+  assert.equal(current(''), false);
+});
+
 test('external binding identities merge both registration branches and deposit-only students by number', () => {
   const registrationRows = [
     ['時間戳記','','','','姓名','','學號','','姓名','','學號'],
@@ -756,7 +765,7 @@ test('external examiner change polling tolerates a one-character name typo and s
     const schedule = isolated.openById(ids.externalClassSchedule).insertSheet('教學週分班表I');
     [
       ['', '教學週I'],
-      ['', '9/10（四）'],
+      ['', '9/20（日）'],
       ['時間', '18:55-20:00'],
       ['項目', 'H6'],
       ['地點', '401'],
@@ -778,7 +787,7 @@ test('external examiner change polling tolerates a one-character name typo and s
 
     const responses = isolated.openById(ids.external).insertSheet('表單回覆 1');
     responses.appendRow(['時間戳記','原考官','日期','器材','找到代班','代班考官','通過認證','同步狀態','同步時間']);
-    responses.appendRow(['2026/9/3 12:00:00','原考宮','2026/9/10','H6','有','新考官','有','','']);
+    responses.appendRow(['2026/9/19 12:00:00','原考宮','2026/9/20','H6','有','新考官','有','','']);
 
     isolated.httpOperations = [];
     assert.equal(externalTeaching.processPendingExaminerChanges(), 1);
@@ -815,9 +824,9 @@ test('deposit payment reminders begin on September 28 and skip paid students', (
     deposits.appendRow(['未繳學生', '', '111101021', 'H6', 1, 50, false]);
     deposits.appendRow(['已繳學生', '', '111101022', 'H6', 1, 50, true]);
     const response = isolated.openById(ids.externalRegistration).insertSheet('表單回覆 1');
-    response.appendRow(['姓名', '學號', 'H6考試']);
-    response.appendRow(['未繳學生', '111101021', '是']);
-    response.appendRow(['已繳學生', '111101022', '是']);
+    response.appendRow(['時間戳記', '姓名', '學號', 'H6考試']);
+    response.appendRow(['2026/9/20 09:00:00', '未繳學生', '111101021', '是']);
+    response.appendRow(['2026/9/20 09:01:00', '已繳學生', '111101022', '是']);
     const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
     bindings.appendRow(['LINE User ID', '姓名', '綁定時間', '學號', '身分類型']);
     bindings.appendRow(['U-UNPAID', '未繳學生', '', '111101021', 'external']);
@@ -855,9 +864,9 @@ test('unpaid registered students are canceled at the deadline, struck from sched
   deposits.appendRow(['學生甲','','1001','H6',1,50,'FALSE','','','','']);
   const registration = isolated.openById(ids.externalRegistration).insertSheet('表單回覆 1');
   const registrationHeader = Array(21).fill('');
-  Object.assign(registrationHeader, { 4: '姓名', 5: '系級', 6: '學號', 20: 'H6考試' });
+  Object.assign(registrationHeader, { 0: '時間戳記', 4: '姓名', 5: '系級', 6: '學號', 20: 'H6考試' });
   const registrationRow = Array(21).fill('');
-  Object.assign(registrationRow, { 4: '學生甲', 6: '1001', 20: true });
+  Object.assign(registrationRow, { 0: '2026/9/20 09:00:00', 4: '學生甲', 6: '1001', 20: true });
   registration.appendRow(registrationHeader); registration.appendRow(registrationRow);
   const schedule = isolated.openById(ids.externalClassSchedule).insertSheet('考試週分班表I');
   schedule.getRange(3, 3).setValue('學生甲');

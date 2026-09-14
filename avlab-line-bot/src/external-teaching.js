@@ -12,6 +12,9 @@ const SHEETS = {
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
 const REMINDER_LEAD_MINUTES = 60;
+// Records before this reset date were cleared from the derived task, student,
+// and deposit sheets. Keep their source rows from rebuilding those records.
+const EXTERNAL_DATA_START_DATE = '2026-09-14';
 const ROSTER_SHEET = process.env.EXTERNAL_ROSTER_SHEET_NAME || '1151修課名單';
 const REGISTRATION_TASK_ID = 'REGISTRATION-1151';
 const EXTERNAL_COMMAND = /^(今日任務$|對外任務$|近期任務$|查看任務\s|開始點名\s|考生名單\s|查看考生\s|查看點名結果\s|修改出席\s|到場判定\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
@@ -63,6 +66,7 @@ function dateKey(value) {
   })();
   return date && !Number.isNaN(date.getTime()) ? Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd') : '';
 }
+const isCurrentExternalData = value => dateKey(value) >= EXTERNAL_DATA_START_DATE;
 function replaceExaminerName(value, originalName, substituteName) {
   const current = String(value || '').trim();
   if (norm(current) === norm(substituteName)) return current;
@@ -192,7 +196,8 @@ function enrichStudentsFromRoster(tasks, roster) {
 
 function registrationRows() {
   const target = SpreadsheetApp.openById(ids.externalRegistration).getSheetByName('表單回覆 1');
-  return target ? parseRegistrationRows(target.getDataRange().getValues()) : [];
+  return target ? parseRegistrationRows(target.getDataRange().getValues())
+    .filter(registration => isCurrentExternalData(registration.timestamp)) : [];
 }
 
 function depositRows() {
@@ -290,7 +295,8 @@ function syncFromSchedule() {
     const sourceSheet = sourceBook.getSheetByName(name);
     if (sourceSheet) source[name] = sourceSheet.getDataRange().getValues();
   });
-  const parsed = parseWorkbook(source, process.env.ACADEMIC_TERM || '1151');
+  const parsed = parseWorkbook(source, process.env.ACADEMIC_TERM || '1151')
+    .filter(task => isCurrentExternalData(task.date));
   const rosterSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName(ROSTER_SHEET);
   const roster = rosterStudents(rosterSheet ? rosterSheet.getDataRange().getValues() : []);
   const registrations = registrationRows();
@@ -1370,4 +1376,4 @@ function sendExternalReminders(now = new Date()) {
   return sent + deposit.reminders;
 }
 
-module.exports = { handleCommand, sendExternalReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, sendExternalReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
