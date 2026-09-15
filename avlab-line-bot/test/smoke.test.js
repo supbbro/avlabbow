@@ -81,6 +81,8 @@ test('submenu pages consistently provide back and home navigation', () => {
 
 test('internal menu groups each feature once without a catch-all more page', () => {
   const main = bot.getReply('中心助理', 'U-menu').quickReply.items.map(item => item.action);
+  assert.equal(main.some(action => action.label === '📖 越級考' && action.text === '越級考'), true);
+  assert.equal(main.some(action => action.label === '✅ 助理認證狀況' && action.uri === 'https://docs.google.com/spreadsheets/d/1vUnpcRVsQmUH9zjqic8KFf5IlGk0E5GSH-rkhBGE7bk/edit?gid=0#gid=0'), true);
   assert.equal(main.some(action => action.text === '助理更多'), false);
   assert.deepEqual(main.filter(action => ['查詢', '請假選項', '助理排程', '助理工具'].includes(action.text)).map(action => action.text), [
     '查詢', '請假選項', '助理排程', '助理工具'

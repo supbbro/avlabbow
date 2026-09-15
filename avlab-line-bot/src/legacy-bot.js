@@ -840,7 +840,8 @@ function getInternalMainMenu(){
       {label:'📅 時程與排班', text:'助理排程'},
       {label:'📚 講義區', text:'講義區'},
       {label:'🌐 影音實驗室平台', uri:'https://avlol.nccu.edu.tw/'},
-      {label:'📖 認證與補考', text:'越級考'},
+      {label:'📖 越級考', text:'越級考'},
+      {label:'✅ 助理認證狀況', uri:'https://docs.google.com/spreadsheets/d/1vUnpcRVsQmUH9zjqic8KFf5IlGk0E5GSH-rkhBGE7bk/edit?gid=0#gid=0'},
       {label:'🎲 休閒工具', text:'助理工具'},
       {label:'🏠 回首頁', text:'主選單'}
     ])
