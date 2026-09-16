@@ -834,6 +834,7 @@ function getInternalMainMenu(){
     text:'請選擇您想查詢的助理資訊：',
     quickReply:qr([
       {label:'📋 點名', text:'點名'},
+      {label:'🗣️ 對外簡答補考', text:'簡答補考'},
       {label:'⏰ 我的對內／對外任務', text:'我的任務'},
       {label:'🔍 個人查詢', text:'查詢'},
       {label:'📝 請假與代班', text:'請假選項'},

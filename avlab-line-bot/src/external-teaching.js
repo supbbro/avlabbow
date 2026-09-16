@@ -17,7 +17,7 @@ const REMINDER_LEAD_MINUTES = 60;
 const EXTERNAL_DATA_START_DATE = '2026-09-14';
 const ROSTER_SHEET = process.env.EXTERNAL_ROSTER_SHEET_NAME || '1151修課名單';
 const REGISTRATION_TASK_ID = 'REGISTRATION-1151';
-const EXTERNAL_COMMAND = /^(今日任務$|對外任務$|近期任務$|查看任務\s|開始點名\s|考生名單\s|查看考生\s|查看點名結果\s|修改出席\s|到場判定\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
+const EXTERNAL_COMMAND = /^(今日任務$|對外任務$|近期任務$|簡答補考$|簡答補考名單\s|簡答補考登記\s|查看任務\s|開始點名\s|考生名單\s|查看考生\s|查看點名結果\s|修改出席\s|到場判定\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
 let activeStudentsByTask = new Map();
 
 const qr = items => ({ items: items.slice(0, 13).map(item => ({
@@ -94,6 +94,13 @@ function boundName(userId) {
   const rows = bindSheet.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) if (rows[i][0] === userId) return String(rows[i][1] || '').trim();
   return '';
+}
+
+function boundAssistantName(userId) {
+  const bindSheet = SpreadsheetApp.openById(ids.master).getSheetByName('用戶綁定');
+  if (!bindSheet || !userId) return '';
+  const row = bindSheet.getDataRange().getValues().slice(1).find(item => item[0] === userId && item[4] === 'assistant');
+  return String(row?.[1] || '').trim();
 }
 
 function userIdForName(name, number = '') {
@@ -968,9 +975,10 @@ function recordExamPart(taskId, studentId, part, value, context) {
       : retest.label === '第一次補考'
         ? '\n提醒：若第一次補考仍未通過，第二次補考須繳交 100 元且不退費。'
         : '';
+    const needsPracticalForm = failedParts.includes('上機') && !retest.finalAttempt;
     const examinerReminder = needsRetest
-      ? `\n\n⚠️ 請考官務必提醒考生${retest.finalAttempt ? '本次為第二次補考，請依規定處理' : `填寫${retest.label}表單`}。\n未通過項目：${failedParts.join('、')}${feeReminder}\n${notification.sent ? '✅ 已私訊已綁定的考生。' : notification.finalAttempt ? 'ℹ️ 已是第二次補考，不再傳送補考表單。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定補考表單網址，暫時無法傳送表單。'}` : '';
-    const formActions = needsRetest && retest.url ? [{ label: `開啟${retest.label}表單`, uri: retest.url }] : [];
+      ? `\n\n⚠️ 請考官提醒考生：${failedParts.includes('簡答題') ? '簡答題在補考週可於實驗室開放時間到場口頭補考，由助理登記；不需填表。' : ''}${needsPracticalForm ? `上機考須填寫${retest.label}報名表。` : ''}${retest.finalAttempt ? '本次為第二次補考，請依規定處理。' : ''}${feeReminder}\n${notification.sent ? '✅ 已私訊已綁定的考生。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定上機補考表單網址，暫時無法傳送表單。'}` : '';
+    const formActions = needsPracticalForm && retest.url ? [{ label: `上機${retest.label}報名`, uri: retest.url }] : [];
     const practicalSummary = progress.shortPassed ? (progress.practicalPassed ? '✅ 通過' : '❌ 未通過') : '⛔ 無上機資格';
     return reply(`✅ ${student.name}本次評分完成\n\n簡答題：${progress.shortPassed ? '✅ 通過' : '❌ 未通過'}\n上機：${practicalSummary}\n\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}${examinerReminder}`, externalNav([
       ...formActions,
@@ -1013,6 +1021,9 @@ function finishAttendance(taskId, context) {
 function handleCommand(text, context) {
   const command = String(text || '').trim();
   let match;
+  if (command === '簡答補考') return oralRetestMenu(context);
+  if ((match = command.match(/^簡答補考名單\s+(\d+)$/))) return oralRetestMenu(context, match[1]);
+  if ((match = command.match(/^簡答補考登記\s+(ORAL-[a-f0-9]+)\s+(通過|未通過)$/))) return recordOralRetest(match[1], match[2], context);
   const scheduleCommand = /^(今日任務|對外任務|近期任務|查看任務\s|開始點名\s|同步對外排程)/.test(command);
   let syncResult = null;
   if (scheduleCommand) {
@@ -1098,16 +1109,87 @@ function retestMessage(task, student, failedParts, label, url) {
   const feeNotice = label === '第二次補考'
     ? '\n\n💰 第二次補考須繳交 100 元，且不退費。'
     : '\n\n提醒：若第一次補考仍未通過，申請第二次補考須繳交 100 元，且不退費。';
-  return `【${label}提醒】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n請填寫${label}表單並留意後續分班通知。${feeNotice}\n報名連結：${url}`;
+  const short = failedParts.includes('簡答題');
+  const practical = failedParts.includes('上機');
+  const instructions = [
+    short ? '🗣️ 簡答題：請在補考週期間，於影音實驗室開放時間隨時到場進行口頭補考；不必填寫上機報名表。現場助理會登記結果。' : '',
+    practical ? `🎬 上機考：請填寫${label}上機考報名表，依後續安排應試。${short ? '須先通過簡答題，才可參加上機考。' : ''}${url ? `\n報名連結：${url}` : ''}` : ''
+  ].filter(Boolean).join('\n\n');
+  return `【${label || '補考'}提醒】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n${instructions}${feeNotice}`;
 }
 
 function notifyStudentForRetest(task, student, failedParts) {
   const form = retestForm(task);
-  if (!form.url) return { sent: false, configured: false, finalAttempt: form.finalAttempt };
+  const needsForm = failedParts.includes('上機') && !form.finalAttempt;
+  if (needsForm && !form.url) return { sent: false, configured: false, finalAttempt: form.finalAttempt };
   const studentUserId = userIdForName(student.name, student.number);
-  if (!studentUserId) return { sent: false, configured: true, finalAttempt: false };
-  queuePush(studentUserId, reply(retestMessage(task, student, failedParts, form.label, form.url), [{ label: `填寫${form.label}表單`, uri: form.url }]));
-  return { sent: true, configured: true, finalAttempt: false };
+  if (!studentUserId) return { sent: false, configured: true, finalAttempt: form.finalAttempt };
+  const actions = needsForm ? [{ label: '上機補考報名', uri: form.url }] : [];
+  queuePush(studentUserId, reply(retestMessage(task, student, failedParts, form.label, needsForm ? form.url : ''), actions));
+  return { sent: true, configured: true, finalAttempt: form.finalAttempt };
+}
+
+function oralRetestCandidates() {
+  const target = sheet(SHEETS.attendance);
+  if (!target) return [];
+  const latest = new Map();
+  for (const row of target.getDataRange().getValues().slice(1)) {
+    if (!row[0] || !isCurrentExternalData(row[2]) || row[4] === '教學' || !row[5] || !row[7]) continue;
+    if (!['通過', '未通過'].includes(String(row[10] || ''))) continue;
+    const identity = norm(row[8]) || norm(row[7]);
+    const key = `${identity}|${equipmentKey(row[5])}`;
+    const previous = latest.get(key);
+    const shortPassed = row[10] === '通過' || row[16] === '通過' || Boolean(previous?.shortPassed);
+    const practicalPassed = row[11] === '通過' || row[17] === '通過' || Boolean(previous?.practicalPassed);
+    latest.set(key, { key, name: String(row[7]), number: String(row[8] || ''), equipment: String(row[5]), shortPassed, practicalPassed });
+  }
+  return [...latest.values()].filter(item => !item.shortPassed).sort((a, b) => a.equipment.localeCompare(b.equipment, 'zh-Hant') || a.name.localeCompare(b.name, 'zh-Hant'));
+}
+
+function oralRetestRecordId(candidate) {
+  return `ORAL-${crypto.createHash('sha256').update(candidate.key).digest('hex').slice(0, 20)}`;
+}
+
+function oralRetestMenu(context, page = 1) {
+  if (!boundAssistantName(context.userId)) return reply('只有已綁定的中心助理可以登記簡答補考。');
+  const candidates = oralRetestCandidates();
+  if (!candidates.length) return reply('目前沒有簡答題未通過、待現場補考的考生。', externalNav([], '中心助理', '回助理首頁'));
+  const pageSize = 10, pages = Math.ceil(candidates.length / pageSize);
+  const current = Math.min(Math.max(1, Number(page) || 1), pages);
+  const visible = candidates.slice((current - 1) * pageSize, current * pageSize);
+  const columns = visible.map(candidate => ({
+    title: candidate.name.slice(0, 40),
+    text: `${candidate.equipment}｜${candidate.number || '無學號'}\n簡答題待補考`.slice(0, 60),
+    actions: [
+      { type: 'postback', label: '簡答題通過', data: `簡答補考登記 ${oralRetestRecordId(candidate)} 通過` },
+      { type: 'postback', label: '簡答題未通過', data: `簡答補考登記 ${oralRetestRecordId(candidate)} 未通過` }
+    ]
+  }));
+  const nav = [];
+  if (current > 1) nav.push({ label: '⬅️ 上一頁', postback: `簡答補考名單 ${current - 1}` });
+  if (current < pages) nav.push({ label: '下一頁 ➡️', postback: `簡答補考名單 ${current + 1}` });
+  return {
+    text: `【簡答補考名單｜${current}/${pages}】\n${visible.map(item => `${item.name}｜${item.equipment}${item.number ? `｜${item.number}` : ''}`).join('\n')}\n\n請滑動卡片選擇考生與結果。`,
+    fallbackQuickReply: qr(externalNav(nav, '中心助理', '回助理首頁')),
+    lineMessage: { type: 'template', altText: '簡答補考考生卡片', template: { type: 'carousel', columns }, quickReply: qr(externalNav(nav, '中心助理', '回助理首頁')) }
+  };
+}
+
+function recordOralRetest(recordId, value, context) {
+  const operator = boundAssistantName(context.userId);
+  if (!operator) return reply('只有已綁定的中心助理可以登記簡答補考。');
+  const candidate = oralRetestCandidates().find(item => oralRetestRecordId(item) === recordId);
+  if (!candidate) return reply('這位考生已通過簡答題，或名單已更新。請重新開啟簡答補考名單。', externalNav([{ label: '更新名單', text: '簡答補考' }], '中心助理', '回助理首頁'));
+  const target = sheet(SHEETS.attendance);
+  const rows = target.getDataRange().getValues();
+  ensureAttendanceHeaders(target, rows);
+  const existing = rows.findIndex((row, index) => index > 0 && row[0] === recordId);
+  const passed = value === '通過';
+  const deposit = passed && candidate.practicalPassed ? '可退保證金' : '不可退保證金';
+  const values = [recordId, '現場簡答補考', new Date(), '', '簡答補考', candidate.equipment, recordId, candidate.name, candidate.number,
+    '到場', value, '未記錄', passed ? '簡答題通過' : '簡答題未通過', operator, context.userId, new Date(), value, candidate.practicalPassed ? '通過' : '未通過', deposit];
+  if (existing < 0) target.appendRow(values); else target.getRange(existing + 1, 1, 1, values.length).setValues([values]);
+  return reply(`✅ 已登記 ${candidate.name}｜${candidate.equipment}\n簡答題：${value}${passed && !candidate.practicalPassed ? '\n上機考仍須另外報名並通過。' : ''}\n保證金：${deposit}`, externalNav([{ label: '回簡答補考名單', text: '簡答補考' }], '中心助理', '回助理首頁'));
 }
 
 function studentRosterText(task) {

@@ -345,8 +345,8 @@ test('retest preserves the passed written result and only asks for the practical
   assert.match(practicalPrompt.text, /上機：⏳ 尚未評分/);
   assert.doesNotMatch(practicalPrompt.text, /保證金：/);
   const failed = externalTeaching.handleCommand('上機登記 T-EXAM-CUM S-EXAM-CUM 未通過', context);
-  assert.match(failed.text, /請考官務必提醒考生填寫第一次補考表單/);
-  assert.match(failed.text, /未通過項目：上機/);
+  assert.match(failed.text, /上機考須填寫第一次補考報名表/);
+  assert.equal(failed.quickReply.items.some(item => item.action.type === 'uri' && item.action.uri.includes('forms.gle')), true);
   assert.match(failed.text, /考生尚未完成 LINE 姓名綁定/);
 
   tasks.appendRow(['T-RETEST-CUM','1151','第一次補考',futureRetest,'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
@@ -543,7 +543,8 @@ test('a failed short answer immediately ends the attempt without practical butto
   const completed = externalTeaching.handleCommand('簡答登記 EXT-SHORT-FAIL STU-SHORT-FAIL 未通過', context);
   assert.match(completed.text, /簡答題：❌ 未通過/);
   assert.match(completed.text, /上機：⛔ 無上機資格/);
-  assert.match(completed.text, /未通過項目：簡答題/);
+  assert.match(completed.text, /簡答題在補考週可於實驗室開放時間到場口頭補考/);
+  assert.equal(completed.quickReply.items.some(item => item.action.type === 'uri' && item.action.uri.includes('forms.gle')), false);
   assert.equal(completed.quickReply.items.some(item => item.action.label.includes('上機')), false);
   const blocked = externalTeaching.handleCommand('上機登記 EXT-SHORT-FAIL STU-SHORT-FAIL 通過', context);
   assert.match(blocked.text, /沒有上機考試資格/);
@@ -570,6 +571,33 @@ test('failed exam stages select the next retest form and stop after the second r
   assert.equal(externalTeaching._test.retestForm({ phase: '第二次補考' }).finalAttempt, true);
   assert.match(externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第一次補考', 'https://forms.gle/first'), /第二次補考須繳交 100 元，且不退費/);
   assert.match(externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第二次補考', 'https://forms.gle/second'), /第二次補考須繳交 100 元，且不退費/);
+  const shortOnly = externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['簡答題'], '第一次補考', '');
+  assert.match(shortOnly, /補考週期間.*隨時到場進行口頭補考/);
+  assert.doesNotMatch(shortOnly, /報名連結|forms\.gle/);
+  const practical = externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第一次補考', 'https://forms.gle/first');
+  assert.match(practical, /報名連結：https:\/\/forms\.gle\/first/);
+});
+
+test('assistant can grade failed external oral retest by student and equipment', () => {
+  const attendance = runtime.openById(ids.externalResults).getSheetByName('LINE點名紀錄');
+  const bindings = runtime.openById(ids.master).getSheetByName('用戶綁定');
+  bindings.appendRow(['U-ORAL-ASSISTANT', '現場助理', '', '', 'assistant']);
+  attendance.appendRow(['ORAL-ORIGINAL', 'EXT-ORIGINAL', new Date('2026-09-22'), '12:00', '考試', 'H6', 'S-ORIGINAL', '口試學生', 'ORAL001', '到場', '未通過', '未記錄', '簡答題未通過', '考官', 'U1', new Date(), '未通過', '未通過', '不可退保證金']);
+  const assistant = { sourceType: 'user', chatId: 'U-ORAL-ASSISTANT', userId: 'U-ORAL-ASSISTANT' };
+  const blocked = externalTeaching.handleCommand('簡答補考', { sourceType: 'user', chatId: 'U-UNBOUND', userId: 'U-UNBOUND' });
+  assert.match(blocked.text, /只有已綁定的中心助理/);
+  const menu = externalTeaching.handleCommand('簡答補考', assistant);
+  const card = menu.lineMessage.template.columns.find(item => item.title === '口試學生');
+  assert.ok(card);
+  assert.match(card.text, /H6/);
+  assert.deepEqual(card.actions.map(item => item.label), ['簡答題通過', '簡答題未通過']);
+  const fail = externalTeaching.handleCommand(card.actions[1].data, assistant);
+  assert.match(fail.text, /簡答題：未通過/);
+  const passed = externalTeaching.handleCommand(card.actions[0].data, assistant);
+  assert.match(passed.text, /簡答題：通過/);
+  const rows = attendance.getDataRange().getValues();
+  assert.equal(rows.filter(row => row[0] === card.actions[0].data.split(' ')[1]).length, 1);
+  assert.equal(externalTeaching.handleCommand('簡答補考', assistant).lineMessage?.template.columns.some(item => item.title === '口試學生'), false);
 });
 
 test('deposit workbook parser normalizes initial and retest payment rows', () => {
