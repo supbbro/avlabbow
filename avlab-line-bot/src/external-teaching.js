@@ -709,7 +709,7 @@ function candidateMenu(task, page = 1, notice = '') {
   const postbackAction = (label, data) => ({ type: 'postback', label, data });
   const columns = visible.map((student, index) => ({
     title: String(student.name || '未填姓名').slice(0, 40),
-    text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}`.slice(0, 60),
+    text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}${isExam(task) ? '｜先簽考生名條' : ''}`.slice(0, 60),
     actions: isExam(task) ? [
       postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
       postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
@@ -855,7 +855,7 @@ function nextPrompt(task, context) {
   if (pendingResult) return resultPrompt(task, pendingResult);
   const pending = students.filter(student => student.attendance === '未點名');
   if (!pending.length) {
-    return reply(`✅ ${task.equipment} 已完成所有學生的點名與結果登記。`, externalNav([
+    return reply(`✅ ${task.equipment} 已完成所有學生的點名與結果登記。\n\n${completionReminderText(task)}`, externalNav([
       { label: '完成點名', text: `完成點名 ${task.id}` },
       { label: '查看認證狀態', uri: certificationStatusUrl() },
       { label: '查看統計', text: `查看任務 ${task.id}` }
@@ -884,7 +884,7 @@ function resultPrompt(task, student) {
   const practicalText = progress.shortRecorded && !progress.shortPassed ? '⛔ 簡答題未通過，無上機資格' : stateText(progress.practicalRecorded, progress.practicalPassed);
   const depositText = progress.shortRecorded && progress.practicalRecorded
     ? `\n保證金：${progress.shortPassed && progress.practicalPassed ? '✅ 可退保證金' : '❌ 不可退保證金'}` : '';
-  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n出席：${student.attendance}\n\n簡答題：${stateText(progress.shortRecorded, progress.shortPassed)}\n上機：${practicalText}${depositText}\n\n${progress.step === 'done' ? '本次評分已完成。' : '請直接選擇簡答題或上機結果。'}`,
+  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n出席：${student.attendance}\n\n簡答題：${stateText(progress.shortRecorded, progress.shortPassed)}\n上機：${practicalText}${depositText}\n\n評分標準：簡答制度 2 題＋器材 3 題，最多錯 1 題；上機最多錯 3 題。\n${progress.step === 'done' ? '本次評分已完成。' : '請直接選擇簡答題或上機結果。'}`,
     externalNav(actions, `查看任務 ${task.id}`, '回任務'));
 }
 
@@ -948,6 +948,12 @@ function recordAttendance(taskId, studentId, status, context) {
   upsertAttendance(task, student, permission.name, context.userId);
   if (isExam(task) && ['到場', '遲到'].includes(status) && examProgress(task, student).step !== 'done') return resultPrompt(task, student);
   const notice = status === '取消資格' ? `🚫 ${student.name} 已超過個別時段 5 分鐘，取消本次考試資格。` : `✅ 已登記 ${student.name}：${status}`;
+  const remaining = studentsFor(task.id).some(item => item.attendance === '未點名' || (isExam(task) && ['到場', '遲到'].includes(item.attendance) && examProgress(task, item).step !== 'done'));
+  if (!remaining) {
+    const done = nextPrompt(task, context);
+    done.text = `${notice}\n\n${done.text}`;
+    return done;
+  }
   return candidateMenu(task, 1, notice);
 }
 
@@ -980,8 +986,12 @@ function recordExamPart(taskId, studentId, part, value, context) {
       ? `\n\n⚠️ 請考官提醒考生：${failedParts.includes('簡答題') ? '簡答題在補考週可於實驗室開放時間到場口頭補考，由助理登記；不需填表。' : ''}${needsPracticalForm ? `上機考須填寫${retest.label}報名表。` : ''}${retest.finalAttempt ? '本次為第二次補考，請依規定處理。' : ''}${feeReminder}\n${notification.sent ? '✅ 已私訊已綁定的考生。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定上機補考表單網址，暫時無法傳送表單。'}` : '';
     const formActions = needsPracticalForm && retest.url ? [{ label: `上機${retest.label}報名`, uri: retest.url }] : [];
     const practicalSummary = progress.shortPassed ? (progress.practicalPassed ? '✅ 通過' : '❌ 未通過') : '⛔ 無上機資格';
-    return reply(`✅ ${student.name}本次評分完成\n\n簡答題：${progress.shortPassed ? '✅ 通過' : '❌ 未通過'}\n上機：${practicalSummary}\n\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}${examinerReminder}`, externalNav([
+    const students = studentsFor(task.id);
+    const allComplete = students.every(item => item.attendance !== '未點名' && (!['到場', '遲到'].includes(item.attendance) || examProgress(task, item).step === 'done'));
+    const depositSignatureReminder = part === 'practical' && value === '通過' ? `\n\n🖊️ ${student.name}上機考通過，現在請考生在保證金單簽名。` : '';
+    return reply(`✅ ${student.name}本次評分完成\n\n簡答題：${progress.shortPassed ? '✅ 通過' : '❌ 未通過'}\n上機：${practicalSummary}\n\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}${depositSignatureReminder}${examinerReminder}${allComplete ? `\n\n${completionReminderText(task)}` : ''}`, externalNav([
       ...formActions,
+      ...(allComplete ? [{ label: '完成點名', text: `完成點名 ${task.id}` }] : []),
       { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
       { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` }
     ], `查看任務 ${task.id}`, '回任務'));
@@ -999,6 +1009,18 @@ function recordResult(taskId, studentId, result, context) {
   updateStudent(student, student.attendance, result);
   const certification = upsertAttendance(task, student, permission.name, context.userId);
   return candidateMenu(task, 1, `✅ 已登記 ${student.name}：${result}\n${certificationText(certification)}`);
+}
+
+function completionReminderText(task) {
+  return isExam(task) ? [
+    '【離開前請確認】',
+    '• 將考生名條放到教學部助理櫃外資料夾。',
+    '• 在黃本簽退並註記時間；簽還出機單、確認器材歸還。'
+  ].join('\n') : [
+    '【離開前請確認】',
+    '• 在黃本簽退並註記時間。',
+    '• 簽還出機單、確認器材歸還。'
+  ].join('\n');
 }
 
 function finishAttendance(taskId, context) {
@@ -1196,6 +1218,19 @@ function studentRosterText(task) {
   const students = studentsFor(task.id);
   if (!students.length) return '考生：尚未安排';
   return `考生（${students.length} 人）：${students.map(student => student.name).join('、')}`;
+}
+
+function examinerReminderText(task, roster = studentRosterText(task)) {
+  const checklist = isExam(task) ? [
+    '【考試前先做】',
+    '• 到場在黃本簽到並註記時間，領取及核對保證金，簽出機單。',
+    '• 到考試時間後，按下方「開啟名字卡」逐位點名及評分；不是填點名表單。'
+  ] : [
+    '【教學前先做】',
+    '• 到場在黃本簽到並註記時間，簽出機單。',
+    '• 到教學時間後，按下方「開啟名字卡」逐位點名；不是填點名表單。'
+  ];
+  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}`;
 }
 
 function studentReminderText(task, student) {
@@ -1430,7 +1465,7 @@ function sendExternalReminders(now = new Date()) {
     const reminderDue = new Date(start.getTime() - REMINDER_LEAD_MINUTES * 60000);
 
     const buttons = [
-      { label: '開始聊天室點名', text: `開始點名 ${task.id}` },
+      { label: '開啟名字卡', text: `開始點名 ${task.id}` },
       { label: '查看任務', text: `查看任務 ${task.id}` }
     ];
     const roster = studentRosterText(task);
@@ -1439,7 +1474,7 @@ function sendExternalReminders(now = new Date()) {
 
     if (!task.twoHoursSentAt && start > now && now >= reminderDue) {
       if (examinerUserId) {
-        queuePush(examinerUserId, reply(`⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}`, buttons));
+        queuePush(examinerUserId, reply(examinerReminderText(task, roster), buttons));
         sent++; taskSent = true;
       }
       if (taskSent) sheet(SHEETS.tasks).getRange(task.row, 16).setValue(now);

@@ -311,10 +311,14 @@ test('group attendance writes a normalized record and completes the task', () =>
   const studentPrompt = externalTeaching.handleCommand('查看考生 T1 S1', context);
   assert.match(studentPrompt.text, /15 分鐘後點名為遲到/);
   assert.deepEqual(studentPrompt.quickReply.items.slice(0, 3).map(item => item.action.label), ['✅ 學生已到', '📝 請假', '❌ 缺席']);
-  assert.match(externalTeaching.handleCommand('點名狀態 T1 S1 到場', context).text, /已登記 學生甲：到場/);
+  const lastTeachingAttendance = externalTeaching.handleCommand('點名狀態 T1 S1 到場', context);
+  assert.match(lastTeachingAttendance.text, /已登記 學生甲：到場/);
+  assert.match(lastTeachingAttendance.text, /黃本簽退並註記時間/);
   assert.equal(attendance.getRange(2, 10).getValue(), '到場');
   const finished = externalTeaching.handleCommand('完成點名 T1', context);
   assert.match(finished.text, /任務已完成/);
+  assert.doesNotMatch(finished.text, /黃本簽退並註記時間/);
+  assert.doesNotMatch(finished.text, /保證金單/);
   assert.equal(finished.quickReply.items[0].action.type, 'uri');
   assert.match(finished.quickReply.items[0].action.uri, new RegExp(ids.externalResults));
   assert.equal(tasks.getRange(taskRow, 12).getValue(), '已完成');
@@ -399,8 +403,32 @@ test('one-hour reminder privately pushes the roster to the examiner', () => {
   for (const push of pushes) {
     assert.match(push.messages[0].text, /1 小時內/);
     assert.match(push.messages[0].text, /學生乙/);
+    assert.match(push.messages[0].text, /黃本簽到並註記時間/);
+    assert.match(push.messages[0].text, /領取及核對保證金/);
+    assert.match(push.messages[0].text, /簽出機單/);
+    assert.match(push.messages[0].text, /開啟名字卡.*逐位點名及評分/);
+    assert.doesNotMatch(push.messages[0].text, /保證金單簽名|黃本簽退/);
+    assert.equal(push.messages[0].quickReply.items[0].action.label, '開啟名字卡');
     assert.equal(push.messages[0].quickReply.items[0].action.text, '開始點名 T-REMIND');
   }
+});
+
+test('finishing an external exam reminds the examiner about deposit slips and checkout', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務');
+  const students = resultBook.getSheetByName('任務學生');
+  tasks.appendRow(['T-EXAM-FINISH','1151','考試',new Date('2026-09-24'),'12:00','13:00','H6','401','測試者','','G1','已排定',true,true,'','','','']);
+  students.appendRow(['T-EXAM-FINISH','S-EXAM-FINISH','簽單考生','FINISH001',1,'到場','未記錄','']);
+  const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
+  externalTeaching.handleCommand('簡答登記 T-EXAM-FINISH S-EXAM-FINISH 通過', context);
+  const lastExamResult = externalTeaching.handleCommand('上機登記 T-EXAM-FINISH S-EXAM-FINISH 通過', context);
+  assert.match(lastExamResult.text, /保證金單簽名/);
+  assert.match(lastExamResult.text, /考生名條放到教學部助理櫃外資料夾/);
+  assert.match(lastExamResult.text, /黃本簽退並註記時間/);
+  assert.equal(lastExamResult.quickReply.items.some(item => item.action.text === '完成點名 T-EXAM-FINISH'), true);
+  const finished = externalTeaching.handleCommand('完成點名 T-EXAM-FINISH', context);
+  assert.match(finished.text, /任務已完成/);
+  assert.doesNotMatch(finished.text, /保證金單簽名/);
 });
 
 test('a roster student can bind LINE and receives a retest form after failed grading', () => {
@@ -563,6 +591,13 @@ test('a bound student receives the teaching reminder with the fifteen-minute rul
   assert.ok(studentPush);
   assert.match(studentPush.messages[0].text, /對外教學將於 1 小時內開始/);
   assert.match(studentPush.messages[0].text, /超過 15 分鐘.*遲到/);
+  const examinerPush = pushes.find(push => push.to === 'U1');
+  assert.ok(examinerPush);
+  assert.match(examinerPush.messages[0].text, /教學前先做/);
+  assert.match(examinerPush.messages[0].text, /黃本簽到並註記時間，簽出機單/);
+  assert.match(examinerPush.messages[0].text, /開啟名字卡.*逐位點名/);
+  assert.doesNotMatch(examinerPush.messages[0].text, /黃本簽退/);
+  assert.doesNotMatch(examinerPush.messages[0].text, /核對保證金/);
 });
 
 test('failed exam stages select the next retest form and stop after the second retest', () => {
