@@ -35,7 +35,7 @@ const reply = (text, items = []) => ({ text, ...(items.length ? { quickReply: qr
 const externalNav = (items = [], parentText = '對外學生', parentLabel = '回對外首頁') => {
   const attendanceTaskId = String(parentText).match(/^(?:查看任務|查看考生)\s+(\S+)/)?.[1];
   const task = attendanceTaskId ? findTask(attendanceTaskId) : null;
-  if (task?.status === '點名中') return [
+  if (task && attendanceInProgress(task)) return [
     ...items.slice(0, 11),
     { label: `🔙 ${parentLabel}`, postback: parentText },
     { label: '🏠 回點名首頁', postback: `點名首頁 ${task.id}` }
@@ -159,6 +159,14 @@ function allTasks() {
 }
 
 function findTask(taskId) { return allTasks().find(task => task.id === taskId) || null; }
+
+function attendanceInProgress(task) {
+  if (task.status === '點名中') return true;
+  // A schedule-time edit can reset the task row to 已排定 while its student
+  // attendance is still unfinished. Those records still belong to this flow.
+  return task.status === '已排定' && studentsFor(task.id, { includeDisqualified: true })
+    .some(student => student.attendance !== '未點名');
+}
 
 function studentFromRow(row, rowNumber) {
   return { row: rowNumber, taskId: String(row[0] || '').trim(), id: String(row[1] || '').trim(), name: row[2], number: row[3], order: Number(row[4] || 0), attendance: String(row[5] || '未點名'), result: String(row[6] || '未記錄'), scheduledStart: row[8] || '', scheduledEnd: row[9] || '', reminderSentAt: row[10] || '', sourceCell: String(row[11] || '').trim() };
@@ -658,7 +666,7 @@ function certificationStatusUrl() {
 function showTask(taskId) {
   const task = findTask(taskId);
   if (!task) return reply(`找不到任務 ${taskId}`);
-  if (task.status === '點名中') return attendanceHome(task);
+  if (attendanceInProgress(task)) return attendanceHome(task);
   const students = studentsFor(taskId, { includeDisqualified: true });
   const stats = { 未點名: 0, 到場: 0, 遲到: 0, 請假: 0, 缺席: 0, 取消資格: 0 };
   students.forEach(student => { stats[student.attendance] = (stats[student.attendance] || 0) + 1; });
@@ -677,6 +685,22 @@ function attendanceHome(task) {
     { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
     ...(!pending.length && !ungraded.length ? [{ label: '完成點名', postback: `完成點名 ${task.id}` }] : [])
   ]);
+}
+
+function resumeActiveAttendance(context, now = new Date()) {
+  if (context.sourceType !== 'user' || !context.userId) return null;
+  const examinerName = boundName(context.userId);
+  if (!examinerName) return null;
+  const today = dateKey(now);
+  const tasks = allTasks().filter(task => attendanceInProgress(task) && dateKey(task.date) === today && (
+    task.examinerUserId === context.userId || norm(task.examiner) === norm(examinerName)
+  ));
+  if (!tasks.length) return null;
+  if (tasks.length === 1) return attendanceHome(tasks[0]);
+  return reply(`你有 ${tasks.length} 個尚未完成的對外點名任務，請選擇要繼續的任務。`, tasks.slice(0, 13).map(task => ({
+    label: `點名 ${String(task.equipment).slice(0, 12)}`,
+    postback: `點名首頁 ${task.id}`
+  })));
 }
 
 function updateTaskStatus(task, status) { sheet(SHEETS.tasks).getRange(task.row, 12).setValue(status); task.status = status; }
@@ -947,8 +971,8 @@ function editRecordPrompt(task, student) {
   const actions = [{ label: '修正點名', postback: `修改步驟 ${task.id} ${student.id} attendance` }];
   const [shortAnswer, practical] = resultParts(student.result);
   if (isExam(task) && ['到場', '遲到'].includes(student.attendance)) {
-    actions.push({ label: '修正簡答題', postback: `修改步驟 ${task.id} ${student.id} short` });
-    if (examProgress(task, student).shortPassed) actions.push({ label: '修正上機考', postback: `修改步驟 ${task.id} ${student.id} practical` });
+    if (['通過', '未通過'].includes(shortAnswer)) actions.push({ label: '修正簡答題', postback: `修改步驟 ${task.id} ${student.id} short` });
+    if (['通過', '未通過'].includes(practical)) actions.push({ label: '修正上機考', postback: `修改步驟 ${task.id} ${student.id} practical` });
   }
   const grades = isExam(task) ? `\n本次簡答：${shortAnswer}｜本次上機：${practical}` : '';
   return reply(`【修改 ${student.name} 的紀錄】\n${task.equipment}\n目前點名：${student.attendance}${grades}\n\n請先選擇要修正的步驟；每次只修改一項。${isExam(task) ? '\n簡答題未通過時，上機結果會清除。' : ''}`,
@@ -957,6 +981,9 @@ function editRecordPrompt(task, student) {
 
 function editStepPrompt(task, student, step) {
   if (step !== 'attendance' && (!isExam(task) || !['到場', '遲到'].includes(student.attendance))) return reply('請先完成點名，才能修正考試結果。');
+  const [shortAnswer, practical] = resultParts(student.result);
+  if (step === 'short' && !['通過', '未通過'].includes(shortAnswer)) return reply('簡答題尚未評分，請先完成簡答題登記，之後才能修正。');
+  if (step === 'practical' && !['通過', '未通過'].includes(practical)) return reply('上機考尚未評分，請先完成上機考登記，之後才能修正。');
   if (step === 'practical' && !examProgress(task, student).shortPassed) return reply('簡答題尚未通過，不能修正上機結果。');
   const actions = step === 'attendance' ? [
     { label: `已到（${automaticArrivalStatus(task, student)}）`, postback: `更正點名 ${task.id} ${student.id} 到場` },
@@ -1008,6 +1035,9 @@ function correctExamPart(taskId, studentId, part, value, context) {
   if (!task || !student) return reply('找不到指定的任務或學生，請重新開啟任務。');
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
   if (!isExam(task) || !['到場', '遲到'].includes(student.attendance)) return reply('請先將考生點名狀態更正為到場，才能修改考試結果。');
+  const [shortAnswer, practical] = resultParts(student.result);
+  if (part === 'short' && !['通過', '未通過'].includes(shortAnswer)) return reply('簡答題尚未評分，請先完成簡答題登記，之後才能修正。');
+  if (part === 'practical' && !['通過', '未通過'].includes(practical)) return reply('上機考尚未評分，請先完成上機考登記，之後才能修正。');
   if (part === 'practical' && !examProgress(task, student).shortPassed) return reply('簡答題尚未通過，不能更正上機結果。');
   const result = part === 'short' && value === '未通過' ? '簡答題未通過' : mergeExamPart(student.result, part, value === '通過');
   updateStudent(student, student.attendance, result);
@@ -1157,7 +1187,7 @@ function handleCommand(text, context) {
     const task = findTask(match[1]);
     if (!task) return reply(`找不到任務 ${match[1]}`);
     const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
-    return task.status === '點名中' ? attendanceHome(task) : showTask(task.id);
+    return attendanceInProgress(task) ? attendanceHome(task) : showTask(task.id);
   }
   if ((match = command.match(/^開始點名\s+(\S+)$/))) return startAttendance(match[1], context);
   if ((match = command.match(/^考生名單\s+(\S+)(?:\s+(\d+))?$/))) {
@@ -1642,4 +1672,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };

@@ -388,6 +388,18 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.match(finished.quickReply.items[0].action.uri, new RegExp(ids.externalResults));
   assert.equal(tasks.getRange(taskRow, 12).getValue(), '已完成');
   assert.doesNotMatch(externalTeaching.handleCommand('點名首頁 T1', context).text, /【點名首頁/);
+
+  tasks.appendRow(['T-RESUME','1151','教學',new Date(),'12:00','13:00','回首頁測試','401','測試者','U1','','點名中',true,true,'','','','']);
+  const resumeRow = tasks.getLastRow();
+  students.appendRow(['T-RESUME','S-RESUME','待點名學生','RESUME001',1,'未點名','未記錄','']);
+  const resumed = externalTeaching.resumeActiveAttendance({ sourceType: 'user', userId: 'U1', chatId: 'U1' });
+  assert.match(resumed.text, /【點名首頁｜回首頁測試】/);
+  assert.equal(resumed.quickReply.items[0].action.data, '考生名單 T-RESUME 1');
+  tasks.getRange(resumeRow, 12).setValue('已排定');
+  students.getRange(students.getLastRow(), 6).setValue('到場');
+  assert.match(externalTeaching.resumeActiveAttendance({ sourceType: 'user', userId: 'U1', chatId: 'U1' }).text, /【點名首頁｜回首頁測試】/);
+  tasks.getRange(resumeRow, 12).setValue('已完成');
+  assert.equal(externalTeaching.resumeActiveAttendance({ sourceType: 'user', userId: 'U1', chatId: 'U1' }), null);
 });
 
 test('retest preserves the passed written result and only asks for the practical result', () => {
@@ -450,7 +462,14 @@ test('examiner can correct attendance and both exam parts without another retest
   tasks.appendRow(['T-CORRECT','1151','考試',new Date('2026-09-25'),'12:00','13:00','X160','401','測試者','','G1','點名中',true,true,'','','','']);
   students.appendRow(['T-CORRECT','S-CORRECT','更正測試生','CORRECT001',1,'未點名','未記錄','']);
   externalTeaching.handleCommand('點名狀態 T-CORRECT S-CORRECT 到場', context);
+  const beforeShort = externalTeaching.handleCommand('修改紀錄 T-CORRECT S-CORRECT', context);
+  assert.deepEqual(beforeShort.quickReply.items.filter(item => item.action.label.startsWith('修正')).map(item => item.action.label), ['修正點名']);
+  assert.match(externalTeaching.handleCommand('修改步驟 T-CORRECT S-CORRECT short', context).text, /簡答題尚未評分/);
+  assert.match(externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT short 通過', context).text, /簡答題尚未評分/);
   externalTeaching.handleCommand('簡答登記 T-CORRECT S-CORRECT 通過', context);
+  const beforePractical = externalTeaching.handleCommand('修改紀錄 T-CORRECT S-CORRECT', context);
+  assert.deepEqual(beforePractical.quickReply.items.filter(item => item.action.label.startsWith('修正')).map(item => item.action.label), ['修正點名', '修正簡答題']);
+  assert.match(externalTeaching.handleCommand('修改步驟 T-CORRECT S-CORRECT practical', context).text, /上機考尚未評分/);
   externalTeaching.handleCommand('上機登記 T-CORRECT S-CORRECT 通過', context);
   externalTeaching.handleCommand('完成點名 T-CORRECT', context);
   const beforePushes = runtime.httpOperations.length;
@@ -475,7 +494,7 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.deepEqual(record.slice(10, 13), ['未通過', '未記錄', '簡答題未通過']);
   assert.match(shortFailed.text, /已更正簡答題[\s\S]*【X160｜第 1\//);
   assert.equal(shortFailed.quickReply.items.some(item => item.action.label.includes('修正上機')), false);
-  assert.match(externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 通過', context).text, /不能更正上機結果/);
+  assert.match(externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 通過', context).text, /上機考尚未評分/);
   assert.equal(runtime.httpOperations.length, beforePushes);
 
   const shortPassed = externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT short 通過', context);
@@ -483,7 +502,8 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.equal(shortPassed.quickReply.items.some(item => /上機|評分|更正/.test(item.action.label)), false);
   assert.equal(shortPassed.quickReply.items[0].action.label, '重新開啟學生卡片');
   assert.equal(tasks.getDataRange().getValues().find(row => row[0] === 'T-CORRECT')[11], '點名中');
-  externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 通過', context);
+  assert.match(externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 通過', context).text, /上機考尚未評分/);
+  externalTeaching.handleCommand('上機登記 T-CORRECT S-CORRECT 通過', context);
   record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
   assert.equal(record[18], '可退保證金');
 

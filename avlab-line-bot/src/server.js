@@ -108,40 +108,52 @@ async function handleLineEvent(event) {
       const originalText = event.message.text.trim();
       const isGroupChat = ['group', 'room'].includes(sourceType);
       if (isGroupChat && !teachingSchedule.isCommand(originalText)) return;
-      const navigationResult = navigation.resolve(runtime.cache, userId, originalText);
-      const text = navigationResult.command;
-      const combinedTaskQuery = text === '我的任務';
-      const personalQueryIds = personalQueryWorkbooks(text);
-      const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
-      const identityFlowCommand = text === '繼續使用目前身份' || /^(?:更改身份|更改名字)\s+(?:中心助理|對外學生)$/.test(text);
-      if (teachingSchedule.isCommand(text)) {
-        await runtime.loadOnly(TEACHING_SCHEDULE_WORKBOOKS, { force: true });
-        await teachingSchedule.loadDocumentLabels(runtime.api, { force: true });
-      } else if (bindingCommand || identityFlowCommand) {
-        // A short shared window absorbs bursts of new students without making
-        // identity checks depend on the general 60-second sheet cache.
-        await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit], { maxAgeMs: 3000 });
-      } else if (text === '選擇中心助理') {
-        await runtime.loadOnly([ids.master, ids.internalAttendance]);
-      } else if (text === '選擇對外學生') {
-        await runtime.loadOnly([ids.master, ids.externalRegistration, ids.deposit]);
-      } else if (internalTeaching.isInternalCommand(text)) {
-        await runtime.loadOnly(INTERNAL_WORKBOOKS, { force: internalTeaching.requiresFreshData(text) });
-      } else if (combinedTaskQuery) {
-        await runtime.loadOnly(TASK_QUERY_WORKBOOKS, { forceIds: LIVE_TASK_WORKBOOKS });
-        externalTeaching.syncFromSchedule();
-      } else if (externalTeaching.isExternalCommand(text)) {
-        await runtime.loadOnly(EXTERNAL_WORKBOOKS, { force: externalTeaching.requiresFreshData(text) });
-      } else if (LIGHTWEIGHT_COMMANDS.has(text)) {
-        await runtime.loadOnly([ids.master]);
-      } else if (personalQueryIds) {
-        await runtime.loadOnly(personalQueryIds, { force: true });
-      } else {
-        await runtime.loadAll();
+      // A current attendance task stays reachable even after unrelated chat
+      // messages replace LINE's quick replies or reset the generic nav stack.
+      let activeAttendance = null;
+      if (!isGroupChat && ['主選單', '回上一頁'].includes(originalText)) {
+        await runtime.loadOnly([ids.externalResults, ids.master], { maxAgeMs: 30_000 });
+        activeAttendance = externalTeaching.resumeActiveAttendance(context);
       }
-      if (!isGroupChat) bot.recordUser(userId);
-      reply = teachingSchedule.handleCommand(text, context) || internalTeaching.handleCommand(text, context) || externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
-      if (!navigationResult.isBack) navigation.remember(runtime.cache, userId, reply?.navigationPage || text, Boolean(reply));
+      if (activeAttendance) {
+        bot.recordUser(userId);
+        reply = activeAttendance;
+      } else {
+        const navigationResult = navigation.resolve(runtime.cache, userId, originalText);
+        const text = navigationResult.command;
+        const combinedTaskQuery = text === '我的任務';
+        const personalQueryIds = personalQueryWorkbooks(text);
+        const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
+        const identityFlowCommand = text === '繼續使用目前身份' || /^(?:更改身份|更改名字)\s+(?:中心助理|對外學生)$/.test(text);
+        if (teachingSchedule.isCommand(text)) {
+          await runtime.loadOnly(TEACHING_SCHEDULE_WORKBOOKS, { force: true });
+          await teachingSchedule.loadDocumentLabels(runtime.api, { force: true });
+        } else if (bindingCommand || identityFlowCommand) {
+          // A short shared window absorbs bursts of new students without making
+          // identity checks depend on the general 60-second sheet cache.
+          await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit], { maxAgeMs: 3000 });
+        } else if (text === '選擇中心助理') {
+          await runtime.loadOnly([ids.master, ids.internalAttendance]);
+        } else if (text === '選擇對外學生') {
+          await runtime.loadOnly([ids.master, ids.externalRegistration, ids.deposit]);
+        } else if (internalTeaching.isInternalCommand(text)) {
+          await runtime.loadOnly(INTERNAL_WORKBOOKS, { force: internalTeaching.requiresFreshData(text) });
+        } else if (combinedTaskQuery) {
+          await runtime.loadOnly(TASK_QUERY_WORKBOOKS, { forceIds: LIVE_TASK_WORKBOOKS });
+          externalTeaching.syncFromSchedule();
+        } else if (externalTeaching.isExternalCommand(text)) {
+          await runtime.loadOnly(EXTERNAL_WORKBOOKS, { force: externalTeaching.requiresFreshData(text) });
+        } else if (LIGHTWEIGHT_COMMANDS.has(text)) {
+          await runtime.loadOnly([ids.master]);
+        } else if (personalQueryIds) {
+          await runtime.loadOnly(personalQueryIds, { force: true });
+        } else {
+          await runtime.loadAll();
+        }
+        if (!isGroupChat) bot.recordUser(userId);
+        reply = teachingSchedule.handleCommand(text, context) || internalTeaching.handleCommand(text, context) || externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
+        if (!navigationResult.isBack) navigation.remember(runtime.cache, userId, reply?.navigationPage || text, Boolean(reply));
+      }
     } else if (event.message.type === 'sticker') {
       if (['group', 'room'].includes(sourceType)) return;
       await runtime.loadOnly([ids.master]);
