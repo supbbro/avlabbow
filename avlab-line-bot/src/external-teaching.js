@@ -1168,7 +1168,7 @@ function finishAttendance(taskId, context) {
   ], '近期任務', '回近期任務'));
 }
 
-function handleCommand(text, context) {
+function handleCommand(text, context, { skipScheduleSync = false } = {}) {
   const command = String(text || '').trim();
   let match;
   if (command === '簡答補考') return oralRetestMenu(context);
@@ -1176,7 +1176,7 @@ function handleCommand(text, context) {
   if ((match = command.match(/^簡答補考登記\s+(ORAL-[a-f0-9]+)\s+(通過|未通過)$/))) return recordOralRetest(match[1], match[2], context);
   const scheduleCommand = /^(今日任務|對外任務|近期任務|查看任務\s|開始點名\s|同步對外排程)/.test(command);
   let syncResult = null;
-  if (scheduleCommand) {
+  if (scheduleCommand && !skipScheduleSync) {
     try { syncResult = syncFromSchedule(); }
     catch (error) { return reply(`讀取對外分班表失敗：${error.message}`); }
   }

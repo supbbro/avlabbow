@@ -1,31 +1,51 @@
 'use strict';
 
-// Practice stays entirely in process memory: no production Sheets, pushes, or
-// certification updates. A Railway restart simply clears the demo sessions.
+// The production attendance controller runs against a private in-memory
+// workbook for each trainee. Practice never opens or flushes live Sheets.
+const crypto = require('crypto');
+const { GoogleSheetsRuntime } = require('./runtime');
+const { ids } = require('./config');
+const externalTeaching = require('./external-teaching');
+
 const sessions = new Map();
 const SESSION_MS = 6 * 60 * 60 * 1000;
-const DEMO_NAMES = ['陳小晴', '林小宇'];
-const DEMO_EQUIPMENT = 'H6';
+const PREFIX = '練習 ';
+const ACTION_COMMAND = /^(?:今日任務|對外任務|近期任務|查看任務|點名首頁|開始點名|考生名單|查看考生|查看點名結果|修改出席|修改紀錄|修改步驟|更正點名|更正評分|到場判定|點名狀態|簡答登記|上機登記|考試登記|完成點名)(?:\s|$)/;
 
-const isPracticeCommand = text => /^(?:練習|開始練習|練習點名|練習重來|結束練習|練習學生 [12]|練習出席 [12] (?:到場|缺席)|練習簡答 [12] (?:通過|未通過)|練習上機 [12] (?:通過|未通過))$/.test(String(text || '').trim());
-const reply = (text, actions = []) => ({ text, ...(actions.length ? { quickReply: { items: actions.map(action => ({
-  type: 'action', action: action.command === '主選單'
-    ? { type: 'message', label: action.label, text: '主選單' }
-    : { type: 'postback', label: action.label, data: action.command }
+const isPracticeCommand = text => /^(?:練習|練習點名|開始練習|開始教學練習|練習重來|結束練習)(?:$|\s)/.test(String(text || '').trim());
+const simpleReply = (text, actions = []) => ({ text, ...(actions.length ? { quickReply: { items: actions.map(([label, data]) => ({
+  type: 'action', action: data === '主選單'
+    ? { type: 'message', label, text: data }
+    : { type: 'postback', label, data }
 })) } } : {}) });
-const nav = () => [
-  { label: '📋 練習名單', command: '練習點名' },
-  { label: '🔄 重新練習', command: '練習重來' },
-  { label: '結束練習', command: '結束練習' },
-  { label: '🏠 回首頁', command: '主選單' }
-];
 
-function createSession(now) {
-  return {
-    expiresAt: now.getTime() + SESSION_MS,
-    startsAt: new Date(now.getTime() + 60 * 60 * 1000),
-    students: DEMO_NAMES.map(name => ({ name, attendance: '未點名', short: '未評分', practical: '未評分' }))
-  };
+function localDateTime(date) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(date).map(part => [part.type, part.value]));
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
+}
+
+function createSession(context, now, phase = '考試') {
+  const runtime = new GoogleSheetsRuntime();
+  const taskId = `PRACTICE-${crypto.createHash('sha256').update(context.userId).digest('hex').slice(0, 12)}`;
+  const starts = localDateTime(new Date(now.getTime() + 60 * 60 * 1000));
+  const ends = localDateTime(new Date(now.getTime() + 3 * 60 * 60 * 1000));
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.insertSheet('對外任務');
+  tasks.appendRow(['任務ID', '學期', '階段', '日期', '開始時間', '結束時間', '器材', '地點', '教學官／考官', '考官LINE User ID', 'LINE群組ID', '任務狀態']);
+  tasks.appendRow([taskId, '練習', phase, starts.date, starts.time, ends.time, 'H6（練習）', '練習教室', '練習考官', context.userId, '', '已排定']);
+  const students = resultBook.insertSheet('任務學生');
+  students.appendRow(['任務ID', '學生ID', '學生姓名', '學號', '點名順序', '出席狀態', '考試結果', '記錄時間', '個別開始時間', '個別結束時間']);
+  students.appendRow([taskId, `${taskId}-1`, '陳小晴', 'PRACTICE001', 1, '未點名', '未記錄', '', starts.time, ends.time]);
+  students.appendRow([taskId, `${taskId}-2`, '林小宇', 'PRACTICE002', 2, '未點名', '未記錄', '', starts.time, ends.time]);
+  resultBook.insertSheet('LINE點名紀錄');
+  const bindings = runtime.openById(ids.master).insertSheet('用戶綁定');
+  bindings.appendRow(['LINE User ID', '姓名', '身份選擇', '學號', '角色']);
+  bindings.appendRow([context.userId, '練習考官', '', '', 'assistant']);
+  runtime.operations.length = 0;
+  return { runtime, taskId, phase, expiresAt: now.getTime() + SESSION_MS };
 }
 
 function getSession(userId, now) {
@@ -37,104 +57,95 @@ function getSession(userId, now) {
   return session;
 }
 
-function taskTime(date) {
-  return new Intl.DateTimeFormat('zh-TW', {
-    timeZone: 'Asia/Taipei', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false
-  }).format(date);
-}
-
-function studentStatus(student) {
-  if (student.attendance === '未點名') return '未點名';
-  if (student.attendance === '缺席') return '缺席';
-  if (student.short === '未評分') return '待評簡答';
-  if (student.short === '未通過') return '簡答未通過';
-  if (student.practical === '未評分') return '待評上機';
-  return student.practical === '通過' ? '全部通過' : '上機未通過';
-}
-
-function listStudents(session) {
-  const rows = session.students.map((student, index) => `${index + 1}. ${student.name}｜${studentStatus(student)}`).join('\n');
-  return reply(`🧪【練習任務】\n${taskTime(session.startsAt)}｜考試｜${DEMO_EQUIPMENT}\n\n${rows}\n\n這是假資料，不會改正式認證或傳訊息給考生。`, [
-    ...session.students.map((student, index) => ({ label: `👤 ${student.name}`, command: `練習學生 ${index + 1}` })),
-    ...nav().slice(1)
-  ]);
-}
-
-function showStudent(session, index) {
-  const student = session.students[index];
-  let actions;
-  let prompt;
-  if (student.attendance === '未點名') {
-    prompt = '請選點名結果：';
-    actions = [
-      { label: '✅ 已到', command: `練習出席 ${index + 1} 到場` },
-      { label: '❌ 缺席', command: `練習出席 ${index + 1} 缺席` }
-    ];
-  } else if (student.attendance === '到場' && student.short === '未評分') {
-    prompt = '請選簡答結果：';
-    actions = [
-      { label: '簡答 ✅', command: `練習簡答 ${index + 1} 通過` },
-      { label: '簡答 ❌', command: `練習簡答 ${index + 1} 未通過` }
-    ];
-  } else if (student.attendance === '到場' && student.short === '通過' && student.practical === '未評分') {
-    prompt = '請選上機結果：';
-    actions = [
-      { label: '上機 ✅', command: `練習上機 ${index + 1} 通過` },
-      { label: '上機 ❌', command: `練習上機 ${index + 1} 未通過` }
-    ];
-  } else {
-    prompt = student.short === '未通過'
-      ? '🗣️ 簡答未通過：請告知考生補考週可到影音實驗室現場補考，不需填上機報名表。'
-      : student.practical === '未通過'
-        ? '🎬 上機未通過：請告知考生須填第一次補考上機考報名表。'
-        : student.attendance === '缺席' ? '缺席，這次不進行評分。' : '🎉 簡答與上機都通過！';
-    actions = [];
+function sandbox(session, command, context) {
+  const originalSheets = global.SpreadsheetApp;
+  const originalFetch = global.UrlFetchApp;
+  global.SpreadsheetApp = { openById: id => session.runtime.openById(id) };
+  global.UrlFetchApp = { fetch: () => { throw new Error('練習模式禁止推送真實 LINE 訊息'); } };
+  try {
+    return externalTeaching.handleCommand(command, context, { skipScheduleSync: true });
+  } finally {
+    global.SpreadsheetApp = originalSheets;
+    global.UrlFetchApp = originalFetch;
+    session.runtime.operations.length = 0;
+    session.runtime.httpOperations.length = 0;
   }
-  return reply(`🧪【${student.name}｜${DEMO_EQUIPMENT}】\n點名：${student.attendance}｜簡答：${student.short}｜上機：${student.practical}\n\n${prompt}\n\n練習資料不會寫入正式表格。`, [
-    ...actions,
-    { label: '📋 回練習名單', command: '練習點名' },
-    { label: '🏠 回首頁', command: '主選單' }
-  ]);
+}
+
+function practiceAction(action, taskId) {
+  if (!action) return action;
+  if (action.type === 'uri' && (/^https:\/\/(?:forms\.gle|docs\.google\.com\/forms)\//.test(action.uri || '') || action.uri?.includes(`/d/${ids.externalResults}/`))) {
+    return { type: 'postback', label: '查看練習紀錄', data: `${PREFIX}查看點名結果 ${taskId}` };
+  }
+  if (action.type === 'postback' && ACTION_COMMAND.test(action.data || '')) {
+    return { ...action, data: PREFIX + action.data };
+  }
+  if (action.type === 'message' && ACTION_COMMAND.test(action.text || '')) {
+    return { type: 'postback', label: action.label, data: PREFIX + action.text };
+  }
+  return action;
+}
+
+function practiceQuickReply(quickReply, taskId) {
+  if (!quickReply?.items) return quickReply;
+  return { ...quickReply, items: quickReply.items.map(item => ({
+    ...item, action: practiceAction(item.action, taskId)
+  })) };
+}
+
+function practiceReply(result, taskId) {
+  if (!result) return simpleReply('練習指令無效，請從考生卡片點選。', [['回練習名單', '練習點名']]);
+  const safeText = result.text
+    ?.replace('考生尚未完成 LINE 姓名綁定，請考官現場提醒。', '練習模式不會私訊真實考生。')
+    .replaceAll(/https:\/\/(?:forms\.gle|docs\.google\.com\/forms)\/\S+/g, '（練習模式不開放填寫正式表單）')
+    .replace('點擊下方可查看考生認證狀態。', '練習結果只保存在這次練習，不會寫入正式認證。');
+  const copy = { ...result, text: safeText };
+  if (result.quickReply) copy.quickReply = practiceQuickReply(result.quickReply, taskId);
+  if (result.fallbackQuickReply) copy.fallbackQuickReply = practiceQuickReply(result.fallbackQuickReply, taskId);
+  if (result.lineMessage) {
+    copy.lineMessage = {
+      ...result.lineMessage,
+      altText: `🧪 練習｜${result.lineMessage.altText || '考生卡片'}`,
+      template: result.lineMessage.template ? {
+        ...result.lineMessage.template,
+        columns: result.lineMessage.template.columns?.map(column => ({
+          ...column, actions: column.actions?.map(action => practiceAction(action, taskId))
+        }))
+      } : undefined,
+      quickReply: practiceQuickReply(result.lineMessage.quickReply, taskId)
+    };
+  }
+  return copy;
 }
 
 function handleCommand(text, context, now = new Date()) {
   const command = String(text || '').trim();
   if (!isPracticeCommand(command)) return null;
-  if (context.sourceType !== 'user' || !context.userId) return reply('練習模式請在與機器人的私人聊天室使用。');
+  if (context.sourceType !== 'user' || !context.userId) return simpleReply('練習模式請在與機器人的私人聊天室使用。');
   if (command === '結束練習') {
     sessions.delete(context.userId);
-    return reply('練習已結束；沒有修改正式資料。', [{ label: '🏠 回首頁', command: '主選單' }]);
+    return simpleReply('練習已結束；假資料已清除，沒有修改正式資料。', [['🏠 回首頁', '主選單']]);
   }
-  if (command === '開始練習' || command === '練習重來') {
-    const session = createSession(now);
+  if (command === '開始練習' || command === '開始教學練習' || command === '練習重來') {
+    const previous = getSession(context.userId, now);
+    const phase = command === '開始教學練習' ? '教學' : command === '練習重來' ? previous?.phase || '考試' : '考試';
+    const session = createSession(context, now, phase);
     sessions.set(context.userId, session);
-    return listStudents(session);
+    return practiceReply(sandbox(session, `開始點名 ${session.taskId}`, context), session.taskId);
   }
   const session = getSession(context.userId, now);
-  if (!session) return reply('目前沒有練習任務，請按「開始練習」。', [
-    { label: '▶️ 開始練習', command: '開始練習' },
-    { label: '🏠 回首頁', command: '主選單' }
+  if (!session) return simpleReply('目前沒有練習任務，請按「開始練習」。', [
+    ['▶️ 開始練習', '開始練習'], ['🏠 回首頁', '主選單']
   ]);
-  if (command === '練習' || command === '練習點名') return listStudents(session);
-  const match = command.match(/^練習(學生|出席|簡答|上機) ([12])(?: (到場|缺席|通過|未通過))?$/);
-  if (!match) return listStudents(session);
-  const [, step, number, value] = match;
-  const index = Number(number) - 1;
-  const student = session.students[index];
-  if (step === '學生') return showStudent(session, index);
-  if (step === '出席' && student.attendance === '未點名' && ['到場', '缺席'].includes(value)) {
-    student.attendance = value;
-  } else if (step === '簡答' && student.attendance === '到場' && student.short === '未評分' && ['通過', '未通過'].includes(value)) {
-    student.short = value;
-  } else if (step === '上機' && student.attendance === '到場' && student.short === '通過' && student.practical === '未評分' && ['通過', '未通過'].includes(value)) {
-    student.practical = value;
-  } else {
-    return reply('這一步目前不能登記；請依點名、簡答、上機的順序操作。', [
-      { label: `👤 ${student.name}`, command: `練習學生 ${index + 1}` },
-      { label: '📋 練習名單', command: '練習點名' }
-    ]);
+  const requested = command === '練習' || command === '練習點名'
+    ? `考生名單 ${session.taskId} 1` : command.slice(PREFIX.length);
+  const realCommand = /^(?:今日任務|對外任務|近期任務)$/.test(requested)
+    ? `查看任務 ${session.taskId}` : requested;
+  // Crafted postbacks must not inspect other tasks or invoke a scheduler.
+  if (!ACTION_COMMAND.test(realCommand) || !realCommand.split(/\s+/).includes(session.taskId)) {
+    return simpleReply('請使用練習卡片上的按鈕。', [['回練習名單', '練習點名']]);
   }
-  return showStudent(session, index);
+  return practiceReply(sandbox(session, realCommand, context), session.taskId);
 }
 
 module.exports = { isPracticeCommand, handleCommand };
