@@ -21,6 +21,36 @@ const { parseDepositWorkbook } = require('../src/deposit-parser');
 const { parseRegistrationRows } = require('../src/external-registration-parser');
 const externalIdentity = require('../src/external-identity');
 const navigation = require('../src/navigation');
+const practiceMode = require('../src/practice-mode');
+
+test('practice tasks stay separate per user and never touch production records', () => {
+  const now = new Date('2026-09-18T10:00:00+08:00');
+  const first = { sourceType: 'user', userId: 'U-practice-first' };
+  const second = { sourceType: 'user', userId: 'U-practice-second' };
+  const beforeWrites = runtime.operations.length;
+  const beforePushes = runtime.httpOperations.length;
+  assert.equal(practiceMode.isPracticeCommand('開始練習'), true);
+  assert.equal(practiceMode.isPracticeCommand('簡答登記 T1 S1 通過'), false);
+  assert.match(practiceMode.handleCommand('開始練習', first, now).text, /陳小晴.*林小宇/s);
+  practiceMode.handleCommand('開始練習', second, now);
+  assert.match(practiceMode.handleCommand('練習學生 1', first, now).text, /請選點名結果/);
+  assert.match(practiceMode.handleCommand('練習出席 1 到場', first, now).text, /請選簡答結果/);
+  const shortFailed = practiceMode.handleCommand('練習簡答 1 未通過', first, now);
+  assert.match(shortFailed.text, /簡答未通過.*不需填上機報名表/);
+  assert.equal(shortFailed.quickReply.items.some(item => /上機/.test(item.action.label)), false);
+  assert.match(practiceMode.handleCommand('練習學生 1', second, now).text, /點名：未點名/);
+  assert.match(practiceMode.handleCommand('練習上機 1 通過', second, now).text, /目前不能登記/);
+  practiceMode.handleCommand('練習出席 1 到場', second, now);
+  practiceMode.handleCommand('練習簡答 1 通過', second, now);
+  assert.match(practiceMode.handleCommand('練習上機 1 未通過', second, now).text, /第一次補考上機考報名表/);
+  assert.match(practiceMode.handleCommand('練習重來', first, now).text, /未點名/);
+  assert.match(practiceMode.handleCommand('練習點名', second, now).text, /上機未通過/);
+  assert.match(practiceMode.handleCommand('開始練習', { sourceType: 'group', userId: 'U-group' }, now).text, /私人聊天室/);
+  assert.match(practiceMode.handleCommand('結束練習', first, now).text, /沒有修改正式資料/);
+  assert.match(practiceMode.handleCommand('練習點名', first, now).text, /沒有練習任務/);
+  assert.equal(runtime.operations.length, beforeWrites);
+  assert.equal(runtime.httpOperations.length, beforePushes);
+});
 
 test('queued LINE delivery records success only after acceptance and leaves failures retryable', async () => {
   const isolated = new GoogleSheetsRuntime();
@@ -101,6 +131,7 @@ test('both identity menus link to the AV Lab platform and external resources sta
   const internalActions = bot.getReply('中心助理', 'U-links-internal').quickReply.items.map(item => item.action);
   assert.equal(externalActions.filter(action => action.uri === platform).length, 1);
   assert.equal(internalActions.filter(action => action.uri === platform).length, 1);
+  assert.equal(internalActions.some(action => action.text === '開始練習'), true);
   assert.equal(externalActions.filter(action => action.uri === 'https://www.facebook.com/nccuavlab').length, 1);
   assert.equal(internalActions.some(action => action.uri === 'https://www.facebook.com/nccuavlab'), false);
   assert.ok(externalActions.length <= 13);
