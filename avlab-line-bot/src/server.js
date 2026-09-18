@@ -17,7 +17,7 @@ const internalTeaching = require('./internal-teaching');
 const externalTeaching = require('./external-teaching');
 const teachingSchedule = require('./teaching-schedule');
 const externalGroupSync = require('./external-group-sync');
-const { sendRegistrationConfirmations, confirmationCandidates, confirmationText, retryUuid } = require('./registration-confirmations');
+const { sendRegistrationConfirmations } = require('./registration-confirmations');
 const navigation = require('./navigation');
 const { WorkQueue } = require('./work-queue');
 const app = express();
@@ -223,68 +223,6 @@ app.post('/automation/:name', (req, res) => {
 
 const completedSchedules = new Set();
 const pendingScheduleKinds = new Set();
-// Explicitly authorized one-day replay after the LINE message plan was upgraded.
-// The persistent LINE補發紀錄 sheet makes Railway restarts idempotent.
-const REPLAY_DATE = '2026-09-18';
-let replayRunning = false;
-let replayComplete = false;
-
-async function replayTodayOnce() {
-  if (replayComplete || replayRunning || formatDate(new Date(), 'yyyy-MM-dd') !== REPLAY_DATE) return;
-  replayRunning = true;
-  try {
-    await enqueue(async () => {
-      await runtime.loadOnly([...new Set([...EXTERNAL_WORKBOOKS, ...INTERNAL_WORKBOOKS, ...TEACHING_SCHEDULE_WORKBOOKS])], { force: true });
-      let groupReady = true;
-      try { await teachingSchedule.loadDocumentLabels(runtime.api, { force: true }); }
-      catch (error) { groupReady = false; console.error('Replay group schedule preparation failed:', error); }
-      const book = runtime.openById(ids.externalResults);
-      let log = book.getSheetByName('LINE補發紀錄');
-      if (!log) {
-        log = book.insertSheet('LINE補發紀錄');
-        log.appendRow(['補發鍵', '對象ID', '類型', 'LINE接受時間']);
-      }
-      const recorded = new Set(log.getDataRange().getValues().slice(1).map(row => String(row[0] || '')).filter(Boolean));
-      const replay = {
-        has: key => recorded.has(key),
-        mark: (key, recipient, kind) => {
-          log.appendRow([key, recipient, kind, new Date()]);
-          recorded.add(key);
-        }
-      };
-      const today = new Date();
-      const queued = (groupReady ? teachingSchedule.replayDailyReminders(today, replay) : 0)
-        + internalTeaching.replayDailyReminders(today, replay)
-        + externalTeaching.replayDailyReminders(today, replay);
-      let registrationQueued = 0;
-      const confirmationLog = book.getSheetByName('報名成功通知紀錄');
-      const acceptedToday = new Set((confirmationLog?.getDataRange().getValues() || []).slice(1)
-        .filter(row => row[4] && formatDate(row[4], 'yyyy-MM-dd') === REPLAY_DATE && row[5] === '已接受')
-        .map(row => String(row[0] || '')));
-      for (const candidate of confirmationCandidates(runtime)) {
-        if (!acceptedToday.has(candidate.key)) continue;
-        const key = `REPLAY:${REPLAY_DATE}:REGISTRATION:${candidate.key}`;
-        if (replay.has(key)) continue;
-        runtime.queueHttp('https://api.line.me/v2/bot/message/push', {
-          method: 'post', headers: {
-            Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json', 'X-Line-Retry-Key': retryUuid(key)
-          },
-          payload: JSON.stringify({ to: candidate.userId, messages: [{ type: 'text', text: `【今日通知補發】\n${confirmationText(candidate.registration)}` }] }),
-          onSuccess: () => replay.mark(key, candidate.userId, '報名成功')
-        });
-        registrationQueued++;
-      }
-      const delivery = await runtime.flush();
-      replayComplete = groupReady && delivery.failed === 0;
-      console.log(`Today reminder replay: queued=${queued + registrationQueued}, accepted=${delivery.delivered}, failed=${delivery.failed}`);
-    }, 'background');
-  } catch (error) {
-    console.error('Today reminder replay failed; will retry:', error);
-  } finally {
-    replayRunning = false;
-  }
-}
 
 async function schedulerTick() {
   const stamp = formatDate(new Date(), 'yyyy-MM-dd HH:mm');
@@ -336,7 +274,6 @@ async function schedulerTick() {
   if (completedSchedules.size > 5000) completedSchedules.clear();
 }
 setInterval(() => schedulerTick().catch(console.error), 30_000).unref();
-setInterval(() => replayTodayOnce().catch(console.error), 60_000).unref();
 
 app.listen(port, '0.0.0.0', error => {
   if (error) {
@@ -345,7 +282,6 @@ app.listen(port, '0.0.0.0', error => {
     return;
   }
   console.log(`Listening on port ${port}`);
-  setTimeout(() => replayTodayOnce().catch(console.error), 5000).unref();
 });
 
 module.exports = { app, validLineSignature, toLineMessage, toFallbackLineMessage };
