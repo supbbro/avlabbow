@@ -19,7 +19,7 @@ const EXAM_PASSING_RULES = '【考試通過標準】\n• 簡答題：考制度 
 const EXTERNAL_DATA_START_DATE = '2026-09-14';
 const ROSTER_SHEET = process.env.EXTERNAL_ROSTER_SHEET_NAME || '1151修課名單';
 const REGISTRATION_TASK_ID = 'REGISTRATION-1151';
-const EXTERNAL_COMMAND = /^(今日任務$|對外任務$|近期任務$|簡答補考$|簡答補考名單\s|簡答補考登記\s|查看任務\s|開始點名\s|考生名單\s|查看考生\s|查看點名結果\s|修改出席\s|修改紀錄\s|更正點名\s|更正評分\s|到場判定\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
+const EXTERNAL_COMMAND = /^(今日任務$|對外任務$|近期任務$|簡答補考$|簡答補考名單\s|簡答補考登記\s|查看任務\s|開始點名\s|考生名單\s|查看考生\s|查看點名結果\s|修改出席\s|修改紀錄\s|修改步驟\s|更正點名\s|更正評分\s|到場判定\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
 let activeStudentsByTask = new Map();
 const pendingReminderKeys = new Set();
 
@@ -905,9 +905,6 @@ function attendanceSummary(taskId) {
 function showStudent(taskId, studentId, context) {
   const task = findTask(taskId), student = findStudent(taskId, studentId);
   if (!task || !student) return reply('找不到指定的任務或學生。');
-  if (student.attendance === '未點名' && isExam(task) && automaticArrivalStatus(task, student) === '取消資格') {
-    return recordAttendance(taskId, studentId, '取消資格', context);
-  }
   if (student.attendance === '未點名') return attendancePrompt(task, student);
   if (isExam(task) && ['到場', '遲到'].includes(student.attendance)) return resultPrompt(task, student);
   return reply(`${student.name}目前出席狀態：${student.attendance}`, externalNav([
@@ -916,38 +913,50 @@ function showStudent(taskId, studentId, context) {
   ], `查看任務 ${task.id}`, '回任務'));
 }
 
-function editRecordPrompt(task, student, notice = '') {
-  const actions = isExam(task) ? [
-    { label: '改為到場', postback: `更正點名 ${task.id} ${student.id} 到場` },
-    { label: '改為缺席', postback: `更正點名 ${task.id} ${student.id} 缺席` },
-    ...(automaticArrivalStatus(task, student) === '到場' ? [{ label: '改為未點名', postback: `更正點名 ${task.id} ${student.id} 未點名` }] : [])
-  ] : [
-    { label: '改為到場', postback: `更正點名 ${task.id} ${student.id} 到場` },
-    { label: '改為遲到', postback: `更正點名 ${task.id} ${student.id} 遲到` },
-    { label: '改為缺席', postback: `更正點名 ${task.id} ${student.id} 缺席` },
-    { label: '改為未點名', postback: `更正點名 ${task.id} ${student.id} 未點名` }
-  ];
+function editRecordPrompt(task, student) {
+  const actions = [{ label: '修正點名', postback: `修改步驟 ${task.id} ${student.id} attendance` }];
   const [shortAnswer, practical] = resultParts(student.result);
   if (isExam(task) && ['到場', '遲到'].includes(student.attendance)) {
-    actions.push(
-      { label: '簡答改通過', postback: `更正評分 ${task.id} ${student.id} short 通過` },
-      { label: '簡答改未過', postback: `更正評分 ${task.id} ${student.id} short 未通過` }
-    );
-    if (examProgress(task, student).shortPassed) actions.push(
-      { label: '上機改通過', postback: `更正評分 ${task.id} ${student.id} practical 通過` },
-      { label: '上機改未過', postback: `更正評分 ${task.id} ${student.id} practical 未通過` }
-    );
+    actions.push({ label: '修正簡答題', postback: `修改步驟 ${task.id} ${student.id} short` });
+    if (examProgress(task, student).shortPassed) actions.push({ label: '修正上機考', postback: `修改步驟 ${task.id} ${student.id} practical` });
   }
   const grades = isExam(task) ? `\n本次簡答：${shortAnswer}｜本次上機：${practical}` : '';
-  return reply(`${notice ? `${notice}\n\n` : ''}【修改 ${student.name} 的紀錄】\n${task.equipment}\n目前點名：${student.attendance}${grades}\n\n請選擇要更正的欄位。${isExam(task) ? '\n簡答題未通過時，上機結果會清除。' : ''}`,
+  return reply(`【修改 ${student.name} 的紀錄】\n${task.equipment}\n目前點名：${student.attendance}${grades}\n\n請先選擇要修正的步驟；每次只修改一項。${isExam(task) ? '\n簡答題未通過時，上機結果會清除。' : ''}`,
     externalNav([...actions, { label: '回這位考生', postback: `查看考生 ${task.id} ${student.id}` }], `查看任務 ${task.id}`, '回任務'));
+}
+
+function editStepPrompt(task, student, step) {
+  if (step !== 'attendance' && (!isExam(task) || !['到場', '遲到'].includes(student.attendance))) return reply('請先完成點名，才能修正考試結果。');
+  if (step === 'practical' && !examProgress(task, student).shortPassed) return reply('簡答題尚未通過，不能修正上機結果。');
+  const actions = step === 'attendance' ? [
+    { label: `已到（${automaticArrivalStatus(task, student)}）`, postback: `更正點名 ${task.id} ${student.id} 到場` },
+    { label: '缺席', postback: `更正點名 ${task.id} ${student.id} 缺席` },
+    ...(automaticArrivalStatus(task, student) === '到場' ? [{ label: '未點名', postback: `更正點名 ${task.id} ${student.id} 未點名` }] : [])
+  ] : [
+    { label: '通過', postback: `更正評分 ${task.id} ${student.id} ${step} 通過` },
+    { label: '未通過', postback: `更正評分 ${task.id} ${student.id} ${step} 未通過` }
+  ];
+  const label = { attendance: '點名', short: '簡答題', practical: '上機考' }[step];
+  const value = step === 'attendance' ? student.attendance : resultParts(student.result)[step === 'short' ? 0 : 1];
+  return reply(`【${student.name}｜修正${label}】\n目前：${value}\n\n只會修改${label}；完成後返回學生卡片。${step === 'attendance' ? `\n按「已到」會依現在時間判定${isExam(task) ? '是否取消資格' : '是否遲到'}。` : ''}`,
+    externalNav([...actions, { label: '回修改選單', postback: `修改紀錄 ${task.id} ${student.id}` }], `查看考生 ${task.id} ${student.id}`, '回這位考生'));
+}
+
+function correctedStudentCard(task, student, notice, context) {
+  const card = showStudent(task.id, student.id, context);
+  card.text = `${notice}\n\n${card.text.replace('請直接選擇簡答題或上機結果。', '如需繼續評分，請重新開啟這位考生。')}`;
+  card.quickReply = qr(externalNav([
+    { label: '重新開啟學生卡片', postback: `查看考生 ${task.id} ${student.id}` },
+    { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
+  ], `查看任務 ${task.id}`, '回任務'));
+  return card;
 }
 
 function correctAttendance(taskId, studentId, status, context) {
   const task = findTask(taskId), student = findStudent(taskId, studentId);
   if (!task || !student) return reply('找不到指定的任務或學生，請重新開啟任務。');
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
-  if (isExam(task) && status === '遲到') return reply('考試沒有遲到狀態，請選擇到場、缺席或未點名。');
+  if (status === '到場' || status === '遲到') status = automaticArrivalStatus(task, student);
   if (isExam(task) && status === '未點名' && automaticArrivalStatus(task, student) === '取消資格') return reply('已超過個別考試時間 5 分鐘，不能改回未點名；若原點名有誤，請更正為到場或缺席。');
   if (student.attendance === '取消資格' && task.phase === '考試') {
     const record = sheet(SHEETS.attendance)?.getDataRange().getValues().find(row => row[0] === `${task.id}:${student.id}`);
@@ -955,12 +964,12 @@ function correctAttendance(taskId, studentId, status, context) {
       return reply('此考生因保證金未繳而取消資格；請先完成對帳，不能直接更改點名狀態。');
     }
   }
-  const result = ['未點名', '缺席'].includes(status) || !isExam(task) ? (status === '未點名' ? '未記錄' : '不適用')
+  const result = ['未點名', '缺席', '取消資格'].includes(status) || !isExam(task) ? (status === '未點名' ? '未記錄' : '不適用')
     : student.result === '不適用' ? '未記錄' : student.result;
   updateStudent(student, status, result);
   upsertAttendance(task, student, permission.name, context.userId);
   if (task.status === '已完成' && (status === '未點名' || (isExam(task) && status === '到場' && examProgress(task, student).step !== 'done'))) updateTaskStatus(task, '點名中');
-  return editRecordPrompt(task, student, `✅ 已更正點名：${status}`);
+  return correctedStudentCard(task, student, `✅ 已更正點名：${status}`, context);
 }
 
 function correctExamPart(taskId, studentId, part, value, context) {
@@ -973,7 +982,7 @@ function correctExamPart(taskId, studentId, part, value, context) {
   updateStudent(student, student.attendance, result);
   const certification = upsertAttendance(task, student, permission.name, context.userId);
   if (task.status === '已完成' && examProgress(task, student).step !== 'done') updateTaskStatus(task, '點名中');
-  return editRecordPrompt(task, student, `✅ 已更正${part === 'short' ? '簡答題' : '上機'}：${value}\n${certificationText(certification)}\n若影響補考或保證金，請同步告知考生並核對單據。`);
+  return correctedStudentCard(task, student, `✅ 已更正${part === 'short' ? '簡答題' : '上機'}：${value}\n${certificationText(certification)}\n若影響補考或保證金，請同步告知考生並核對單據。`, context);
 }
 
 function startAttendance(taskId, context) {
@@ -1127,6 +1136,12 @@ function handleCommand(text, context) {
     if (!task || !student) return reply('找不到指定的任務或學生。');
     const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
     return editRecordPrompt(task, student);
+  }
+  if ((match = command.match(/^修改步驟\s+(\S+)\s+(\S+)\s+(attendance|short|practical)$/))) {
+    const task = findTask(match[1]), student = findStudent(match[1], match[2]);
+    if (!task || !student) return reply('找不到指定的任務或學生。');
+    const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
+    return editStepPrompt(task, student, match[3]);
   }
   if ((match = command.match(/^更正點名\s+(\S+)\s+(\S+)\s+(到場|遲到|缺席|未點名)$/))) return correctAttendance(match[1], match[2], match[3], context);
   if ((match = command.match(/^更正評分\s+(\S+)\s+(\S+)\s+(short|practical)\s+(通過|未通過)$/))) return correctExamPart(match[1], match[2], match[3], match[4], context);
