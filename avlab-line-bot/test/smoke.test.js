@@ -394,6 +394,8 @@ test('retest preserves the passed written result and only asks for the practical
   const firstPrompt = externalTeaching.handleCommand('點名狀態 T-EXAM-CUM S-EXAM-CUM 到場', context);
   assert.match(firstPrompt.text, /簡答題：⏳ 尚未評分/);
   assert.match(firstPrompt.text, /上機：⏳ 尚未評分/);
+  assert.match(firstPrompt.text, /考制度 2 題＋器材 3 題，最多錯 1 題/);
+  assert.match(firstPrompt.text, /上機考：最多錯 3 題/);
   assert.doesNotMatch(firstPrompt.text, /保證金：/);
   assert.equal(firstPrompt.quickReply.items[0].action.type, 'postback');
   const practicalPrompt = externalTeaching.handleCommand('簡答登記 T-EXAM-CUM S-EXAM-CUM 通過', context);
@@ -438,6 +440,13 @@ test('arrival grace rules are five minutes for exams and fifteen minutes for tea
   assert.match(teachingReminder, /對外教學將於 1 小時內開始/);
   assert.match(teachingReminder, /超過 15 分鐘.*遲到/);
   assert.doesNotMatch(teachingReminder, /取消本次考試資格/);
+  assert.doesNotMatch(teachingReminder, /考試通過標準/);
+  const examReminder = externalTeaching._test.studentReminderText(
+    { phase: '考試', date, start: '12:00', end: '13:00', equipment: 'X160', location: '401' },
+    { name: '虛擬考生', scheduledStart: '12:10', scheduledEnd: '13:00' }
+  );
+  assert.match(examReminder, /考制度 2 題＋器材 3 題，最多錯 1 題/);
+  assert.match(examReminder, /上機考：最多錯 3 題/);
 });
 
 test('one-hour reminder privately pushes the roster to the examiner', () => {
@@ -459,6 +468,8 @@ test('one-hour reminder privately pushes the roster to the examiner', () => {
     assert.match(push.messages[0].text, /領取及核對保證金/);
     assert.match(push.messages[0].text, /簽出機單/);
     assert.match(push.messages[0].text, /開啟名字卡.*逐位點名及評分/);
+    assert.match(push.messages[0].text, /考制度 2 題＋器材 3 題，最多錯 1 題/);
+    assert.match(push.messages[0].text, /上機考：最多錯 3 題/);
     assert.doesNotMatch(push.messages[0].text, /保證金單簽名|黃本簽退/);
     assert.equal(push.messages[0].quickReply.items[0].action.label, '開啟名字卡');
     assert.equal(push.messages[0].quickReply.items[0].action.text, '開始點名 T-REMIND');

@@ -13,6 +13,7 @@ const SHEETS = {
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
 const REMINDER_LEAD_MINUTES = 60;
+const EXAM_PASSING_RULES = '【考試通過標準】\n• 簡答題：考制度 2 題＋器材 3 題，最多錯 1 題。\n• 上機考：最多錯 3 題。';
 // Records before this reset date were cleared from the derived task, student,
 // and deposit sheets. Keep their source rows from rebuilding those records.
 const EXTERNAL_DATA_START_DATE = '2026-09-14';
@@ -875,7 +876,7 @@ function resultPrompt(task, student) {
   const practicalText = progress.shortRecorded && !progress.shortPassed ? '⛔ 簡答題未通過，無上機資格' : stateText(progress.practicalRecorded, progress.practicalPassed);
   const depositText = progress.shortRecorded && progress.practicalRecorded
     ? `\n保證金：${progress.shortPassed && progress.practicalPassed ? '✅ 可退保證金' : '❌ 不可退保證金'}` : '';
-  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n出席：${student.attendance}\n\n簡答題：${stateText(progress.shortRecorded, progress.shortPassed)}\n上機：${practicalText}${depositText}\n\n評分標準：簡答制度 2 題＋器材 3 題，最多錯 1 題；上機最多錯 3 題。\n${progress.step === 'done' ? '本次評分已完成。' : '請直接選擇簡答題或上機結果。'}`,
+  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n出席：${student.attendance}\n\n簡答題：${stateText(progress.shortRecorded, progress.shortPassed)}\n上機：${practicalText}${depositText}\n\n${EXAM_PASSING_RULES}\n${progress.step === 'done' ? '本次評分已完成。' : '請直接選擇簡答題或上機結果。'}`,
     externalNav(actions, `查看任務 ${task.id}`, '回任務'));
 }
 
@@ -1006,11 +1007,11 @@ function completionReminderText(task) {
   return isExam(task) ? [
     '【離開前請確認】',
     '• 將考生名條放到教學部助理櫃外資料夾。',
-    '• 在黃本簽退並註記時間；簽還出機單、確認器材歸還。'
+    '• 在黃本簽退並註記時間；簽還出機單、確認器材測完並放回架上，提醒值班助理幫忙簽線上。'
   ].join('\n') : [
     '【離開前請確認】',
     '• 在黃本簽退並註記時間。',
-    '• 簽還出機單、確認器材歸還。'
+    '• 簽還出機單、確認器材測完並放回架上，提醒值班助理幫忙簽線上。'
   ].join('\n');
 }
 
@@ -1227,7 +1228,7 @@ function examinerReminderText(task, roster = studentRosterText(task)) {
     '• 到場在黃本簽到並註記時間，簽出機單。',
     '• 到教學時間後，按下方「開啟名字卡」逐位點名。'
   ];
-  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}`;
+  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}${isExam(task) ? `\n\n${EXAM_PASSING_RULES}` : ''}`;
 }
 
 function studentReminderText(task, student) {
@@ -1235,7 +1236,7 @@ function studentReminderText(task, student) {
   const attendanceRule = isExam(task)
     ? '⚠️ 請依個別時間準時到場；超過 5 分鐘將取消本次考試資格。'
     : '⚠️ 請依個別時間準時到場；開始後超過 15 分鐘完成點名將記為遲到。';
-  return `⏰ 你的對外${task.phase}將於 1 小時內開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n${attendanceRule}`;
+  return `⏰ 你的對外${task.phase}將於 1 小時內開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n${attendanceRule}${isExam(task) ? `\n\n${EXAM_PASSING_RULES}` : ''}`;
 }
 
 const DEPOSIT_LOG_HEADERS = ['提醒鍵','類型','學生姓名','學號','任務ID','提醒時間','狀態'];
