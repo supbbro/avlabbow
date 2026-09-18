@@ -14,16 +14,13 @@ const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
 const REMINDER_LEAD_MINUTES = 60;
 const EXAM_PASSING_RULES = '【考試通過標準】\n• 簡答題：考制度 2 題＋器材 3 題，最多錯 1 題。\n• 上機考：最多錯 3 題。';
-const ATTENDANCE_DOCUMENTS = [
-  { label: '題庫資料夾', uri: 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X' },
-  { label: '官網器材教學手冊', uri: 'https://avlab.nccu.edu.tw/PageDownload?fid=10553' }
-];
+const COMBINED_QUESTION_BANK_URL = 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X';
 // Records before this reset date were cleared from the derived task, student,
 // and deposit sheets. Keep their source rows from rebuilding those records.
 const EXTERNAL_DATA_START_DATE = '2026-09-14';
 const ROSTER_SHEET = process.env.EXTERNAL_ROSTER_SHEET_NAME || '1151修課名單';
 const REGISTRATION_TASK_ID = 'REGISTRATION-1151';
-const EXTERNAL_COMMAND = /^(今日任務$|對外任務$|近期任務$|簡答補考$|簡答補考名單\s|簡答補考登記\s|查看任務\s|開始點名\s|考生名單\s|查看考生\s|查看點名結果\s|點名講義\s|修改出席\s|修改紀錄\s|修改步驟\s|更正點名\s|更正評分\s|到場判定\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
+const EXTERNAL_COMMAND = /^(今日任務$|對外任務$|近期任務$|簡答補考$|簡答補考名單\s|簡答補考登記\s|查看任務\s|開始點名\s|考生名單\s|查看考生\s|查看點名結果\s|修改出席\s|修改紀錄\s|修改步驟\s|更正點名\s|更正評分\s|到場判定\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
 let activeStudentsByTask = new Map();
 const pendingReminderKeys = new Set();
 
@@ -694,7 +691,7 @@ function attendancePrompt(task, student) {
   const rule = isExam(task) ? '個別時段開始 5 分鐘後尚未點名，將取消考試資格。' : '系統會依開始時間自動判定：15 分鐘後點名為遲到。';
   return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n個別時間：${formatTime(student.scheduledStart || task.start)}\n目前出席：${student.attendance}\n\n${rule}`, externalNav([
     ...attendanceActions,
-    { label: '📚 講義區文件', postback: `點名講義 ${task.id}` },
+    { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
     { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
   ], `查看任務 ${task.id}`, '回任務'));
 }
@@ -733,7 +730,7 @@ function candidateMenu(task, page = 1, notice = '') {
       template: { type: 'carousel', columns },
       quickReply: qr(externalNav([
         ...navActions,
-        { label: '📚 講義區文件', postback: `點名講義 ${task.id}` },
+        { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
         { label: '查看點名結果', postback: `查看點名結果 ${task.id}` }
       ], `查看任務 ${task.id}`, '回任務'))
     }
@@ -742,16 +739,6 @@ function candidateMenu(task, page = 1, notice = '') {
 
 function attendanceBoard(task) {
   return candidateMenu(task);
-}
-
-function attendanceDocuments(taskId, context) {
-  const task = findTask(taskId);
-  if (!task) return reply(`找不到任務 ${taskId}`);
-  const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
-  return reply(`【${task.equipment}｜講義區文件】\n點選下方開啟題庫資料夾或官網器材教學手冊。`, externalNav([
-    ...ATTENDANCE_DOCUMENTS,
-    { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
-  ], `查看任務 ${task.id}`, '回任務'));
 }
 
 function resultParts(result) {
@@ -891,7 +878,7 @@ function resultPrompt(task, student) {
   );
   actions.push(
     { label: '修改紀錄', postback: `修改紀錄 ${task.id} ${student.id}` },
-    { label: '📚 講義區文件', postback: `點名講義 ${task.id}` },
+    { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
     { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
   );
   const stateText = (recorded, passed) => !recorded ? '⏳ 尚未評分' : passed ? '✅ 通過' : '❌ 未通過';
@@ -928,7 +915,7 @@ function showStudent(taskId, studentId, context) {
   if (isExam(task) && ['到場', '遲到'].includes(student.attendance)) return resultPrompt(task, student);
   return reply(`${student.name}目前出席狀態：${student.attendance}`, externalNav([
     { label: '修改紀錄', postback: `修改紀錄 ${task.id} ${student.id}` },
-    { label: '📚 講義區文件', postback: `點名講義 ${task.id}` },
+    { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
     { label: '繼續依序點名', postback: `開始點名 ${task.id}` }
   ], `查看任務 ${task.id}`, '回任務'));
 }
@@ -967,7 +954,7 @@ function correctedStudentCard(task, student, notice, context) {
   card.text = `${notice}\n\n${card.text.replace('請直接選擇簡答題或上機結果。', '如需繼續評分，請重新開啟這位考生。')}`;
   card.quickReply = qr(externalNav([
     { label: '重新開啟學生卡片', postback: `查看考生 ${task.id} ${student.id}` },
-    { label: '📚 講義區文件', postback: `點名講義 ${task.id}` },
+    { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
     { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
   ], `查看任務 ${task.id}`, '回任務'));
   return card;
@@ -1152,7 +1139,6 @@ function handleCommand(text, context) {
   }
   if ((match = command.match(/^查看考生\s+(\S+)\s+(\S+)$/))) return showStudent(match[1], match[2], context);
   if ((match = command.match(/^查看點名結果\s+(\S+)$/))) return attendanceSummary(match[1]);
-  if ((match = command.match(/^點名講義\s+(\S+)$/))) return attendanceDocuments(match[1], context);
   if ((match = command.match(/^(?:修改出席|修改紀錄)\s+(\S+)\s+(\S+)$/))) {
     const task = findTask(match[1]), student = findStudent(match[1], match[2]);
     if (!task || !student) return reply('找不到指定的任務或學生。');
