@@ -438,7 +438,8 @@ test('retest preserves the passed written result and only asks for the practical
   assert.match(practicalPrompt.text, /上機：⏳ 尚未評分/);
   assert.doesNotMatch(practicalPrompt.text, /保證金：/);
   const failed = externalTeaching.handleCommand('上機登記 T-EXAM-CUM S-EXAM-CUM 未通過', context);
-  assert.match(failed.text, /上機考須填寫第一次補考報名表/);
+  assert.match(failed.text, /未通過時，請當場告知考生/);
+  assert.match(failed.text, /請考生填寫第一次補考上機考報名表：https:\/\/forms\.gle\//);
   assert.equal(failed.quickReply.items.some(item => item.action.type === 'uri' && item.action.uri.includes('forms.gle')), true);
   assert.match(failed.text, /考生尚未完成 LINE 姓名綁定/);
 
@@ -630,6 +631,9 @@ test('one-hour reminder privately pushes the roster to the examiner', () => {
     assert.match(push.messages[0].text, /可現在開啟點名卡，也可稍後從「我的任務／對外任務」重新開啟/);
     assert.match(push.messages[0].text, /考制度 2 題＋器材 3 題，最多錯 1 題/);
     assert.match(push.messages[0].text, /上機考：最多錯 3 題/);
+    assert.match(push.messages[0].text, /未通過時，請當場告知考生/);
+    assert.match(push.messages[0].text, /簡答題未通過：補考週可於影音實驗室開放時間到場口頭補考/);
+    assert.match(push.messages[0].text, /上機未通過：請考生填寫第一次補考上機考報名表/);
     assert.doesNotMatch(push.messages[0].text, /保證金單簽名|黃本簽退/);
     assert.equal(push.messages[0].quickReply.items[0].action.label, '開啟點名卡');
     assert.equal(push.messages[0].quickReply.items[0].action.text, '開始點名 T-REMIND');
@@ -705,7 +709,7 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   const failed = externalTeaching.handleCommand('上機登記 EXT-BIND-TEST STU-BIND-TEST 未通過', context);
   if (previousUrl === undefined) delete process.env.EXTERNAL_FIRST_RETEST_FORM_URL;
   else process.env.EXTERNAL_FIRST_RETEST_FORM_URL = previousUrl;
-  assert.match(failed.text, /已私訊已綁定的考生/);
+  assert.match(failed.text, /已排入考生 LINE 私訊，仍請當面確認/);
   const push = JSON.parse(runtime.httpOperations[0].options.payload);
   assert.equal(push.to, 'U-external-student-test');
   assert.match(push.messages[0].text, /上機/);
@@ -794,7 +798,7 @@ test('a failed short answer immediately ends the attempt without practical butto
   const completed = externalTeaching.handleCommand('簡答登記 EXT-SHORT-FAIL STU-SHORT-FAIL 未通過', context);
   assert.match(completed.text, /簡答題：❌ 未通過/);
   assert.match(completed.text, /上機：⛔ 無上機資格/);
-  assert.match(completed.text, /簡答題在補考週可於實驗室開放時間到場口頭補考/);
+  assert.match(completed.text, /簡答題未通過：補考週可於影音實驗室開放時間到場口頭補考/);
   assert.equal(completed.quickReply.items.some(item => item.action.type === 'uri' && item.action.uri.includes('forms.gle')), false);
   assert.equal(completed.quickReply.items.some(item => item.action.label.includes('上機')), false);
   const blocked = externalTeaching.handleCommand('上機登記 EXT-SHORT-FAIL STU-SHORT-FAIL 通過', context);

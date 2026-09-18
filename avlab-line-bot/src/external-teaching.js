@@ -1104,14 +1104,9 @@ function recordExamPart(taskId, studentId, part, value, context) {
     const needsRetest = failedParts.length > 0;
     const retest = retestForm(task);
     const notification = needsRetest && previousProgress.step !== 'done' ? notifyStudentForRetest(task, student, failedParts) : { sent: false, configured: Boolean(retest.url), finalAttempt: retest.finalAttempt };
-    const feeReminder = retest.label === '第二次補考'
-      ? '\n💰 第二次補考須繳交 100 元，且不退費；請考官一併提醒考生。'
-      : retest.label === '第一次補考'
-        ? '\n提醒：若第一次補考仍未通過，第二次補考須繳交 100 元且不退費。'
-        : '';
     const needsPracticalForm = failedParts.includes('上機') && !retest.finalAttempt;
     const examinerReminder = needsRetest
-      ? `\n\n⚠️ 請考官提醒考生：${failedParts.includes('簡答題') ? '簡答題在補考週可於實驗室開放時間到場口頭補考，由助理登記；不需填表。' : ''}${needsPracticalForm ? `上機考須填寫${retest.label}報名表。` : ''}${retest.finalAttempt ? '本次為第二次補考，請依規定處理。' : ''}${feeReminder}\n${notification.sent ? '✅ 已私訊已綁定的考生。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定上機補考表單網址，暫時無法傳送表單。'}` : '';
+      ? `\n\n${examinerRetestInstructions(task, failedParts)}\n${notification.sent ? '✅ 已排入考生 LINE 私訊，仍請當面確認。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定上機補考表單網址，暫時無法傳送表單。'}` : '';
     const formActions = needsPracticalForm && retest.url ? [{ label: `上機${retest.label}報名`, uri: retest.url }] : [];
     const practicalSummary = progress.shortPassed ? (progress.practicalPassed ? '✅ 通過' : '❌ 未通過') : '⛔ 無上機資格';
     const students = studentsFor(task.id);
@@ -1275,6 +1270,21 @@ function retestForm(task) {
   return { url: validFormUrl(process.env.EXTERNAL_FIRST_RETEST_FORM_URL || process.env.EXTERNAL_RETEST_FORM_URL || 'https://forms.gle/3be87wRzRBKvdkFb6'), label: '第一次補考', finalAttempt: false };
 }
 
+function examinerRetestInstructions(task, failedParts = ['簡答題', '上機']) {
+  const form = retestForm(task);
+  const lines = ['【未通過時，請當場告知考生】'];
+  if (form.finalAttempt) {
+    lines.push('• 本次是第二次補考；若仍未通過，沒有下一次補考表單，請依實驗室規定處理。');
+  } else {
+    if (failedParts.includes('簡答題')) lines.push('• 簡答題未通過：補考週可於影音實驗室開放時間到場口頭補考，由助理登記，不需填上機報名表。');
+    if (failedParts.includes('上機')) lines.push(`• 上機未通過：請考生填寫${form.label}上機考報名表${form.url ? `：${form.url}` : '（請向教學部確認連結）'}。`);
+    if (form.label === '第二次補考') lines.push('• 第二次補考須繳交 100 元，且不退費。');
+    else lines.push('• 若第一次補考仍未通過，第二次補考須繳交 100 元，且不退費。');
+  }
+  lines.push('• LINE 私訊僅供輔助，請當面確認考生知道下一步。');
+  return lines.join('\n');
+}
+
 function retestMessage(task, student, failedParts, label, url) {
   const feeNotice = label === '第二次補考'
     ? '\n\n💰 第二次補考須繳交 100 元，且不退費。'
@@ -1378,7 +1388,7 @@ function examinerReminderText(task, roster = studentRosterText(task)) {
     '• 到場在黃本簽到並註記時間，簽出機單。',
     '• 到教學時間後，開啟點名卡逐位點名。'
   ];
-  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n可現在開啟點名卡，也可稍後從「我的任務／對外任務」重新開啟；已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}` : ''}`;
+  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n可現在開啟點名卡，也可稍後從「我的任務／對外任務」重新開啟；已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}\n\n${examinerRetestInstructions(task)}` : ''}`;
 }
 
 function studentReminderText(task, student) {
