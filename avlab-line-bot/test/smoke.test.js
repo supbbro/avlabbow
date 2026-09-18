@@ -366,10 +366,12 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.equal(attendanceStart.lineMessage.template.columns[0].title, '學生甲');
   assert.deepEqual(attendanceStart.lineMessage.template.columns[0].actions.map(action => action.label), ['學生已到（自動判定）', '缺席']);
   assert.equal(attendanceStart.lineMessage.template.columns[0].actions[0].type, 'postback');
-  const attendanceHomeButton = attendanceStart.lineMessage.quickReply.items.find(item => item.action.label === '🏠 回點名首頁');
-  assert.equal(attendanceHomeButton.action.type, 'postback');
-  assert.equal(attendanceHomeButton.action.data, '點名首頁 T1');
-  assert.match(externalTeaching.handleCommand('點名首頁 T1', context).text, /未點名 1/);
+  const attendanceHomeButton = attendanceStart.lineMessage.quickReply.items.find(item => item.action.label === '🏠 回首頁');
+  assert.equal(attendanceHomeButton.action.type, 'message');
+  assert.equal(attendanceHomeButton.action.text, '主選單');
+  const attendanceOverview = externalTeaching.handleCommand('點名首頁 T1', context);
+  assert.match(attendanceOverview.text, /未點名 1/);
+  assert.equal(attendanceOverview.quickReply.items.find(item => item.action.label === '🏠 回首頁').action.text, '主選單');
   const rosterQuestionBank = attendanceStart.lineMessage.quickReply.items.find(item => item.action.label === '📚 合併版題庫');
   assert.equal(rosterQuestionBank.action.type, 'uri');
   assert.equal(rosterQuestionBank.action.uri, 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X');
@@ -377,7 +379,7 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.match(studentPrompt.text, /15 分鐘後點名為遲到/);
   assert.deepEqual(studentPrompt.quickReply.items.slice(0, 2).map(item => item.action.label), ['✅ 學生已到', '❌ 缺席']);
   assert.equal(studentPrompt.quickReply.items.find(item => item.action.label === '📚 合併版題庫').action.uri, rosterQuestionBank.action.uri);
-  assert.equal(studentPrompt.quickReply.items.find(item => item.action.label === '🏠 回點名首頁').action.data, '點名首頁 T1');
+  assert.equal(studentPrompt.quickReply.items.find(item => item.action.label === '🏠 回首頁').action.text, '主選單');
   assert.equal(studentPrompt.quickReply.items.find(item => item.action.label === '🔙 回任務').action.type, 'postback');
   assert.match(externalTeaching.handleCommand('點名狀態 T1 S1 請假', context).text, /已移除「請假」/);
   const lastTeachingAttendance = externalTeaching.handleCommand('點名狀態 T1 S1 到場', context);

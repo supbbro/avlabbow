@@ -38,7 +38,7 @@ const externalNav = (items = [], parentText = '對外學生', parentLabel = '回
   if (task && attendanceInProgress(task)) return [
     ...items.slice(0, 11),
     { label: `🔙 ${parentLabel}`, postback: parentText },
-    { label: '🏠 回點名首頁', postback: `點名首頁 ${task.id}` }
+    { label: '🏠 回首頁', text: '主選單' }
   ];
   return [
     ...items.slice(0, 11),
@@ -683,7 +683,8 @@ function attendanceHome(task) {
     { label: '▶️ 繼續點名', postback: `考生名單 ${task.id} 1` },
     { label: '查看點名結果', postback: `查看點名結果 ${task.id}` },
     { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
-    ...(!pending.length && !ungraded.length ? [{ label: '完成點名', postback: `完成點名 ${task.id}` }] : [])
+    ...(!pending.length && !ungraded.length ? [{ label: '完成點名', postback: `完成點名 ${task.id}` }] : []),
+    { label: '🏠 回首頁', text: '主選單' }
   ]);
 }
 
