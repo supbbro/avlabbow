@@ -1215,11 +1215,11 @@ function examinerReminderText(task, roster = studentRosterText(task)) {
   const checklist = isExam(task) ? [
     '【考試前先做】',
     '• 到場在黃本簽到並註記時間，領取及核對保證金，簽出機單。',
-    '• 到考試時間後，按下方「開啟名字卡」逐位點名及評分；不是填點名表單。'
+    '• 到考試時間後，按下方「開啟名字卡」逐位點名及評分。'
   ] : [
     '【教學前先做】',
     '• 到場在黃本簽到並註記時間，簽出機單。',
-    '• 到教學時間後，按下方「開啟名字卡」逐位點名；不是填點名表單。'
+    '• 到教學時間後，按下方「開啟名字卡」逐位點名。'
   ];
   return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}`;
 }
