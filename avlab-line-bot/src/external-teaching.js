@@ -1043,8 +1043,13 @@ function correctExamPart(taskId, studentId, part, value, context) {
   const result = part === 'short' && value === '未通過' ? '簡答題未通過' : mergeExamPart(student.result, part, value === '通過');
   updateStudent(student, student.attendance, result);
   const certification = upsertAttendance(task, student, permission.name, context.userId);
-  if (task.status === '已完成' && examProgress(task, student).step !== 'done') updateTaskStatus(task, '點名中');
-  return correctedStudentCard(task, student, `✅ 已更正${part === 'short' ? '簡答題' : '上機'}：${value}\n${certificationText(certification)}\n若影響補考或保證金，請同步告知考生並核對單據。`, context);
+  const progress = examProgress(task, student);
+  if (task.status === '已完成' && progress.step !== 'done') updateTaskStatus(task, '點名中');
+  const failedParts = progress.step !== 'done' ? [] : !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
+  const correctionNotice = failedParts.length
+    ? `\n\n${examinerRetestInstructions(task, failedParts)}\n⚠️ 更正評分不會自動重發考生私訊，請考官當場告知。`
+    : value === '通過' ? '\n若先前已告知考生補考，請主動通知結果已更正。' : '';
+  return correctedStudentCard(task, student, `✅ 已更正${part === 'short' ? '簡答題' : '上機'}：${value}\n${certificationText(certification)}${correctionNotice}\n請核對保證金單據。`, context);
 }
 
 function startAttendance(taskId, context) {
@@ -1270,11 +1275,11 @@ function retestForm(task) {
   return { url: validFormUrl(process.env.EXTERNAL_FIRST_RETEST_FORM_URL || process.env.EXTERNAL_RETEST_FORM_URL || 'https://forms.gle/3be87wRzRBKvdkFb6'), label: '第一次補考', finalAttempt: false };
 }
 
-function examinerRetestInstructions(task, failedParts = ['簡答題', '上機']) {
+function examinerRetestInstructions(task, failedParts) {
   const form = retestForm(task);
   const lines = ['【未通過時，請當場告知考生】'];
   if (form.finalAttempt) {
-    lines.push('• 本次是第二次補考；若仍未通過，沒有下一次補考表單，請依實驗室規定處理。');
+    lines.push(`• ${failedParts.join('、')}未通過；本次是第二次補考，沒有下一次補考表單，請依實驗室規定處理。`);
   } else {
     if (failedParts.includes('簡答題')) lines.push('• 簡答題未通過：補考週可於影音實驗室開放時間到場口頭補考，由助理登記，不需填上機報名表。');
     if (failedParts.includes('上機')) lines.push(`• 上機未通過：請考生填寫${form.label}上機考報名表${form.url ? `：${form.url}` : '（請向教學部確認連結）'}。`);
@@ -1388,7 +1393,7 @@ function examinerReminderText(task, roster = studentRosterText(task)) {
     '• 到場在黃本簽到並註記時間，簽出機單。',
     '• 到教學時間後，開啟點名卡逐位點名。'
   ];
-  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n可現在開啟點名卡，也可稍後從「我的任務／對外任務」重新開啟；已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}\n\n${examinerRetestInstructions(task)}` : ''}`;
+  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n可現在開啟點名卡，也可稍後從「我的任務／對外任務」重新開啟；已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}\n\n若考生未通過，請在評分後依該考生結果頁顯示的補考方式當場告知。` : ''}`;
 }
 
 function studentReminderText(task, student) {
@@ -1683,4 +1688,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };

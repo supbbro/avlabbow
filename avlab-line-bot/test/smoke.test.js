@@ -440,6 +440,7 @@ test('retest preserves the passed written result and only asks for the practical
   const failed = externalTeaching.handleCommand('上機登記 T-EXAM-CUM S-EXAM-CUM 未通過', context);
   assert.match(failed.text, /未通過時，請當場告知考生/);
   assert.match(failed.text, /請考生填寫第一次補考上機考報名表：https:\/\/forms\.gle\//);
+  assert.doesNotMatch(failed.text, /簡答題未通過：補考週/);
   assert.equal(failed.quickReply.items.some(item => item.action.type === 'uri' && item.action.uri.includes('forms.gle')), true);
   assert.match(failed.text, /考生尚未完成 LINE 姓名綁定/);
 
@@ -503,6 +504,8 @@ test('examiner can correct attendance and both exam parts without another retest
   record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
   assert.deepEqual(record.slice(10, 13), ['未通過', '未記錄', '簡答題未通過']);
   assert.match(shortFailed.text, /已更正簡答題[\s\S]*【X160｜第 1\//);
+  assert.match(shortFailed.text, /簡答題未通過：補考週/);
+  assert.doesNotMatch(shortFailed.text, /請考生填寫第一次補考上機考報名表/);
   assert.equal(shortFailed.quickReply.items.some(item => item.action.label.includes('修正上機')), false);
   assert.match(externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 通過', context).text, /上機考尚未評分/);
   assert.equal(runtime.httpOperations.length, beforePushes);
@@ -631,9 +634,8 @@ test('one-hour reminder privately pushes the roster to the examiner', () => {
     assert.match(push.messages[0].text, /可現在開啟點名卡，也可稍後從「我的任務／對外任務」重新開啟/);
     assert.match(push.messages[0].text, /考制度 2 題＋器材 3 題，最多錯 1 題/);
     assert.match(push.messages[0].text, /上機考：最多錯 3 題/);
-    assert.match(push.messages[0].text, /未通過時，請當場告知考生/);
-    assert.match(push.messages[0].text, /簡答題未通過：補考週可於影音實驗室開放時間到場口頭補考/);
-    assert.match(push.messages[0].text, /上機未通過：請考生填寫第一次補考上機考報名表/);
+    assert.match(push.messages[0].text, /若考生未通過，請在評分後依該考生結果頁顯示的補考方式當場告知/);
+    assert.doesNotMatch(push.messages[0].text, /簡答題未通過：補考週|上機未通過：請考生填寫/);
     assert.doesNotMatch(push.messages[0].text, /保證金單簽名|黃本簽退/);
     assert.equal(push.messages[0].quickReply.items[0].action.label, '開啟點名卡');
     assert.equal(push.messages[0].quickReply.items[0].action.text, '開始點名 T-REMIND');
@@ -799,6 +801,7 @@ test('a failed short answer immediately ends the attempt without practical butto
   assert.match(completed.text, /簡答題：❌ 未通過/);
   assert.match(completed.text, /上機：⛔ 無上機資格/);
   assert.match(completed.text, /簡答題未通過：補考週可於影音實驗室開放時間到場口頭補考/);
+  assert.doesNotMatch(completed.text, /上機未通過：請考生填寫/);
   assert.equal(completed.quickReply.items.some(item => item.action.type === 'uri' && item.action.uri.includes('forms.gle')), false);
   assert.equal(completed.quickReply.items.some(item => item.action.label.includes('上機')), false);
   const blocked = externalTeaching.handleCommand('上機登記 EXT-SHORT-FAIL STU-SHORT-FAIL 通過', context);
@@ -828,6 +831,16 @@ test('a bound student receives the teaching reminder with the fifteen-minute rul
 });
 
 test('failed exam stages select the next retest form and stop after the second retest', () => {
+  const examinerShort = externalTeaching._test.examinerRetestInstructions({ phase: '考試' }, ['簡答題']);
+  assert.match(examinerShort, /簡答題未通過：補考週可/);
+  assert.doesNotMatch(examinerShort, /上機未通過：|報名表：https/);
+  const examinerPractical = externalTeaching._test.examinerRetestInstructions({ phase: '第一次補考' }, ['上機']);
+  assert.match(examinerPractical, /第二次補考上機考報名表：https:\/\/forms\.gle\/t1vrm4U43xMhoWxD9/);
+  assert.match(examinerPractical, /100 元，且不退費/);
+  assert.doesNotMatch(examinerPractical, /簡答題未通過：/);
+  const finalAttempt = externalTeaching._test.examinerRetestInstructions({ phase: '第二次補考' }, ['上機']);
+  assert.match(finalAttempt, /上機未通過；本次是第二次補考/);
+  assert.doesNotMatch(finalAttempt, /報名表：https|簡答題未通過：/);
   assert.equal(externalTeaching._test.retestForm({ phase: '考試' }).url, 'https://forms.gle/3be87wRzRBKvdkFb6');
   assert.equal(externalTeaching._test.retestForm({ phase: '第一次補考' }).url, 'https://forms.gle/t1vrm4U43xMhoWxD9');
   assert.equal(externalTeaching._test.retestForm({ phase: '第二次補考' }).finalAttempt, true);
