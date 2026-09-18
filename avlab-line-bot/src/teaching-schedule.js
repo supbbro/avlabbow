@@ -245,6 +245,21 @@ function sendGroupReminders(now = new Date()) {
   return count;
 }
 
+function replayDailyReminders(now, replay) {
+  const events = eventsForDay(now);
+  if (!events.length) return 0;
+  let queued = 0;
+  for (const group of groupRows().filter(item => item.enabled === '是')) {
+    const key = `REPLAY:${dateKey(now)}:GROUP:${group.id}`;
+    if (replay.has(key)) continue;
+    const message = scheduleReply(events, false);
+    message.text = `【今日排程補發】\n${message.text}`.slice(0, 4900);
+    queuePush(group.id, message, key, () => replay.mark(key, group.id, '教學群組'));
+    queued++;
+  }
+  return queued;
+}
+
 function handleCommand(text, context) {
   const command = clean(text);
   const bind = command.match(/^綁定教學群組(?:\s+(.+))?$/);
@@ -265,6 +280,6 @@ function handleCommand(text, context) {
 }
 
 module.exports = {
-  isCommand: text => COMMAND.test(clean(text)), handleCommand, sendGroupReminders, disableGroup, loadDocumentLabels,
+  isCommand: text => COMMAND.test(clean(text)), handleCommand, sendGroupReminders, replayDailyReminders, disableGroup, loadDocumentLabels,
   _test: { allEvents, eventsForDay, eventsForWeek, mondayOf, reminderDue, formatEvents, extractLinkedLabels, stripDocumentNames }
 };

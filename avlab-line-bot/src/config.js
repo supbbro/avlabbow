@@ -39,7 +39,7 @@ const workbooks = {
   [ids.schedule]: ['對外考試排程', '表單回覆 1'],
   [ids.teachingSchedule]: ['8月', '9月', '10月', '11月', '12月'],
   [ids.externalClassSchedule]: ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'],
-  [ids.externalResults]: ['1151修課名單', '對外任務', '任務學生', 'LINE點名紀錄', 'LINE群組設定', '保證金提醒紀錄', '報名成功通知紀錄', '教學排程提醒紀錄'],
+  [ids.externalResults]: ['1151修課名單', '對外任務', '任務學生', 'LINE點名紀錄', 'LINE群組設定', '保證金提醒紀錄', '報名成功通知紀錄', '教學排程提醒紀錄', 'LINE補發紀錄'],
   [ids.externalRegistration]: ['表單回覆 1'],
   [ids.deposit]: ['考試週保證金', '第一次補考週保證金', '第二次補考週保證金']
 };

@@ -237,9 +237,24 @@ function sendInternalReminders(now = new Date()) {
   return count;
 }
 
+function replayDailyReminders(now, replay) {
+  let queued = 0;
+  for (const task of allTasks()) {
+    if (dateKey(task.date) !== dateKey(now)) continue;
+    const userId = userIdForName(task.examiner);
+    if (!userId) continue;
+    const key = `REPLAY:${dateKey(now)}:INTERNAL:${task.id}:${userId}`;
+    if (replay.has(key)) continue;
+    queuePush(userId, `【今日提醒補發】今天有你的對內教學／檢定任務，請開啟點名表進行登記。\n\n${taskText(task)}`, key,
+      () => replay.mark(key, userId, '對內教學官／考官'));
+    queued++;
+  }
+  return queued;
+}
+
 function isInternalCommand(text) { return COMMAND.test(clean(text)); }
 
 module.exports = {
-  handleCommand, isInternalCommand, requiresFreshData: () => true, sendInternalReminders, syncInternalCertifications,
+  handleCommand, isInternalCommand, requiresFreshData: () => true, sendInternalReminders, replayDailyReminders, syncInternalCertifications,
   _test: { allTasks, mondayReminderDate, eventReminderDate, reminderDue, attendanceUrl, equipmentKey }
 };

@@ -1495,4 +1495,32 @@ function sendExternalReminders(now = new Date()) {
   return sent + deposit.reminders;
 }
 
-module.exports = { handleCommand, sendExternalReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+function replayDailyReminders(now, replay) {
+  syncFromSchedule();
+  let queued = 0;
+  for (const task of allTasks()) {
+    const start = parseTaskStart(task);
+    if (!start || dateKey(start) !== dateKey(now) || !['已排定', '點名中'].includes(task.status)) continue;
+    const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
+    if (examinerUserId) {
+      const key = `REPLAY:${dateKey(now)}:EXTERNAL-EXAMINER:${task.id}:${examinerUserId}`;
+      if (!replay.has(key)) {
+        const buttons = [{ label: '開啟名字卡', text: `開始點名 ${task.id}` }, { label: '查看任務', text: `查看任務 ${task.id}` }];
+        const message = examinerReminderText(task, studentRosterText(task))
+          .replace('你的對外任務將於 1 小時內開始', '今日對外任務資訊');
+        if (queuePush(examinerUserId, reply(`【今日提醒補發】若任務已開始，請以現場安排為準。\n\n${message}`, buttons), { key, onSuccess: () => replay.mark(key, examinerUserId, '對外教學官／考官') })) queued++;
+      }
+    }
+    for (const student of studentsFor(task.id)) {
+      const userId = userIdForName(student.name, student.number);
+      if (!userId) continue;
+      const key = `REPLAY:${dateKey(now)}:EXTERNAL-STUDENT:${task.id}:${student.id}:${userId}`;
+      if (replay.has(key)) continue;
+      const message = studentReminderText(task, student).replace('將於 1 小時內開始', '任務資訊');
+      if (queuePush(userId, reply(`【今日提醒補發】若任務已開始，請以現場安排為準。\n\n${message}`), { key, onSuccess: () => replay.mark(key, userId, '對外學生') })) queued++;
+    }
+  }
+  return queued;
+}
+
+module.exports = { handleCommand, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
