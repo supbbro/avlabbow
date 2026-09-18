@@ -828,6 +828,51 @@ test('exam assignments propagate merged date headers and choose the correct exam
   assert.equal(tasks[0].date.getFullYear(), 2027);
 });
 
+test('exam schedule students sync in row order even without a matching registration', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  try {
+    const schedule = isolated.openById(ids.externalClassSchedule).insertSheet('考試週分班表I');
+    [
+      ['', '', '考試週'],
+      ['一般器材', '燈光器材', '9/18(五)'],
+      ['項目', '', '200W Par'],
+      ['地點', '', '417'],
+      ['考官', '', '考官甲'],
+      ['18:55-19:05', '18:55-19:05', '學生甲'],
+      ['19:10-19:20', '19:10-19:20', '學生乙']
+    ].forEach(row => schedule.appendRow(row));
+
+    const resultBook = isolated.openById(ids.externalResults);
+    resultBook.insertSheet('對外任務').appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','考官','考官LINE User ID','群組ID','狀態']);
+    const students = resultBook.insertSheet('任務學生');
+    students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間','個別開始時間','個別結束時間','提醒時間','來源儲存格']);
+    resultBook.insertSheet('1151修課名單').appendRow(['姓名','學號']);
+
+    const registration = isolated.openById(ids.externalRegistration).insertSheet('表單回覆 1');
+    const header = Array(21).fill('');
+    Object.assign(header, { 0: '時間戳記', 4: '姓名', 6: '學號', 20: 'H6考試' });
+    const response = Array(21).fill('');
+    Object.assign(response, { 0: '2026/9/18 09:00:00', 4: '學生甲', 6: '1001', 20: true });
+    registration.appendRow(header); registration.appendRow(response);
+
+    const deposit = isolated.openById(ids.deposit).insertSheet('考試週保證金');
+    deposit.appendRow(['姓名','系級','學號']);
+    deposit.appendRow(['說明']);
+    deposit.appendRow(['說明']);
+
+    assert.equal(externalTeaching.syncFromSchedule().students, 2);
+    const taskId = resultBook.getSheetByName('對外任務').getRange(2, 1).getValue();
+    assert.deepEqual(students.getDataRange().getValues().slice(1, 3).map(row => [row[0], row[2], row[3], row[4]]), [
+      [taskId, '學生甲', '1001', 1],
+      [taskId, '學生乙', '', 2]
+    ]);
+    assert.deepEqual(externalTeaching._test.studentsFor(taskId).map(student => student.name), ['學生甲', '學生乙']);
+  } finally {
+    installGlobals(runtime);
+  }
+});
+
 test('external examiner change polling tolerates a one-character name typo and sends the attendance entry once', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);

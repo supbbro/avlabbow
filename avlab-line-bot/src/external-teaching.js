@@ -308,22 +308,13 @@ function syncFromSchedule() {
   const roster = rosterStudents(rosterSheet ? rosterSheet.getDataRange().getValues() : []);
   const registrations = registrationRows();
   const depositIdentities = depositRows().map(row => ({ name: row.name, number: row.number }));
-  // Registration is authoritative. Roster and existing deposit rows only fill
-  // a missing student number during the empty-source migration period.
+  // Supplement schedule names with student numbers from known sources without
+  // using those sources to decide who belongs to a scheduled task.
   enrichStudentsFromRoster(parsed, registrations);
   enrichStudentsFromRoster(parsed, roster);
   enrichStudentsFromRoster(parsed, depositIdentities);
-  if (registrations.length) {
-    const byNumber = new Map(registrations.map(item => [norm(item.number), item]));
-    const byName = new Map(registrations.map(item => [norm(item.name), item]));
-    for (const task of parsed.filter(task => task.phase === '考試')) {
-      const taskEquipment = equipmentKey(task.equipment);
-      task.students = task.students.filter(student => {
-        const registration = norm(student.number) ? byNumber.get(norm(student.number)) : byName.get(norm(student.name));
-        return registration && registration.equipment.some(item => equipmentKey(item) === taskEquipment);
-      });
-    }
-  }
+  // The class schedule is the attendance authority for every phase. A form
+  // response may fill in a student number, but never removes a scheduled student.
   const bindingsBackfilled = backfillBindingNumbers([...registrations, ...roster, ...depositIdentities]);
   const taskSheet = sheet(SHEETS.tasks), studentSheet = sheet(SHEETS.students);
   if (!taskSheet || !studentSheet) throw new Error('找不到對外任務或任務學生工作表');
