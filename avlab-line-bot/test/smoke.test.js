@@ -359,9 +359,18 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.equal(attendanceStart.lineMessage.template.columns[0].title, '學生甲');
   assert.deepEqual(attendanceStart.lineMessage.template.columns[0].actions.map(action => action.label), ['學生已到（自動判定）', '缺席']);
   assert.equal(attendanceStart.lineMessage.template.columns[0].actions[0].type, 'postback');
+  assert.equal(attendanceStart.lineMessage.quickReply.items.some(item => item.action.data === '點名講義 T1'), true);
+  assert.equal(externalTeaching.isExternalCommand('點名講義 T1'), true);
+  const documents = externalTeaching.handleCommand('點名講義 T1', context);
+  assert.match(documents.text, /講義區文件/);
+  assert.deepEqual(documents.quickReply.items.slice(0, 2).map(item => item.action.type), ['uri', 'uri']);
+  assert.match(documents.quickReply.items[0].action.uri, /drive\.google\.com\/drive\/folders\/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X/);
+  assert.match(documents.quickReply.items[1].action.uri, /PageDownload\?fid=10553/);
+  assert.equal(documents.quickReply.items[2].action.data, '考生名單 T1 1');
   const studentPrompt = externalTeaching.handleCommand('查看考生 T1 S1', context);
   assert.match(studentPrompt.text, /15 分鐘後點名為遲到/);
   assert.deepEqual(studentPrompt.quickReply.items.slice(0, 2).map(item => item.action.label), ['✅ 學生已到', '❌ 缺席']);
+  assert.equal(studentPrompt.quickReply.items.some(item => item.action.data === '點名講義 T1'), true);
   assert.match(externalTeaching.handleCommand('點名狀態 T1 S1 請假', context).text, /已移除「請假」/);
   const lastTeachingAttendance = externalTeaching.handleCommand('點名狀態 T1 S1 到場', context);
   assert.match(lastTeachingAttendance.text, /已登記 學生甲：到場/);
