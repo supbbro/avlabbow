@@ -359,6 +359,10 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.equal(attendanceStart.lineMessage.template.columns[0].title, '學生甲');
   assert.deepEqual(attendanceStart.lineMessage.template.columns[0].actions.map(action => action.label), ['學生已到（自動判定）', '缺席']);
   assert.equal(attendanceStart.lineMessage.template.columns[0].actions[0].type, 'postback');
+  const attendanceHomeButton = attendanceStart.lineMessage.quickReply.items.find(item => item.action.label === '🏠 回點名首頁');
+  assert.equal(attendanceHomeButton.action.type, 'postback');
+  assert.equal(attendanceHomeButton.action.data, '點名首頁 T1');
+  assert.match(externalTeaching.handleCommand('點名首頁 T1', context).text, /未點名 1/);
   const rosterQuestionBank = attendanceStart.lineMessage.quickReply.items.find(item => item.action.label === '📚 合併版題庫');
   assert.equal(rosterQuestionBank.action.type, 'uri');
   assert.equal(rosterQuestionBank.action.uri, 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X');
@@ -366,11 +370,16 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.match(studentPrompt.text, /15 分鐘後點名為遲到/);
   assert.deepEqual(studentPrompt.quickReply.items.slice(0, 2).map(item => item.action.label), ['✅ 學生已到', '❌ 缺席']);
   assert.equal(studentPrompt.quickReply.items.find(item => item.action.label === '📚 合併版題庫').action.uri, rosterQuestionBank.action.uri);
+  assert.equal(studentPrompt.quickReply.items.find(item => item.action.label === '🏠 回點名首頁').action.data, '點名首頁 T1');
+  assert.equal(studentPrompt.quickReply.items.find(item => item.action.label === '🔙 回任務').action.type, 'postback');
   assert.match(externalTeaching.handleCommand('點名狀態 T1 S1 請假', context).text, /已移除「請假」/);
   const lastTeachingAttendance = externalTeaching.handleCommand('點名狀態 T1 S1 到場', context);
   assert.match(lastTeachingAttendance.text, /已登記 學生甲：到場/);
   assert.match(lastTeachingAttendance.text, /黃本簽退並註記時間/);
   assert.equal(attendance.getRange(2, 10).getValue(), '到場');
+  const readyHome = externalTeaching.handleCommand('點名首頁 T1', context);
+  assert.match(readyHome.text, /所有考生已登記/);
+  assert.equal(readyHome.quickReply.items.some(item => item.action.data === '完成點名 T1'), true);
   const finished = externalTeaching.handleCommand('完成點名 T1', context);
   assert.match(finished.text, /任務已完成/);
   assert.doesNotMatch(finished.text, /黃本簽退並註記時間/);
@@ -378,6 +387,7 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.equal(finished.quickReply.items[0].action.type, 'uri');
   assert.match(finished.quickReply.items[0].action.uri, new RegExp(ids.externalResults));
   assert.equal(tasks.getRange(taskRow, 12).getValue(), '已完成');
+  assert.doesNotMatch(externalTeaching.handleCommand('點名首頁 T1', context).text, /【點名首頁/);
 });
 
 test('retest preserves the passed written result and only asks for the practical result', () => {
@@ -608,7 +618,7 @@ test('finishing an external exam reminds the examiner about deposit slips and ch
   assert.match(lastExamResult.text, /保證金單簽名/);
   assert.match(lastExamResult.text, /考生名條放到教學部助理櫃外資料夾/);
   assert.match(lastExamResult.text, /黃本簽退並註記時間/);
-  assert.equal(lastExamResult.quickReply.items.some(item => item.action.text === '完成點名 T-EXAM-FINISH'), true);
+  assert.equal(lastExamResult.quickReply.items.some(item => item.action.data === '完成點名 T-EXAM-FINISH'), true);
   const finished = externalTeaching.handleCommand('完成點名 T-EXAM-FINISH', context);
   assert.match(finished.text, /任務已完成/);
   assert.doesNotMatch(finished.text, /保證金單簽名/);
