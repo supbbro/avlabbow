@@ -650,7 +650,7 @@ function showTask(taskId) {
   const students = studentsFor(taskId);
   const stats = { 未點名: 0, 到場: 0, 遲到: 0, 請假: 0, 缺席: 0, 取消資格: 0 };
   students.forEach(student => { stats[student.attendance] = (stats[student.attendance] || 0) + 1; });
-  return reply(`【任務 ${task.id}】\n${taskText(task)}\n👥 學生 ${students.length} 人\n未點名 ${stats.未點名}｜到場 ${stats.到場}｜遲到 ${stats.遲到}｜請假 ${stats.請假}｜缺席 ${stats.缺席}${isExam(task) ? `｜取消資格 ${stats.取消資格}` : ''}`,
+  return reply(`【任務 ${task.id}】\n${taskText(task)}\n👥 學生 ${students.length} 人\n未點名 ${stats.未點名}｜到場 ${stats.到場}｜遲到 ${stats.遲到}｜缺席 ${stats.缺席}${stats.請假 ? `｜歷史請假 ${stats.請假}` : ''}${isExam(task) ? `｜取消資格 ${stats.取消資格}` : ''}`,
     externalNav([{ label: '開始／繼續點名', text: `開始點名 ${task.id}` }], '近期任務', '回近期任務'));
 }
 
@@ -684,7 +684,6 @@ function attendancePrompt(task, student) {
     { label: '✅ 考生已到', postback: `到場判定 ${task.id} ${student.id}` }
   ] : [
     { label: '✅ 學生已到', postback: `到場判定 ${task.id} ${student.id}` },
-    { label: '📝 請假', postback: `點名狀態 ${task.id} ${student.id} 請假` },
     { label: '❌ 缺席', postback: `點名狀態 ${task.id} ${student.id} 缺席` }
   ];
   const rule = isExam(task) ? '個別時段開始 5 分鐘後尚未點名，將取消考試資格。' : '系統會依開始時間自動判定：15 分鐘後點名為遲到。';
@@ -708,7 +707,6 @@ function candidateMenu(task, page = 1, notice = '') {
       postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
     ] : [
       postbackAction('學生已到（自動判定）', `到場判定 ${task.id} ${student.id}`),
-      postbackAction('請假', `點名狀態 ${task.id} ${student.id} 請假`),
       postbackAction('缺席', `點名狀態 ${task.id} ${student.id} 缺席`)
     ]
   }));
@@ -1028,7 +1026,7 @@ function finishAttendance(taskId, context) {
     const refundable = students.filter(student => certificationForStudent(task, student).refundable).length;
     return `\n可退保證金 ${refundable}｜尚未符合 ${students.length - refundable}`;
   })() : '';
-  return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜請假 ${counts('請假')}｜缺席 ${counts('缺席')}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}${refundSummary}\n\n點擊下方可查看考生認證狀態。`, externalNav([
+  return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}${refundSummary}\n\n點擊下方可查看考生認證狀態。`, externalNav([
     { label: '查看考生認證狀態', uri: certificationStatusUrl() }
   ], '近期任務', '回近期任務'));
 }
@@ -1065,7 +1063,8 @@ function handleCommand(text, context) {
     return attendancePrompt(task, student);
   }
   if ((match = command.match(/^到場判定\s+(\S+)\s+(\S+)$/))) return recordAutomaticArrival(match[1], match[2], context);
-  if ((match = command.match(/^點名狀態\s+(\S+)\s+(\S+)\s+(到場|遲到|請假|缺席|取消資格)$/))) return recordAttendance(match[1], match[2], match[3], context);
+  if (/^點名狀態\s+\S+\s+\S+\s+請假$/.test(command)) return reply('對外點名已移除「請假」選項。請重新開啟名字卡，選擇「學生已到」或「缺席」。');
+  if ((match = command.match(/^點名狀態\s+(\S+)\s+(\S+)\s+(到場|遲到|缺席|取消資格)$/))) return recordAttendance(match[1], match[2], match[3], context);
   if ((match = command.match(/^簡答登記\s+(\S+)\s+(\S+)\s+(通過|未通過)$/))) return recordExamPart(match[1], match[2], 'short', match[3], context);
   if ((match = command.match(/^上機登記\s+(\S+)\s+(\S+)\s+(通過|未通過)$/))) return recordExamPart(match[1], match[2], 'practical', match[3], context);
   if ((match = command.match(/^考試登記\s+(\S+)\s+(\S+)\s+(全部通過|僅簡答通過|僅上機通過|未通過|簡答通過|簡答未通過|上機通過|上機未通過)$/))) return recordResult(match[1], match[2], match[3], context);

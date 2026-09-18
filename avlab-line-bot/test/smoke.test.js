@@ -357,11 +357,12 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.equal(attendanceStart.lineMessage.type, 'template');
   assert.equal(attendanceStart.lineMessage.template.type, 'carousel');
   assert.equal(attendanceStart.lineMessage.template.columns[0].title, '學生甲');
-  assert.deepEqual(attendanceStart.lineMessage.template.columns[0].actions.map(action => action.label), ['學生已到（自動判定）', '請假', '缺席']);
+  assert.deepEqual(attendanceStart.lineMessage.template.columns[0].actions.map(action => action.label), ['學生已到（自動判定）', '缺席']);
   assert.equal(attendanceStart.lineMessage.template.columns[0].actions[0].type, 'postback');
   const studentPrompt = externalTeaching.handleCommand('查看考生 T1 S1', context);
   assert.match(studentPrompt.text, /15 分鐘後點名為遲到/);
-  assert.deepEqual(studentPrompt.quickReply.items.slice(0, 3).map(item => item.action.label), ['✅ 學生已到', '📝 請假', '❌ 缺席']);
+  assert.deepEqual(studentPrompt.quickReply.items.slice(0, 2).map(item => item.action.label), ['✅ 學生已到', '❌ 缺席']);
+  assert.match(externalTeaching.handleCommand('點名狀態 T1 S1 請假', context).text, /已移除「請假」/);
   const lastTeachingAttendance = externalTeaching.handleCommand('點名狀態 T1 S1 到場', context);
   assert.match(lastTeachingAttendance.text, /已登記 學生甲：到場/);
   assert.match(lastTeachingAttendance.text, /黃本簽退並註記時間/);
