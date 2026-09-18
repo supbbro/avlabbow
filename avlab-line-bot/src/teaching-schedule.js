@@ -1,11 +1,13 @@
 'use strict';
 
 const { ids } = require('./config');
+const { retryUuid } = require('./registration-confirmations');
 
 const MONTH_TABS = ['8月', '9月', '10月', '11月', '12月'];
 const GROUP_SHEET = 'LINE群組設定';
 const LOG_SHEET = '教學排程提醒紀錄';
 const GROUP_SCOPE = '教學總排程';
+const pendingReminderKeys = new Set();
 const SCHEDULE_URL = `https://docs.google.com/spreadsheets/d/${ids.teachingSchedule}/edit`;
 const COMMAND = /^(綁定教學群組(?:\s|$)|解除教學群組$|今日教學排程$|本週教學排程$)/;
 const CATEGORIES = new Set([
@@ -201,12 +203,15 @@ function scheduleReply(events, weekly) {
   ]);
 }
 
-function queuePush(groupId, message) {
+function queuePush(groupId, message, key, onSuccess) {
+  pendingReminderKeys.add(key);
   UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
-    method: 'post', headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}` },
+    method: 'post', headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`, 'X-Line-Retry-Key': retryUuid(key) },
     contentType: 'application/json', payload: JSON.stringify({
       to: groupId, messages: [{ type: 'text', text: message.text, quickReply: message.quickReply }]
-    }), muteHttpExceptions: true
+    }), muteHttpExceptions: true,
+    onSuccess: () => { pendingReminderKeys.delete(key); onSuccess(); },
+    onFailure: () => pendingReminderKeys.delete(key)
   });
 }
 
@@ -230,9 +235,9 @@ function sendGroupReminders(now = new Date()) {
     if (weeklyEvents.length) reminders.push({ type: '週一提醒', key: `教學排程週一:${group.id}:${dateKey(mondayOf(now))}`, events: weeklyEvents, weekly: true });
     if (dailyEvents.length) reminders.push({ type: '當日提醒', key: `教學排程當日:${group.id}:${dateKey(now)}`, events: dailyEvents, weekly: false });
     for (const reminder of reminders) {
-      if (sent.has(reminder.key)) continue;
-      queuePush(group.id, scheduleReply(reminder.events, reminder.weekly));
-      log.appendRow([reminder.type, reminder.key, group.id, group.name, dateKey(now), now]);
+      if (sent.has(reminder.key) || pendingReminderKeys.has(reminder.key)) continue;
+      queuePush(group.id, scheduleReply(reminder.events, reminder.weekly), reminder.key,
+        () => log.appendRow([reminder.type, reminder.key, group.id, group.name, dateKey(now), now]));
       sent.add(reminder.key);
       count++;
     }

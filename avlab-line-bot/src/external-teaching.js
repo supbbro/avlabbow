@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { ids } = require('./config');
 const { parseWorkbook, parseDateCell } = require('./external-schedule-parser');
 const { parseRegistrationRows } = require('./external-registration-parser');
+const { retryUuid } = require('./registration-confirmations');
 
 const SHEETS = {
   tasks: '對外任務', students: '任務學生', attendance: 'LINE點名紀錄', groups: 'LINE群組設定',
@@ -19,6 +20,7 @@ const ROSTER_SHEET = process.env.EXTERNAL_ROSTER_SHEET_NAME || '1151修課名單
 const REGISTRATION_TASK_ID = 'REGISTRATION-1151';
 const EXTERNAL_COMMAND = /^(今日任務$|對外任務$|近期任務$|簡答補考$|簡答補考名單\s|簡答補考登記\s|查看任務\s|開始點名\s|考生名單\s|查看考生\s|查看點名結果\s|修改出席\s|到場判定\s|點名狀態\s|簡答登記\s|上機登記\s|考試登記\s|完成點名\s|同步對外排程$)/;
 let activeStudentsByTask = new Map();
+const pendingReminderKeys = new Set();
 
 const qr = items => ({ items: items.slice(0, 13).map(item => ({
   type: 'action', action: item.uri
@@ -1096,12 +1098,17 @@ function enabledFlag(value, defaultValue = true) {
   if (value === '' || value == null) return defaultValue;
   return value === true || ['TRUE', '是', '1'].includes(String(value).toUpperCase());
 }
-function queuePush(chatId, content) {
+function queuePush(chatId, content, { key, onSuccess } = {}) {
+  if (key && pendingReminderKeys.has(key)) return false;
+  if (key) pendingReminderKeys.add(key);
   const message = { type: 'text', text: content.text, ...(content.quickReply ? { quickReply: content.quickReply } : {}) };
   UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
-    method: 'post', headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-    payload: JSON.stringify({ to: chatId, messages: [message] }), muteHttpExceptions: true
+    method: 'post', headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`, 'Content-Type': 'application/json', ...(key ? { 'X-Line-Retry-Key': retryUuid(key) } : {}) },
+    payload: JSON.stringify({ to: chatId, messages: [message] }), muteHttpExceptions: true,
+    onSuccess: () => { if (key) pendingReminderKeys.delete(key); onSuccess?.(); },
+    onFailure: () => { if (key) pendingReminderKeys.delete(key); }
   });
+  return true;
 }
 
 function validFormUrl(value) {
@@ -1365,7 +1372,7 @@ function processDepositRequirements(now = new Date()) {
     if (record?.paid) continue;
     const personKey = norm(registration.number);
     const initialKey = `DEPOSIT-START:${personKey}:${taipeiDate(reminderStart)}`;
-    if (!personKey || logged.has(initialKey)) continue;
+    if (!personKey || logged.has(initialKey) || pendingReminderKeys.has(initialKey)) continue;
     const studentUserId = userIdForName(registration.name, registration.number);
     if (!studentUserId) continue;
     const entry = firstExams.find(candidate => norm(candidate.student.number) === personKey);
@@ -1374,13 +1381,14 @@ function processDepositRequirements(now = new Date()) {
     if (entry && today === dayBeforeDate(entry.start)) sameDayDue.push(['exam-day-before', `DEPOSIT-EXAM:${personKey}:${taipeiDate(entry.start)}`]);
     const pendingDue = sameDayDue.filter(([, key]) => !logged.has(key));
     const kind = pendingDue.some(([type]) => type === 'exam-day-before') ? 'exam-day-before' : pendingDue.length ? 'deadline' : 'start';
-    queuePush(studentUserId, reply(depositReminderText(kind, entry?.task, kind === 'start' ? registration : entry.student, deadline)));
-    logDepositAction(logSheet, initialKey, '開始繳費提醒', registration, entry?.task, now, '已合併推播');
+    queuePush(studentUserId, reply(depositReminderText(kind, entry?.task, kind === 'start' ? registration : entry.student, deadline)), {
+      key: initialKey, onSuccess: () => {
+        logDepositAction(logSheet, initialKey, '開始繳費提醒', registration, entry?.task, now, '已合併推播');
+        for (const [type, key] of pendingDue) logDepositAction(logSheet, key, type, registration, entry?.task, now, '已合併推播');
+      }
+    });
     logged.add(initialKey);
-    for (const [type, key] of pendingDue) {
-      logDepositAction(logSheet, key, type, registration, entry?.task, now, '已合併推播');
-      logged.add(key);
-    }
+    for (const [, key] of pendingDue) logged.add(key);
     reminders++;
   }
 
@@ -1394,14 +1402,14 @@ function processDepositRequirements(now = new Date()) {
     const remindersDue = [];
     if (today === dayBeforeDate(deadline)) remindersDue.push(['deadline', `DEPOSIT-DEADLINE:${personKey}:${taipeiDate(deadline)}`]);
     if (today === dayBeforeDate(start)) remindersDue.push(['exam-day-before', `DEPOSIT-EXAM:${personKey}:${taipeiDate(start)}`]);
-    const pendingReminders = remindersDue.filter(([, key]) => !logged.has(key));
+    const pendingReminders = remindersDue.filter(([, key]) => !logged.has(key) && !pendingReminderKeys.has(key));
     if (pendingReminders.length && studentUserId) {
       const messageKind = pendingReminders.some(([kind]) => kind === 'exam-day-before') ? 'exam-day-before' : 'deadline';
-      queuePush(studentUserId, reply(depositReminderText(messageKind, task, student, deadline)));
-      for (const [kind, key] of pendingReminders) {
-        logDepositAction(logSheet, key, kind, student, task, now, '已合併推播');
-        logged.add(key);
-      }
+      queuePush(studentUserId, reply(depositReminderText(messageKind, task, student, deadline)), {
+        key: pendingReminders[0][1],
+        onSuccess: () => { for (const [kind, key] of pendingReminders) logDepositAction(logSheet, key, kind, student, task, now, '已合併推播'); }
+      });
+      for (const [, key] of pendingReminders) logged.add(key);
       reminders++;
     }
   }
@@ -1461,14 +1469,14 @@ function sendExternalReminders(now = new Date()) {
     ];
     const roster = studentRosterText(task);
     const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
-    let taskSent = false;
-
     if (!task.twoHoursSentAt && start > now && now >= reminderDue) {
-      if (examinerUserId) {
-        queuePush(examinerUserId, reply(examinerReminderText(task, roster), buttons));
-        sent++; taskSent = true;
+      if (examinerUserId && !pendingReminderKeys.has(`EXTERNAL-EXAMINER:${task.id}:${start.toISOString()}:${examinerUserId}`)) {
+        queuePush(examinerUserId, reply(examinerReminderText(task, roster), buttons), {
+          key: `EXTERNAL-EXAMINER:${task.id}:${start.toISOString()}:${examinerUserId}`,
+          onSuccess: () => sheet(SHEETS.tasks).getRange(task.row, 16).setValue(now)
+        });
+        sent++;
       }
-      if (taskSent) sheet(SHEETS.tasks).getRange(task.row, 16).setValue(now);
     }
 
     for (const student of studentsFor(task.id)) {
@@ -1476,8 +1484,11 @@ function sendExternalReminders(now = new Date()) {
       if (!studentStart || studentStart <= now || student.reminderSentAt || now < new Date(studentStart.getTime() - REMINDER_LEAD_MINUTES * 60000)) continue;
       const studentUserId = userIdForName(student.name, student.number);
       if (!studentUserId) continue;
-      queuePush(studentUserId, reply(studentReminderText(task, student)));
-      sheet(SHEETS.students).getRange(student.row, 11).setValue(now);
+      if (pendingReminderKeys.has(`EXTERNAL-STUDENT:${task.id}:${student.id}:${studentStart.toISOString()}:${studentUserId}`)) continue;
+      queuePush(studentUserId, reply(studentReminderText(task, student)), {
+        key: `EXTERNAL-STUDENT:${task.id}:${student.id}:${studentStart.toISOString()}:${studentUserId}`,
+        onSuccess: () => sheet(SHEETS.students).getRange(student.row, 11).setValue(now)
+      });
       sent++;
     }
   }

@@ -22,6 +22,57 @@ const { parseRegistrationRows } = require('../src/external-registration-parser')
 const externalIdentity = require('../src/external-identity');
 const navigation = require('../src/navigation');
 
+test('queued LINE delivery records success only after acceptance and leaves failures retryable', async () => {
+  const isolated = new GoogleSheetsRuntime();
+  const confirmed = [];
+  const failed = [];
+  for (const key of ['ok', 'quota', 'already-accepted']) {
+    isolated.queueHttp('https://api.line.me/v2/bot/message/push', {
+      method: 'post', headers: { 'X-Line-Retry-Key': key },
+      onSuccess: () => confirmed.push(key), onFailure: () => failed.push(key)
+    });
+  }
+  const statuses = [200, 429, 409];
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const result = await isolated.flush({ fetchImpl: async () => ({
+      status: statuses.shift(),
+      get ok() { return this.status >= 200 && this.status < 300; },
+      text: async () => 'quota exceeded'
+    }) });
+    assert.deepEqual(result, { delivered: 2, failed: 1 });
+    assert.deepEqual(confirmed, ['ok', 'already-accepted']);
+    assert.deepEqual(failed, ['quota']);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('a failed LINE push leaves its Sheet marker unwritten until a later successful retry', async () => {
+  const isolated = new GoogleSheetsRuntime();
+  const writes = [];
+  isolated.api.spreadsheets.values.batchUpdate = async request => { writes.push(request.requestBody.data); };
+  const marker = { spreadsheetId: 'test-book', name: '提醒紀錄' };
+  const enqueue = () => isolated.queueHttp('https://api.line.me/v2/bot/message/push', {
+    method: 'post', headers: { 'X-Line-Retry-Key': 'stable-retry-key' },
+    onSuccess: () => isolated.queueUpdate(marker, 2, 1, [['已送']])
+  });
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    enqueue();
+    await isolated.flush({ fetchImpl: async () => ({ ok: false, status: 429, text: async () => 'quota' }) });
+    assert.equal(writes.length, 0);
+    enqueue();
+    await isolated.flush({ fetchImpl: async () => ({ ok: true, status: 200 }) });
+    assert.equal(writes.length, 1);
+    assert.deepEqual(writes[0][0].values, [['已送']]);
+  } finally {
+    console.error = originalError;
+  }
+});
+
 test('main menu survives the Apps Script to Node compatibility layer', () => {
   const reply = bot.getReply('主選單', 'U-test');
   assert.match(reply.text, /影音實驗室/);

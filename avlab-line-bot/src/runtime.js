@@ -276,7 +276,7 @@ class GoogleSheetsRuntime {
     this.operations.push({ kind: 'clear', sheet }, { kind: 'update', sheet, row: 1, column: 1, values });
   }
 
-  async flush() {
+  async flushSheets() {
     const batchUpdates = new Map();
     const formatUpdates = new Map();
     for (const op of this.operations) {
@@ -319,14 +319,32 @@ class GoogleSheetsRuntime {
       spreadsheetId, requestBody: { requests }
     })));
     this.operations = [];
-    const calls = this.httpOperations.splice(0).map(({ url, options }) => {
-      const headers = { ...(options.headers || {}) };
-      if (options.contentType) headers['Content-Type'] = options.contentType;
-      return fetch(url, { method: String(options.method || 'get').toUpperCase(), headers, body: options.payload }).then(async response => {
-        if (!response.ok) throw new Error(`HTTP ${response.status} from ${url}: ${await response.text()}`);
-      });
+  }
+
+  async flush({ fetchImpl = fetch } = {}) {
+    await this.flushSheets();
+    const calls = this.httpOperations.splice(0).map(async ({ url, options }) => {
+      try {
+        const headers = { ...(options.headers || {}) };
+        if (options.contentType) headers['Content-Type'] = options.contentType;
+        const response = await fetchImpl(url, {
+          method: String(options.method || 'get').toUpperCase(), headers,
+          body: options.payload, signal: AbortSignal.timeout(8000)
+        });
+        if (!response.ok && !(response.status === 409 && headers['X-Line-Retry-Key'])) {
+          throw new Error(`HTTP ${response.status} from ${url}: ${await response.text()}`);
+        }
+        options.onSuccess?.();
+      } catch (error) {
+        options.onFailure?.();
+        throw error;
+      }
     });
-    await Promise.all(calls);
+    const outcomes = await Promise.allSettled(calls);
+    await this.flushSheets();
+    const failures = outcomes.filter(outcome => outcome.status === 'rejected');
+    for (const failure of failures) console.error('Queued HTTP delivery failed; sent marker was not recorded:', failure.reason);
+    return { delivered: outcomes.length - failures.length, failed: failures.length };
   }
 }
 

@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { ids } = require('./config');
+const { retryUuid } = require('./registration-confirmations');
 
 const TASK_SHEET = '1151 對內教學官／考官安排';
 const BIND_SHEET = '用戶綁定';
@@ -10,6 +11,7 @@ const ATTENDANCE_SHEET = '教學考試點名和通過情況總表';
 const CERT_SHEET = '工作表1';
 const ATTENDANCE_GID = '653206596';
 const COMMAND = /^(點名$|對內近期任務$|對內任務\s)/;
+const pendingReminderKeys = new Set();
 
 const clean = value => String(value ?? '').trim();
 const norm = value => clean(value).replace(/[（(][^）)]*[）)]/g, '').replace(/\s+/g, '');
@@ -183,16 +185,19 @@ function reminderDue(now, due) {
   return Boolean(due && now >= due && dateKey(now) === dateKey(due));
 }
 
-function queuePush(userId, text) {
+function queuePush(userId, text, key, onSuccess) {
+  pendingReminderKeys.add(key);
   const message = reply(text, [
     { label: '📋 開啟點名表', uri: attendanceUrl() },
     { label: '查看近期任務', text: '對內近期任務' }
   ]);
   UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
-    method: 'post', headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}` },
+    method: 'post', headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`, 'X-Line-Retry-Key': retryUuid(key) },
     contentType: 'application/json', payload: JSON.stringify({
       to: userId, messages: [{ type: 'text', text: message.text, quickReply: message.quickReply }]
-    }), muteHttpExceptions: true
+    }), muteHttpExceptions: true,
+    onSuccess: () => { pendingReminderKeys.delete(key); onSuccess(); },
+    onFailure: () => pendingReminderKeys.delete(key)
   });
 }
 
@@ -223,9 +228,9 @@ function sendInternalReminders(now = new Date()) {
     ];
     for (const reminder of reminders) {
       const key = `${reminder.type}:${task.id}:${dateKey(reminder.due)}`;
-      if (sent.has(key) || !reminderDue(now, reminder.due)) continue;
-      queuePush(userId, `⏰ ${reminder.intro}\n\n${taskText(task)}`);
-      log.appendRow([reminder.type, key, task.id, task.examiner, userId, now, task.equipment]);
+      if (sent.has(key) || pendingReminderKeys.has(key) || !reminderDue(now, reminder.due)) continue;
+      queuePush(userId, `⏰ ${reminder.intro}\n\n${taskText(task)}`, key,
+        () => log.appendRow([reminder.type, key, task.id, task.examiner, userId, now, task.equipment]));
       sent.add(key); count++;
     }
   }
