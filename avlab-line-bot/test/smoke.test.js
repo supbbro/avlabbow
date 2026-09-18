@@ -427,6 +427,74 @@ test('retest preserves the passed written result and only asks for the practical
   assert.equal(retestRow[18], '可退保證金');
 });
 
+test('examiner can correct attendance and both exam parts without another retest push', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務');
+  const students = resultBook.getSheetByName('任務學生');
+  const attendance = resultBook.getSheetByName('LINE點名紀錄');
+  const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
+  tasks.appendRow(['T-CORRECT','1151','考試',new Date('2026-09-25'),'12:00','13:00','X160','401','測試者','','G1','點名中',true,true,'','','','']);
+  students.appendRow(['T-CORRECT','S-CORRECT','更正測試生','CORRECT001',1,'未點名','未記錄','']);
+  externalTeaching.handleCommand('點名狀態 T-CORRECT S-CORRECT 到場', context);
+  externalTeaching.handleCommand('簡答登記 T-CORRECT S-CORRECT 通過', context);
+  externalTeaching.handleCommand('上機登記 T-CORRECT S-CORRECT 通過', context);
+  externalTeaching.handleCommand('完成點名 T-CORRECT', context);
+  const beforePushes = runtime.httpOperations.length;
+  const edit = externalTeaching.handleCommand('修改出席 T-CORRECT S-CORRECT', context);
+  const labels = edit.quickReply.items.map(item => item.action.label);
+  assert.equal(labels.includes('改為缺席'), true);
+  assert.equal(labels.includes('簡答改未過'), true);
+  assert.equal(labels.includes('上機改未過'), true);
+  assert.doesNotMatch(edit.text, /請假/);
+
+  externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 未通過', context);
+  let record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
+  assert.deepEqual(record.slice(10, 13), ['通過', '未通過', '僅簡答題通過']);
+  assert.equal(record[18], '不可退保證金');
+
+  const shortFailed = externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT short 未通過', context);
+  record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
+  assert.deepEqual(record.slice(10, 13), ['未通過', '未記錄', '簡答題未通過']);
+  assert.equal(shortFailed.quickReply.items.some(item => item.action.label.startsWith('上機改')), false);
+  assert.match(externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 通過', context).text, /不能更正上機結果/);
+  assert.equal(runtime.httpOperations.length, beforePushes);
+
+  externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT short 通過', context);
+  assert.equal(tasks.getDataRange().getValues().find(row => row[0] === 'T-CORRECT')[11], '點名中');
+  externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 通過', context);
+  record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
+  assert.equal(record[18], '可退保證金');
+
+  externalTeaching.handleCommand('更正點名 T-CORRECT S-CORRECT 缺席', context);
+  record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
+  assert.deepEqual(record.slice(9, 13), ['缺席', '不適用', '不適用', '不適用']);
+  externalTeaching.handleCommand('更正點名 T-CORRECT S-CORRECT 到場', context);
+  assert.equal(students.getDataRange().getValues().find(row => row[0] === 'T-CORRECT')[6], '未記錄');
+
+  students.appendRow(['T-CORRECT','S-TIMED-OUT','逾時更正生','CORRECT002',2,'取消資格','不適用','']);
+  attendance.appendRow(['T-CORRECT:S-TIMED-OUT','T-CORRECT',new Date('2026-09-25'),'12:00','考試','X160','S-TIMED-OUT','逾時更正生','CORRECT002','取消資格','不適用','不適用','不適用','系統自動判定','SYSTEM',new Date()]);
+  assert.match(externalTeaching.handleCommand('查看點名結果 T-CORRECT', context).text, /逾時更正生：取消資格/);
+  const timedOut = externalTeaching.handleCommand('查看考生 T-CORRECT S-TIMED-OUT', context);
+  assert.equal(timedOut.quickReply.items.some(item => item.action.label === '修改紀錄'), true);
+  externalTeaching.handleCommand('更正點名 T-CORRECT S-TIMED-OUT 到場', context);
+  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-TIMED-OUT')[5], '到場');
+
+  students.appendRow(['T-CORRECT','S-UNPAID','未繳測試生','CORRECT003',3,'取消資格','不適用','']);
+  attendance.appendRow(['T-CORRECT:S-UNPAID','T-CORRECT',new Date('2026-09-25'),'12:00','考試','X160','S-UNPAID','未繳測試生','CORRECT003','取消資格','不適用','不適用','不適用','保證金未繳','SYSTEM',new Date()]);
+  assert.match(externalTeaching.handleCommand('到場判定 T-CORRECT S-UNPAID', context).text, /已取消資格/);
+  assert.match(externalTeaching.handleCommand('點名狀態 T-CORRECT S-UNPAID 到場', context).text, /已取消資格/);
+  assert.match(externalTeaching.handleCommand('更正點名 T-CORRECT S-UNPAID 到場', context).text, /請先完成對帳/);
+  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-UNPAID')[5], '取消資格');
+
+  tasks.appendRow(['T-TEACH-CORRECT','1151','教學',new Date('2026-09-25'),'13:00','14:00','基礎配件','401','測試者','','G1','點名中',true,true,'','','','']);
+  students.appendRow(['T-TEACH-CORRECT','S-TEACH-CORRECT','教學更正生','CORRECT004',1,'到場','不適用','']);
+  const teachingEdit = externalTeaching.handleCommand('修改紀錄 T-TEACH-CORRECT S-TEACH-CORRECT', context);
+  assert.equal(teachingEdit.quickReply.items.some(item => item.action.label === '改為遲到'), true);
+  assert.equal(teachingEdit.quickReply.items.some(item => item.action.label.startsWith('簡答改')), false);
+  externalTeaching.handleCommand('更正點名 T-TEACH-CORRECT S-TEACH-CORRECT 遲到', context);
+  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-TEACH-CORRECT')[5], '遲到');
+});
+
 test('arrival grace rules are five minutes for exams and fifteen minutes for teaching', () => {
   const date = new Date('2026-09-02T00:00:00+08:00');
   const student = { scheduledStart: '12:00' };
