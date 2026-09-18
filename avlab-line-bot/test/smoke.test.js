@@ -315,6 +315,13 @@ test('my task query includes internal and external assignments', () => {
   assert.match(mine.text, /\[對內\].*導播台/);
   assert.match(mine.text, /\[對外\].*基礎配件課程/);
   assert.match(mine.text, /任務已過期/);
+  assert.equal(mine.quickReply.items.some(item => item.action.label === '📋 對內點名表'), true);
+
+  const upcoming = new Date(); upcoming.setDate(upcoming.getDate() + 2);
+  tasks.appendRow(['EXT-NAME-UPCOMING','1151','考試',upcoming,'18:00','19:00','200W Par','417','黃忻妤','','','已排定']);
+  runtime.cache.remove('spam_U-COMBINED_我的任務');
+  const reopened = bot.getReply('我的任務', 'U-COMBINED');
+  assert.equal(reopened.quickReply.items.some(item => item.action.text === '開始點名 EXT-NAME-UPCOMING'), true);
 
   for (const command of ['個人點名統計', '代班查詢', '認證', '考試結果', '認證 其他人']) {
     const personal = bot.getReply(command, 'U-COMBINED');
@@ -617,11 +624,12 @@ test('one-hour reminder privately pushes the roster to the examiner', () => {
     assert.match(push.messages[0].text, /黃本簽到並註記時間/);
     assert.match(push.messages[0].text, /領取及核對保證金/);
     assert.match(push.messages[0].text, /簽出機單/);
-    assert.match(push.messages[0].text, /開啟名字卡.*逐位點名及評分/);
+    assert.match(push.messages[0].text, /開啟點名卡.*逐位點名及評分/);
+    assert.match(push.messages[0].text, /可現在開啟點名卡，也可稍後從「我的任務／對外任務」重新開啟/);
     assert.match(push.messages[0].text, /考制度 2 題＋器材 3 題，最多錯 1 題/);
     assert.match(push.messages[0].text, /上機考：最多錯 3 題/);
     assert.doesNotMatch(push.messages[0].text, /保證金單簽名|黃本簽退/);
-    assert.equal(push.messages[0].quickReply.items[0].action.label, '開啟名字卡');
+    assert.equal(push.messages[0].quickReply.items[0].action.label, '開啟點名卡');
     assert.equal(push.messages[0].quickReply.items[0].action.text, '開始點名 T-REMIND');
   }
 });
@@ -808,7 +816,7 @@ test('a bound student receives the teaching reminder with the fifteen-minute rul
   assert.ok(examinerPush);
   assert.match(examinerPush.messages[0].text, /教學前先做/);
   assert.match(examinerPush.messages[0].text, /黃本簽到並註記時間，簽出機單/);
-  assert.match(examinerPush.messages[0].text, /開啟名字卡.*逐位點名/);
+  assert.match(examinerPush.messages[0].text, /開啟點名卡.*逐位點名/);
   assert.doesNotMatch(examinerPush.messages[0].text, /黃本簽退/);
   assert.doesNotMatch(examinerPush.messages[0].text, /核對保證金/);
 });

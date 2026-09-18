@@ -108,10 +108,10 @@ async function handleLineEvent(event) {
       const originalText = event.message.text.trim();
       const isGroupChat = ['group', 'room'].includes(sourceType);
       if (isGroupChat && !teachingSchedule.isCommand(originalText)) return;
-      // A current attendance task stays reachable even after unrelated chat
-      // messages replace LINE's quick replies or reset the generic nav stack.
+      // Back resumes an interrupted attendance flow. Home remains a real exit,
+      // so examiners can reopen the card later from their task list.
       let activeAttendance = null;
-      if (!isGroupChat && ['主選單', '回上一頁'].includes(originalText)) {
+      if (!isGroupChat && originalText === '回上一頁') {
         await runtime.loadOnly([ids.externalResults, ids.master], { maxAgeMs: 30_000 });
         activeAttendance = externalTeaching.resumeActiveAttendance(context);
       }

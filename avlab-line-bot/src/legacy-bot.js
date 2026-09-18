@@ -398,7 +398,7 @@ function getTasksFromSheet(n){
         summary:sum,
         description:'級別：'+r[COL_TASK_LEVEL]+'\n項目：'+r[COL_TASK_ITEM]+'\n地點：'+r[COL_TASK_LOCATION],
         start:new Date(dt.setHours(18,0,0,0)),
-        end:new Date(dt.setHours(21,0,0,0))
+        end:new Date(dt.setHours(21,0,0,0)),source:'對內'
       };
     });
     return tasks;
@@ -440,7 +440,7 @@ function getExternalTasksForName(n){
       return{
         summary:summary,
         description:'任務ID：'+r[0]+'\n階段：'+phase+'\n項目：'+r[6]+'\n地點：'+(r[7]||'未填'),
-        start:start,end:end,taskId:String(r[0]),source:'對外'
+        start:start,end:end,taskId:String(r[0]),equipment:String(r[6]||'任務'),status:String(r[11]||''),source:'對外'
       };
     }).filter(Boolean);
   }catch(e){return[];}
@@ -462,15 +462,19 @@ function showTasksForName(name) {
   if (!t.length) return { text: '找不到 ' + name + ' 的任務記錄', quickReply: bA(), notFound: true };
   var txt=(level==='見習'?apprenticeText+'\n\n':'')+'【' + name + ' 的對內＋對外教學官／考官任務】\n\n',q=[],td=new Date();
   var today=new Date(td);today.setHours(0,0,0,0);
+  if (t.some(tk => tk.source === '對內')) q.push({ type: 'action', action: { type: 'uri', label: '📋 對內點名表', uri: 'https://docs.google.com/spreadsheets/d/' + INTERNAL_ATTENDANCE_SHEET_ID + '/edit#gid=653206596' } });
+  t.filter(tk => tk.source === '對外' && tk.status !== '已完成' && tk.start >= today).slice(0, 9).forEach(tk => {
+    q.push({ type: 'action', action: { type: 'message', label: '📝 點名卡 ' + tk.equipment.slice(0, 10), text: '開始點名 ' + tk.taskId } });
+  });
   t.forEach((tk, i) => {
     txt += tk.summary + '\n';
     var taskDay=new Date(tk.start);taskDay.setHours(0,0,0,0);
     var df=Math.round((taskDay-today)/86400000);
     txt += df > 0 ? '   ⏳ 距離任務還有 ' + df + ' 天\n' : df === 0 ? '   ⚠️ 就是今天！好強！\n' : '   ⌛ 任務已過期\n';
-    q.push({ type: 'action', action: { type: 'uri', label: '📅 加入任務 ' + (i + 1), uri: gC(tk.summary, tk.start, tk.end, tk.description, '影音實驗室') } });
+    if (q.length < 11) q.push({ type: 'action', action: { type: 'uri', label: '📅 加入任務 ' + (i + 1), uri: gC(tk.summary, tk.start, tk.end, tk.description, '影音實驗室') } });
     txt += '\n';
   });
-  txt += '💡 將任務手動加入手機行事曆！怎這強！';
+  txt += '💡 對外點名卡可在任務時間到時重新開啟；對內點名請開啟試算表。';
   q.push({ type: 'action', action: { type: 'message', label: '🔙 回上一頁', text: '回上一頁' } }, { type: 'action', action: { type: 'message', label: '🏠 回首頁', text: '主選單' } });
   return { text: txt, quickReply: { items: q } };
 }

@@ -654,7 +654,7 @@ function listTasks(context, todayOnly) {
   if (!tasks.length) return reply(todayOnly ? '今天沒有待執行的對外任務。' : '未來七天沒有待執行的對外任務。', externalNav());
   const body = tasks.map(task => `【${task.id}】\n${taskText(task)}`).join('\n\n');
   return reply(`【${context.sourceType === 'user' ? '我的' : ''}${todayOnly ? '今日' : '近期'}對外任務】\n\n${body}`,
-    externalNav(tasks.map(task => ({ label: `點名 ${String(task.equipment).slice(0, 12)}`, postback: `開始點名 ${task.id}` }))));
+    externalNav(tasks.map(task => ({ label: `點名卡 ${String(task.equipment).slice(0, 11)}`, postback: `開始點名 ${task.id}` }))));
 }
 
 function certificationStatusUrl() {
@@ -671,7 +671,7 @@ function showTask(taskId) {
   const stats = { 未點名: 0, 到場: 0, 遲到: 0, 請假: 0, 缺席: 0, 取消資格: 0 };
   students.forEach(student => { stats[student.attendance] = (stats[student.attendance] || 0) + 1; });
   return reply(`【任務 ${task.id}】\n${taskText(task)}\n👥 學生 ${students.length} 人\n未點名 ${stats.未點名}｜到場 ${stats.到場}｜遲到 ${stats.遲到}｜缺席 ${stats.缺席}${stats.請假 ? `｜歷史請假 ${stats.請假}` : ''}${isExam(task) ? `｜取消資格 ${stats.取消資格}` : ''}`,
-    externalNav([{ label: '開始／繼續點名', postback: `開始點名 ${task.id}` }], '近期任務', '回近期任務'));
+    externalNav([{ label: '開啟／繼續點名卡', postback: `開始點名 ${task.id}` }], '近期任務', '回近期任務'));
 }
 
 function attendanceHome(task) {
@@ -1371,13 +1371,13 @@ function examinerReminderText(task, roster = studentRosterText(task)) {
   const checklist = isExam(task) ? [
     '【考試前先做】',
     '• 到場在黃本簽到並註記時間，領取及核對保證金，簽出機單。',
-    '• 到考試時間後，按下方「開啟名字卡」逐位點名及評分。'
+    '• 到考試時間後，開啟點名卡逐位點名及評分。'
   ] : [
     '【教學前先做】',
     '• 到場在黃本簽到並註記時間，簽出機單。',
-    '• 到教學時間後，按下方「開啟名字卡」逐位點名。'
+    '• 到教學時間後，開啟點名卡逐位點名。'
   ];
-  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}${isExam(task) ? `\n\n${EXAM_PASSING_RULES}` : ''}`;
+  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n可現在開啟點名卡，也可稍後從「我的任務／對外任務」重新開啟；已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}` : ''}`;
 }
 
 function studentReminderText(task, student) {
@@ -1613,8 +1613,8 @@ function sendExternalReminders(now = new Date()) {
     const reminderDue = new Date(start.getTime() - REMINDER_LEAD_MINUTES * 60000);
 
     const buttons = [
-      { label: '開啟名字卡', text: `開始點名 ${task.id}` },
-      { label: '查看任務', text: `查看任務 ${task.id}` }
+      { label: '開啟點名卡', text: `開始點名 ${task.id}` },
+      { label: '稍後看我的任務', text: '我的任務' }
     ];
     const roster = studentRosterText(task);
     const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
