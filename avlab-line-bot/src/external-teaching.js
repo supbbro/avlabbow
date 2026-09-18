@@ -648,7 +648,7 @@ function certificationStatusUrl() {
 function showTask(taskId) {
   const task = findTask(taskId);
   if (!task) return reply(`找不到任務 ${taskId}`);
-  const students = studentsFor(taskId);
+  const students = studentsFor(taskId, { includeDisqualified: true });
   const stats = { 未點名: 0, 到場: 0, 遲到: 0, 請假: 0, 缺席: 0, 取消資格: 0 };
   students.forEach(student => { stats[student.attendance] = (stats[student.attendance] || 0) + 1; });
   return reply(`【任務 ${task.id}】\n${taskText(task)}\n👥 學生 ${students.length} 人\n未點名 ${stats.未點名}｜到場 ${stats.到場}｜遲到 ${stats.遲到}｜缺席 ${stats.缺席}${stats.請假 ? `｜歷史請假 ${stats.請假}` : ''}${isExam(task) ? `｜取消資格 ${stats.取消資格}` : ''}`,
@@ -663,7 +663,7 @@ function updateStudent(student, attendance, result) {
 }
 
 function studentPosition(task, student) {
-  const students = studentsFor(task.id);
+  const students = studentsFor(task.id, { includeDisqualified: true });
   return { position: Math.max(0, students.findIndex(item => item.id === student.id)) + 1, total: students.length };
 }
 
@@ -695,7 +695,7 @@ function attendancePrompt(task, student) {
 }
 
 function candidateMenu(task, page = 1, notice = '') {
-  const students = studentsFor(task.id);
+  const students = studentsFor(task.id, { includeDisqualified: true });
   const pageSize = 10, totalPages = Math.max(1, Math.ceil(students.length / pageSize));
   const currentPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
   const visible = students.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -703,7 +703,9 @@ function candidateMenu(task, page = 1, notice = '') {
   const columns = visible.map((student, index) => ({
     title: String(student.name || '未填姓名').slice(0, 40),
     text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}${isExam(task) ? '｜先簽考生名條' : ''}`.slice(0, 60),
-    actions: isExam(task) ? [
+    actions: student.attendance === '取消資格' ? [
+      postbackAction('查看／修正', `查看考生 ${task.id} ${student.id}`)
+    ] : isExam(task) ? [
       postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
       postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
     ] : [
@@ -990,7 +992,7 @@ function startAttendance(taskId, context) {
   if (!task) return reply(`找不到任務 ${taskId}`);
   const permission = canOperate(task, context);
   if (!permission.ok) return reply(permission.message);
-  if (!studentsFor(taskId).length) return reply('這個任務尚未在「任務學生」分頁安排學生。');
+  if (!studentsFor(taskId, { includeDisqualified: true }).length) return reply('這個任務尚未在「任務學生」分頁安排學生。');
   updateTaskStatus(task, '點名中');
   return candidateMenu(task);
 }

@@ -493,6 +493,12 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.match(externalTeaching.handleCommand('點名狀態 T-CORRECT S-UNPAID 到場', context).text, /已取消資格/);
   assert.match(externalTeaching.handleCommand('更正點名 T-CORRECT S-UNPAID 到場', context).text, /請先完成對帳/);
   assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-UNPAID')[5], '取消資格');
+  const fullRoster = externalTeaching.handleCommand('考生名單 T-CORRECT', context);
+  assert.match(fullRoster.text, /逾時更正生｜到場/);
+  assert.match(fullRoster.text, /未繳測試生｜取消資格/);
+  const unpaidCard = fullRoster.lineMessage.template.columns.find(column => column.title === '未繳測試生');
+  assert.deepEqual(unpaidCard.actions.map(action => action.label), ['查看／修正']);
+  assert.equal(externalTeaching.handleCommand('查看任務 T-CORRECT', context).text.includes('取消資格 1'), true);
 
   tasks.appendRow(['T-TEACH-CORRECT','1151','教學',new Date('2026-09-25'),'13:00','14:00','基礎配件','401','測試者','','G1','點名中',true,true,'','','','']);
   students.appendRow(['T-TEACH-CORRECT','S-TEACH-CORRECT','教學更正生','CORRECT004',1,'到場','不適用','']);
