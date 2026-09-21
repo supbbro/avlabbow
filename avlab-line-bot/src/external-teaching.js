@@ -760,7 +760,8 @@ function candidateMenu(task, page = 1, notice = '') {
     title: String(student.name || '未填姓名').slice(0, 40),
     text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}${isExam(task) ? '｜先簽考生名條' : ''}`.slice(0, 60),
     actions: student.attendance === '取消資格' ? [
-      postbackAction('查看／修正', `查看考生 ${task.id} ${student.id}`)
+      postbackAction('查看狀態', `查看考生 ${task.id} ${student.id}`),
+      postbackAction('修改狀態', `修改紀錄 ${task.id} ${student.id}`)
     ] : isExam(task) ? [
       postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
       postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
