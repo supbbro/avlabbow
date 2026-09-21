@@ -457,24 +457,23 @@ function showTasksForName(name) {
                '📚 11/6 期末教學\n\n' +
                '📝 12/4 期末檢定\n\n' +
                '⚠️ 考官與考生請留意時間，無法出席請依規定完成請假程序喔！';
-  var t = getTasksFromSheet(name).concat(getExternalTasksForName(name)).sort((a,b)=>a.start-b.start);
+  var td=new Date();
+  var t = getTasksFromSheet(name).concat(getExternalTasksForName(name)).filter(function(tk){
+    return tk.end>td&&tk.status!=='已完成'&&tk.status!=='已取消';
+  }).sort((a,b)=>a.start-b.start);
   if(level==='見習'&&!t.length)return{text:apprenticeText,quickReply:bA()};
   if (!t.length) return { text: '找不到 ' + name + ' 的任務記錄', quickReply: bA(), notFound: true };
-  var txt=(level==='見習'?apprenticeText+'\n\n':'')+'【' + name + ' 的對內＋對外教學官／考官任務】\n\n',q=[],td=new Date();
+  var txt=(level==='見習'?apprenticeText+'\n\n':'')+'【' + name + ' 的對內＋對外教學官／考官任務】\n\n',q=[];
   var today=new Date(td);today.setHours(0,0,0,0);
   if (t.some(tk => tk.source === '對內')) q.push({ type: 'action', action: { type: 'uri', label: '📋 對內點名表', uri: 'https://docs.google.com/spreadsheets/d/' + INTERNAL_ATTENDANCE_SHEET_ID + '/edit#gid=653206596' } });
-  var completedCutoff=new Date(today);completedCutoff.setDate(completedCutoff.getDate()-14);
-  t.filter(tk => tk.source === '對外' && tk.status === '已完成' && tk.start >= completedCutoff && tk.start < td).sort((a,b)=>b.start-a.start).slice(0,3).forEach(tk => {
-    if(q.length<10)q.push({ type:'action', action:{ type:'postback', label:'✏️ 修改 '+tk.equipment.slice(0,11), data:'查看點名結果 '+tk.taskId } });
-  });
-  t.filter(tk => tk.source === '對外' && tk.status !== '已完成' && tk.start >= today).slice(0, 9).forEach(tk => {
+  t.filter(tk => tk.source === '對外').slice(0, 9).forEach(tk => {
     if(q.length<10)q.push({ type: 'action', action: { type: 'message', label: '📝 點名卡 ' + tk.equipment.slice(0, 10), text: '開始點名 ' + tk.taskId } });
   });
   t.forEach((tk, i) => {
     txt += tk.summary + '\n';
     var taskDay=new Date(tk.start);taskDay.setHours(0,0,0,0);
     var df=Math.round((taskDay-today)/86400000);
-    txt += df > 0 ? '   ⏳ 距離任務還有 ' + df + ' 天\n' : df === 0 ? '   ⚠️ 就是今天！好強！\n' : '   ⌛ 任務已過期\n';
+    txt += df > 0 ? '   ⏳ 距離任務還有 ' + df + ' 天\n' : '   ⚠️ 就是今天！好強！\n';
     if (q.length < 11) q.push({ type: 'action', action: { type: 'uri', label: '📅 加入任務 ' + (i + 1), uri: gC(tk.summary, tk.start, tk.end, tk.description, '影音實驗室') } });
     txt += '\n';
   });

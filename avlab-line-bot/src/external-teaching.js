@@ -643,12 +643,15 @@ function listTasks(context, todayOnly) {
   if (context.sourceType === 'user' && !personalName) return reply('請先輸入「我是 姓名」完成綁定，才能查看個人的近期對外任務。');
   const parentText = context.sourceType === 'user' ? '中心助理' : '主選單';
   const parentLabel = context.sourceType === 'user' ? '回助理首頁' : '回首頁';
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const now = new Date();
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
   const end = new Date(today); end.setDate(end.getDate() + (todayOnly ? 1 : 8));
   const tasks = allTasks().filter(task => {
     const date = task.date instanceof Date ? new Date(task.date) : new Date(task.date);
     if (Number.isNaN(date.getTime()) || ['已完成', '已取消'].includes(task.status)) return false;
     date.setHours(0, 0, 0, 0);
+    const taskEnd = parseTaskEnd(task);
+    if (!taskEnd || taskEnd <= now) return false;
     const belongsToContext = context.sourceType === 'user'
       ? norm(task.examiner) === norm(personalName)
       : (!task.groupId || task.groupId === context.chatId);
@@ -971,8 +974,19 @@ function showStudent(taskId, studentId, context) {
   ], `查看任務 ${task.id}`, '回任務'));
 }
 
+function attendanceCorrectionActions(task, student) {
+  const attendanceOptions = student.attendance === '到場' ? ['缺席', '遲到']
+    : student.attendance === '遲到' ? ['到場', '缺席']
+      : student.attendance === '缺席' ? ['到場', '遲到']
+        : ['到場', '遲到', '缺席'];
+  return attendanceOptions.map(status => ({
+    label: `點名改為${status}`,
+    postback: `更正點名 ${task.id} ${student.id} ${status}`
+  }));
+}
+
 function editRecordPrompt(task, student) {
-  const actions = [{ label: '修正點名', postback: `修改步驟 ${task.id} ${student.id} attendance` }];
+  const actions = attendanceCorrectionActions(task, student);
   const [shortAnswer, practical] = resultParts(student.result);
   if (isExam(task) && ['到場', '遲到'].includes(student.attendance)) {
     if (['通過', '未通過'].includes(shortAnswer)) {
@@ -985,7 +999,7 @@ function editRecordPrompt(task, student) {
     }
   }
   const grades = isExam(task) ? `\n本次簡答：${shortAnswer}｜本次上機：${practical}` : '';
-  return reply(`【修改 ${student.name} 的紀錄】\n${task.equipment}\n目前點名：${student.attendance}${grades}\n\n請選擇要修正的項目；每次只修改一項。${isExam(task) ? '\n考試結果按鈕會直接顯示目前結果的相反，點下後立即更新。\n簡答題改為未通過時，上機結果會清除。' : ''}`,
+  return reply(`【修改 ${student.name} 的紀錄】\n${task.equipment}\n目前點名：${student.attendance}${grades}\n\n請選擇要修正的項目；每次只修改一項。\n點名修正會直接套用所選狀態，不會依現在時間重新判定。${isExam(task) ? '\n考試結果按鈕會直接顯示目前結果的相反，點下後立即更新。\n簡答題改為未通過時，上機結果會清除。' : ''}`,
     externalNav([...actions, { label: '回這位考生', postback: `查看考生 ${task.id} ${student.id}` }], `查看任務 ${task.id}`, '回任務'));
 }
 
@@ -995,17 +1009,13 @@ function editStepPrompt(task, student, step) {
   if (step === 'short' && !['通過', '未通過'].includes(shortAnswer)) return reply('簡答題尚未評分，請先完成簡答題登記，之後才能修正。');
   if (step === 'practical' && !['通過', '未通過'].includes(practical)) return reply('上機考尚未評分，請先完成上機考登記，之後才能修正。');
   if (step === 'practical' && !examProgress(task, student).shortPassed) return reply('簡答題尚未通過，不能修正上機結果。');
-  const actions = step === 'attendance' ? [
-    { label: `已到（${automaticArrivalStatus(task, student)}）`, postback: `更正點名 ${task.id} ${student.id} 到場` },
-    { label: '缺席', postback: `更正點名 ${task.id} ${student.id} 缺席` },
-    ...(automaticArrivalStatus(task, student) === '到場' ? [{ label: '未點名', postback: `更正點名 ${task.id} ${student.id} 未點名` }] : [])
-  ] : [
+  const actions = step === 'attendance' ? attendanceCorrectionActions(task, student) : [
     { label: '通過', postback: `更正評分 ${task.id} ${student.id} ${step} 通過` },
     { label: '未通過', postback: `更正評分 ${task.id} ${student.id} ${step} 未通過` }
   ];
   const label = { attendance: '點名', short: '簡答題', practical: '上機考' }[step];
   const value = step === 'attendance' ? student.attendance : resultParts(student.result)[step === 'short' ? 0 : 1];
-  return reply(`【${student.name}｜修正${label}】\n目前：${value}\n\n只會修改${label}；完成後返回學生卡片。${step === 'attendance' ? `\n按「已到」會依現在時間判定${isExam(task) ? '是否取消資格' : '是否遲到'}。` : ''}`,
+  return reply(`【${student.name}｜修正${label}】\n目前：${value}\n\n只會修改${label}；完成後返回學生卡片。${step === 'attendance' ? '\n點名修正會直接套用所選狀態，不會依現在時間重新判定。' : ''}`,
     externalNav([...actions, { label: '回修改選單', postback: `修改紀錄 ${task.id} ${student.id}` }], `查看考生 ${task.id} ${student.id}`, '回這位考生'));
 }
 
@@ -1025,7 +1035,6 @@ function correctAttendance(taskId, studentId, status, context) {
   const task = findTask(taskId), student = findStudent(taskId, studentId);
   if (!task || !student) return reply('找不到指定的任務或學生，請重新開啟任務。');
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
-  if (status === '到場' || status === '遲到') status = automaticArrivalStatus(task, student);
   if (isExam(task) && status === '未點名' && automaticArrivalStatus(task, student) === '取消資格') return reply('已超過個別考試時間 5 分鐘，不能改回未點名；若原點名有誤，請更正為到場或缺席。');
   if (student.attendance === '取消資格' && task.phase === '考試') {
     const record = sheet(SHEETS.attendance)?.getDataRange().getValues().find(row => row[0] === `${task.id}:${student.id}`);
@@ -1254,6 +1263,14 @@ function parseTaskStart(task) {
   const calendarDate = Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   const isoTime = `${String(time.hour).padStart(2, '0')}:${String(time.minute).padStart(2, '0')}:00`;
   return new Date(`${calendarDate}T${isoTime}+08:00`);
+}
+
+function parseTaskEnd(task) {
+  const start = parseTaskStart(task);
+  if (!start) return null;
+  const end = parseTaskStart({ ...task, start: task.end });
+  if (!end) return new Date(start.getTime() + 60 * 60 * 1000);
+  return end <= start ? new Date(end.getTime() + 24 * 60 * 60 * 1000) : end;
 }
 function enabledFlag(value, defaultValue = true) {
   if (value === '' || value == null) return defaultValue;

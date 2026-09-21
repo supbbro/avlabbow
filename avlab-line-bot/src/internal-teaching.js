@@ -129,11 +129,13 @@ function listRecent(context) {
   if (!name) return reply('請先輸入「我是 姓名」完成綁定。', [
     { label: '🔙 回上一頁', text: '回上一頁' }, { label: '🏠 回首頁', text: '主選單' }
   ]);
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const now = new Date();
+  const today = new Date(now); today.setHours(0, 0, 0, 0);
   const end = new Date(today); end.setDate(end.getDate() + 14);
   const tasks = allTasks().filter(task => {
     const date = new Date(task.date); date.setHours(0, 0, 0, 0);
-    return norm(task.examiner) === norm(name) && date >= today && date <= end;
+    const taskEnd = new Date(task.date); taskEnd.setHours(21, 0, 0, 0);
+    return norm(task.examiner) === norm(name) && taskEnd > now && date <= end;
   }).sort((a, b) => a.date - b.date);
   const body = tasks.length ? tasks.map(taskText).join('\n\n') : '未來 14 天沒有你的對內教學／檢定任務。';
   return sheetLinkReply(`【我的近期對內任務】\n\n${body}\n\n其他時間也可按下方按鈕開啟點名表。`);

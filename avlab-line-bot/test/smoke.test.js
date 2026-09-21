@@ -322,10 +322,12 @@ test('my task query includes internal and external assignments', () => {
   const resultBook = runtime.openById(ids.externalResults);
   const tasks = resultBook.getSheetByName('對外任務') || resultBook.insertSheet('對外任務');
   if (!tasks.getLastRow()) tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','教學官／考官','考官LINE User ID','LINE群組ID','任務狀態']);
-  tasks.appendRow(['EXT-NAME-QUERY','1151','教學',new Date('2026-03-17'),'12:00','13:00','基礎配件課程','大勇401','黃忻妤','','','已排定']);
+  const futureExternal = new Date(); futureExternal.setDate(futureExternal.getDate() + 3);
+  tasks.appendRow(['EXT-NAME-QUERY','1151','教學',futureExternal,'12:00','13:00','基礎配件課程','大勇401','黃忻妤','','','已排定']);
   const internalTasks = runtime.openById(ids.task).getSheetByName('1151 對內教學官／考官安排') || runtime.openById(ids.task).insertSheet('1151 對內教學官／考官安排');
   if (!internalTasks.getLastRow()) internalTasks.appendRow(['日期','階段','級別','項目','教學官／考官','地點']);
-  internalTasks.appendRow([new Date('2026-03-18'),'期中教學','二級','導播台','黃忻妤','新棚']);
+  const futureInternal = new Date(); futureInternal.setDate(futureInternal.getDate() + 4);
+  internalTasks.appendRow([futureInternal,'期中教學','二級','導播台','黃忻妤','新棚']);
   const binds = runtime.openById(ids.master).getSheetByName('用戶綁定') || runtime.openById(ids.master).insertSheet('用戶綁定');
   if (!binds.getLastRow()) binds.appendRow(['LINE User ID','姓名','綁定時間','學號']);
   binds.appendRow(['U-COMBINED','黃忻妤','','112703005']);
@@ -333,19 +335,28 @@ test('my task query includes internal and external assignments', () => {
   assert.match(mine.text, /黃忻妤 的對內＋對外教學官／考官任務/);
   assert.match(mine.text, /\[對內\].*導播台/);
   assert.match(mine.text, /\[對外\].*基礎配件課程/);
-  assert.match(mine.text, /任務已過期/);
+  assert.doesNotMatch(mine.text, /任務已過期/);
   assert.equal(mine.quickReply.items.some(item => item.action.label === '📋 對內點名表'), true);
 
   const upcoming = new Date(); upcoming.setDate(upcoming.getDate() + 2);
   tasks.appendRow(['EXT-NAME-UPCOMING','1151','考試',upcoming,'18:00','19:00','200W Par','417','黃忻妤','','','已排定']);
-  const recentlyCompleted = new Date(); recentlyCompleted.setDate(recentlyCompleted.getDate() - 1);
-  tasks.appendRow(['EXT-NAME-COMPLETED','1151','考試',recentlyCompleted,'18:00','19:00','H6','417','黃忻妤','','','已完成']);
+  const futureCompleted = new Date(); futureCompleted.setDate(futureCompleted.getDate() + 5);
+  tasks.appendRow(['EXT-NAME-COMPLETED','1151','考試',futureCompleted,'18:00','19:00','H6','417','黃忻妤','','','已完成']);
+  const expiredExternal = new Date(); expiredExternal.setDate(expiredExternal.getDate() - 1);
+  tasks.appendRow(['EXT-NAME-EXPIRED','1151','教學',expiredExternal,'18:00','19:00','過期對外器材','401','黃忻妤','','','已排定']);
+  const expiredInternal = new Date(); expiredInternal.setDate(expiredInternal.getDate() - 1);
+  internalTasks.appendRow([expiredInternal,'期中教學','二級','過期內部器材','黃忻妤','新棚']);
   runtime.cache.remove('spam_U-COMBINED_我的任務');
   const reopened = bot.getReply('我的任務', 'U-COMBINED');
   assert.equal(reopened.quickReply.items.some(item => item.action.text === '開始點名 EXT-NAME-UPCOMING'), true);
-  const completedAction = reopened.quickReply.items.find(item => item.action.data === '查看點名結果 EXT-NAME-COMPLETED');
-  assert.equal(completedAction.action.type, 'postback');
-  assert.match(completedAction.action.label, /修改/);
+  assert.equal(reopened.quickReply.items.some(item => item.action.data === '查看點名結果 EXT-NAME-COMPLETED'), false);
+  assert.doesNotMatch(reopened.text, /H6|過期對外器材|過期內部器材|任務已過期/);
+  const externalRecent = externalTeaching.handleCommand('近期任務', { sourceType: 'user', userId: 'U-COMBINED', chatId: 'U-COMBINED' }, { skipScheduleSync: true });
+  assert.match(externalRecent.text, /200W Par|基礎配件課程/);
+  assert.doesNotMatch(externalRecent.text, /H6|過期對外器材/);
+  const internalRecent = internalTeaching.handleCommand('對內近期任務', { sourceType: 'user', userId: 'U-COMBINED', chatId: 'U-COMBINED' });
+  assert.match(internalRecent.text, /導播台/);
+  assert.doesNotMatch(internalRecent.text, /過期內部器材/);
 
   for (const command of ['個人點名統計', '代班查詢', '認證', '考試結果', '認證 其他人']) {
     const personal = bot.getReply(command, 'U-COMBINED');
@@ -505,28 +516,31 @@ test('examiner can correct attendance and both exam parts without another retest
   students.appendRow(['T-CORRECT','S-CORRECT','更正測試生','CORRECT001',1,'未點名','未記錄','']);
   externalTeaching.handleCommand('點名狀態 T-CORRECT S-CORRECT 到場', context);
   const beforeShort = externalTeaching.handleCommand('修改紀錄 T-CORRECT S-CORRECT', context);
-  assert.deepEqual(beforeShort.quickReply.items.filter(item => item.action.label.startsWith('修正')).map(item => item.action.label), ['修正點名']);
+  assert.deepEqual(beforeShort.quickReply.items.slice(0, 2).map(item => item.action.label), ['點名改為缺席', '點名改為遲到']);
+  assert.equal(beforeShort.quickReply.items[0].action.data, '更正點名 T-CORRECT S-CORRECT 缺席');
   assert.match(externalTeaching.handleCommand('修改步驟 T-CORRECT S-CORRECT short', context).text, /簡答題尚未評分/);
   assert.match(externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT short 通過', context).text, /簡答題尚未評分/);
   externalTeaching.handleCommand('簡答登記 T-CORRECT S-CORRECT 通過', context);
   const beforePractical = externalTeaching.handleCommand('修改紀錄 T-CORRECT S-CORRECT', context);
-  assert.deepEqual(beforePractical.quickReply.items.slice(0, 2).map(item => item.action.label), ['修正點名', '簡答改為未通過']);
-  assert.equal(beforePractical.quickReply.items[1].action.data, '更正評分 T-CORRECT S-CORRECT short 未通過');
+  assert.deepEqual(beforePractical.quickReply.items.slice(0, 3).map(item => item.action.label), ['點名改為缺席', '點名改為遲到', '簡答改為未通過']);
+  assert.equal(beforePractical.quickReply.items[2].action.data, '更正評分 T-CORRECT S-CORRECT short 未通過');
   assert.match(externalTeaching.handleCommand('修改步驟 T-CORRECT S-CORRECT practical', context).text, /上機考尚未評分/);
   externalTeaching.handleCommand('上機登記 T-CORRECT S-CORRECT 通過', context);
   externalTeaching.handleCommand('完成點名 T-CORRECT', context);
   const beforePushes = runtime.httpOperations.length;
   const edit = externalTeaching.handleCommand('修改出席 T-CORRECT S-CORRECT', context);
   const labels = edit.quickReply.items.map(item => item.action.label);
-  assert.deepEqual(labels.slice(0, 3), ['修正點名', '簡答改為未通過', '上機改為未通過']);
-  assert.equal(edit.quickReply.items[1].action.data, '更正評分 T-CORRECT S-CORRECT short 未通過');
-  assert.equal(edit.quickReply.items[2].action.data, '更正評分 T-CORRECT S-CORRECT practical 未通過');
+  assert.deepEqual(labels.slice(0, 4), ['點名改為缺席', '點名改為遲到', '簡答改為未通過', '上機改為未通過']);
+  assert.equal(edit.quickReply.items[2].action.data, '更正評分 T-CORRECT S-CORRECT short 未通過');
+  assert.equal(edit.quickReply.items[3].action.data, '更正評分 T-CORRECT S-CORRECT practical 未通過');
   assert.match(edit.text, /直接顯示目前結果的相反/);
+  assert.match(edit.text, /不會依現在時間重新判定/);
   const shortStep = externalTeaching.handleCommand('修改步驟 T-CORRECT S-CORRECT short', context);
   assert.deepEqual(shortStep.quickReply.items.slice(0, 2).map(item => item.action.label), ['通過', '未通過']);
   assert.equal(shortStep.quickReply.items.some(item => item.action.label.includes('上機')), false);
   const attendanceStep = externalTeaching.handleCommand('修改步驟 T-CORRECT S-CORRECT attendance', context);
-  assert.equal(attendanceStep.quickReply.items.some(item => item.action.label === '缺席'), true);
+  assert.equal(attendanceStep.quickReply.items.some(item => item.action.label === '點名改為缺席'), true);
+  assert.equal(attendanceStep.quickReply.items.some(item => item.action.label === '點名改為遲到'), true);
   assert.equal(attendanceStep.quickReply.items.some(item => item.action.label.includes('簡答')), false);
   assert.doesNotMatch(edit.text, /請假/);
 
@@ -593,13 +607,15 @@ test('examiner can correct attendance and both exam parts without another retest
   tasks.appendRow(['T-TEACH-CORRECT','1151','教學',new Date('2026-09-25'),'13:00','14:00','基礎配件','401','測試者','','G1','點名中',true,true,'','','','']);
   students.appendRow(['T-TEACH-CORRECT','S-TEACH-CORRECT','教學更正生','CORRECT004',1,'到場','不適用','']);
   const teachingEdit = externalTeaching.handleCommand('修改紀錄 T-TEACH-CORRECT S-TEACH-CORRECT', context);
-  assert.equal(teachingEdit.quickReply.items.some(item => item.action.label === '修正點名'), true);
+  assert.equal(teachingEdit.quickReply.items.some(item => item.action.label === '點名改為缺席'), true);
+  assert.equal(teachingEdit.quickReply.items.some(item => item.action.label === '點名改為遲到'), true);
+  assert.equal(teachingEdit.quickReply.items.some(item => item.action.label === '修正點名'), false);
   assert.equal(teachingEdit.quickReply.items.some(item => item.action.label.includes('簡答')), false);
   externalTeaching.handleCommand('更正點名 T-TEACH-CORRECT S-TEACH-CORRECT 遲到', context);
-  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-TEACH-CORRECT')[5], '到場');
+  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-TEACH-CORRECT')[5], '遲到');
 });
 
-test('attendance correction uses click time and returns to the student card', () => {
+test('attendance correction applies the chosen status directly and returns to the student card', () => {
   const book = runtime.openById(ids.externalResults);
   const tasks = book.getSheetByName('對外任務');
   const students = book.getSheetByName('任務學生');
@@ -624,12 +640,13 @@ test('attendance correction uses click time and returns to the student card', ()
   assert.match(exam.text, /取消本次考試資格/);
 
   const teachingCorrection = externalTeaching.handleCommand('更正點名 T-LATE-TEACH S-LATE-TEACH 到場', context);
-  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-LATE-TEACH')[5], '遲到');
-  assert.match(teachingCorrection.text, /遲到生目前出席狀態/);
+  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-LATE-TEACH')[5], '到場');
+  assert.match(teachingCorrection.text, /遲到生目前出席狀態：到場/);
   assert.doesNotMatch(teachingCorrection.text, /已更正點名/);
   const examCorrection = externalTeaching.handleCommand('更正點名 T-LATE-EXAM S-LATE-EXAM 到場', context);
-  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-LATE-EXAM')[5], '取消資格');
-  assert.match(examCorrection.text, /逾時生目前出席狀態：取消資格/);
+  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-LATE-EXAM')[5], '到場');
+  assert.match(examCorrection.text, /學生：逾時生/);
+  assert.match(examCorrection.text, /出席：到場/);
   assert.doesNotMatch(examCorrection.text, /已更正點名/);
   assert.equal(examCorrection.quickReply.items.some(item => /簡答|上機/.test(item.action.label)), false);
 });
