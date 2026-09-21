@@ -35,7 +35,8 @@ const reply = (text, items = []) => ({ text, ...(items.length ? { quickReply: qr
 const externalNav = (items = [], parentText = '對外學生', parentLabel = '回對外首頁') => {
   const attendanceTaskId = String(parentText).match(/^(?:查看任務|查看考生)\s+(\S+)/)?.[1];
   const task = attendanceTaskId ? findTask(attendanceTaskId) : null;
-  if (task && attendanceInProgress(task)) return [
+  const usePostback = (task && attendanceInProgress(task)) || /^(?:近期任務|對外任務)$/.test(parentText);
+  if (usePostback) return [
     ...items.slice(0, 11),
     { label: `🔙 ${parentLabel}`, postback: parentText },
     { label: '🏠 回首頁', text: '主選單' }
@@ -640,6 +641,8 @@ function taskText(task) {
 function listTasks(context, todayOnly) {
   const personalName = context.sourceType === 'user' ? boundName(context.userId) : '';
   if (context.sourceType === 'user' && !personalName) return reply('請先輸入「我是 姓名」完成綁定，才能查看個人的近期對外任務。');
+  const parentText = context.sourceType === 'user' ? '中心助理' : '主選單';
+  const parentLabel = context.sourceType === 'user' ? '回助理首頁' : '回首頁';
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const end = new Date(today); end.setDate(end.getDate() + (todayOnly ? 1 : 8));
   const tasks = allTasks().filter(task => {
@@ -651,10 +654,10 @@ function listTasks(context, todayOnly) {
       : (!task.groupId || task.groupId === context.chatId);
     return date >= today && date < end && belongsToContext;
   }).sort((a, b) => new Date(a.date) - new Date(b.date));
-  if (!tasks.length) return reply(todayOnly ? '今天沒有待執行的對外任務。' : '未來七天沒有待執行的對外任務。', externalNav());
+  if (!tasks.length) return reply(todayOnly ? '今天沒有待執行的對外任務。' : '未來七天沒有待執行的對外任務。', externalNav([], parentText, parentLabel));
   const body = tasks.map(task => `【${task.id}】\n${taskText(task)}`).join('\n\n');
   return reply(`【${context.sourceType === 'user' ? '我的' : ''}${todayOnly ? '今日' : '近期'}對外任務】\n\n${body}`,
-    externalNav(tasks.map(task => ({ label: `點名卡 ${String(task.equipment).slice(0, 11)}`, postback: `開始點名 ${task.id}` }))));
+    externalNav(tasks.map(task => ({ label: `點名卡 ${String(task.equipment).slice(0, 11)}`, postback: `開始點名 ${task.id}` })), parentText, parentLabel));
 }
 
 function certificationStatusUrl() {

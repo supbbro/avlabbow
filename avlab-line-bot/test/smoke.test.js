@@ -296,6 +296,24 @@ test('external commands are routed to the smaller workbook set', () => {
   assert.equal(externalTeaching.isCombinedTaskQuery('近期任務'), false);
 });
 
+test('private external recent tasks return to the assistant area', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務') || resultBook.insertSheet('對外任務');
+  if (!tasks.getLastRow()) tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','教學官／考官','考官LINE User ID','LINE群組ID','任務狀態']);
+  const master = runtime.openById(ids.master);
+  const bindings = master.getSheetByName('用戶綁定') || master.insertSheet('用戶綁定');
+  if (!bindings.getLastRow()) bindings.appendRow(['LINE User ID','姓名','綁定時間','學號','身分類型']);
+  bindings.appendRow(['U-RECENT-NAV','導航助理','','','assistant']);
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+  tasks.appendRow(['T-RECENT-NAV','1151','教學',tomorrow,'12:00','13:00','導航測試','401','導航助理','U-RECENT-NAV','','已排定',true,true,'','','','']);
+
+  const recent = externalTeaching.handleCommand('近期任務', { sourceType: 'user', userId: 'U-RECENT-NAV', chatId: 'U-RECENT-NAV' }, { skipScheduleSync: true });
+  const back = recent.quickReply.items.find(item => item.action.label.includes('回助理首頁'));
+  assert.equal(back.action.type, 'message');
+  assert.equal(back.action.text, '中心助理');
+  assert.equal(recent.quickReply.items.some(item => item.action.text === '對外學生'), false);
+});
+
 test('my task query includes internal and external assignments', () => {
   const assistantBook = runtime.openById(ids.assistant);
   const assistants = assistantBook.getSheetByName('助理名單') || assistantBook.insertSheet('助理名單');
@@ -396,6 +414,9 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.doesNotMatch(finished.text, /保證金單/);
   assert.equal(finished.quickReply.items[0].action.type, 'uri');
   assert.match(finished.quickReply.items[0].action.uri, new RegExp(ids.externalResults));
+  const recentTasks = finished.quickReply.items.find(item => item.action.label.includes('回近期任務'));
+  assert.equal(recentTasks.action.type, 'postback');
+  assert.equal(recentTasks.action.data, '近期任務');
   assert.equal(tasks.getRange(taskRow, 12).getValue(), '已完成');
   assert.doesNotMatch(externalTeaching.handleCommand('點名首頁 T1', context).text, /【點名首頁/);
 
