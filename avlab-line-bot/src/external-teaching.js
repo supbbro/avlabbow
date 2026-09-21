@@ -1000,9 +1000,10 @@ function editStepPrompt(task, student, step) {
     externalNav([...actions, { label: '回修改選單', postback: `修改紀錄 ${task.id} ${student.id}` }], `查看考生 ${task.id} ${student.id}`, '回這位考生'));
 }
 
-function correctedStudentCard(task, student, notice, context) {
+function correctedStudentCard(task, student, followUp, context) {
   const card = showStudent(task.id, student.id, context);
-  card.text = `${notice}\n\n${card.text.replace('請直接選擇簡答題或上機結果。', '如需繼續評分，請重新開啟這位考生。')}`;
+  card.text = card.text.replace('請直接選擇簡答題或上機結果。', '狀態已即時更新；如需繼續評分，請重新開啟這位考生。');
+  if (followUp) card.text += `\n\n${String(followUp).trim()}`;
   card.quickReply = qr(externalNav([
     { label: '重新開啟學生卡片', postback: `查看考生 ${task.id} ${student.id}` },
     { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
@@ -1028,7 +1029,7 @@ function correctAttendance(taskId, studentId, status, context) {
   updateStudent(student, status, result);
   upsertAttendance(task, student, permission.name, context.userId);
   if (task.status === '已完成' && (status === '未點名' || (isExam(task) && status === '到場' && examProgress(task, student).step !== 'done'))) updateTaskStatus(task, '點名中');
-  return correctedStudentCard(task, student, `✅ 已更正點名：${status}`, context);
+  return correctedStudentCard(task, student, '', context);
 }
 
 function correctExamPart(taskId, studentId, part, value, context) {
@@ -1042,14 +1043,14 @@ function correctExamPart(taskId, studentId, part, value, context) {
   if (part === 'practical' && !examProgress(task, student).shortPassed) return reply('簡答題尚未通過，不能更正上機結果。');
   const result = part === 'short' && value === '未通過' ? '簡答題未通過' : mergeExamPart(student.result, part, value === '通過');
   updateStudent(student, student.attendance, result);
-  const certification = upsertAttendance(task, student, permission.name, context.userId);
+  upsertAttendance(task, student, permission.name, context.userId);
   const progress = examProgress(task, student);
   if (task.status === '已完成' && progress.step !== 'done') updateTaskStatus(task, '點名中');
   const failedParts = progress.step !== 'done' ? [] : !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
   const correctionNotice = failedParts.length
     ? `\n\n${examinerRetestInstructions(task, failedParts)}\n⚠️ 更正評分不會自動重發考生私訊，請考官當場告知。`
     : value === '通過' ? '\n若先前已告知考生補考，請主動通知結果已更正。' : '';
-  return correctedStudentCard(task, student, `✅ 已更正${part === 'short' ? '簡答題' : '上機'}：${value}\n${certificationText(certification)}${correctionNotice}\n請核對保證金單據。`, context);
+  return correctedStudentCard(task, student, `${correctionNotice}\n請核對保證金單據。`, context);
 }
 
 function startAttendance(taskId, context) {
@@ -1393,7 +1394,7 @@ function examinerReminderText(task, roster = studentRosterText(task)) {
     '• 到場在黃本簽到並註記時間，簽出機單。',
     '• 到教學時間後，開啟點名卡逐位點名。'
   ];
-  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n可現在開啟點名卡，也可稍後從「我的任務／對外任務」重新開啟；已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}\n\n若考生未通過，請在評分後依該考生結果頁顯示的補考方式當場告知。` : ''}`;
+  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n若現在不處理，可按「放一邊」；之後從「我的任務」的對外任務重新開啟，已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}\n\n若考生未通過，請在評分後依該考生結果頁顯示的補考方式當場告知。` : ''}`;
 }
 
 function studentReminderText(task, student) {
@@ -1629,8 +1630,8 @@ function sendExternalReminders(now = new Date()) {
     const reminderDue = new Date(start.getTime() - REMINDER_LEAD_MINUTES * 60000);
 
     const buttons = [
-      { label: '開啟點名卡', text: `開始點名 ${task.id}` },
-      { label: '稍後看我的任務', text: '我的任務' }
+      { label: '開啟點名卡', postback: `開始點名 ${task.id}` },
+      { label: '放一邊', postback: `提醒放一邊 ${task.id}` }
     ];
     const roster = studentRosterText(task);
     const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;

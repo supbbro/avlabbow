@@ -504,7 +504,8 @@ test('examiner can correct attendance and both exam parts without another retest
   const shortFailed = externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT short 未通過', context);
   record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
   assert.deepEqual(record.slice(10, 13), ['未通過', '未記錄', '簡答題未通過']);
-  assert.match(shortFailed.text, /已更正簡答題[\s\S]*【X160｜第 1\//);
+  assert.match(shortFailed.text, /^【X160｜第 1\//);
+  assert.doesNotMatch(shortFailed.text, /已更正簡答題/);
   assert.match(shortFailed.text, /簡答題未通過：補考週/);
   assert.doesNotMatch(shortFailed.text, /請考生填寫第一次補考上機考報名表/);
   assert.equal(shortFailed.quickReply.items.some(item => item.action.label.includes('修正上機')), false);
@@ -512,7 +513,9 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.equal(runtime.httpOperations.length, beforePushes);
 
   const shortPassed = externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT short 通過', context);
-  assert.match(shortPassed.text, /已更正簡答題：通過[\s\S]*【X160｜第 1\//);
+  assert.match(shortPassed.text, /^【X160｜第 1\//);
+  assert.match(shortPassed.text, /簡答題：✅ 通過/);
+  assert.doesNotMatch(shortPassed.text, /已更正簡答題/);
   assert.equal(shortPassed.quickReply.items.some(item => /上機|評分|更正/.test(item.action.label)), false);
   assert.equal(shortPassed.quickReply.items[0].action.label, '重新開啟學生卡片');
   assert.equal(tasks.getDataRange().getValues().find(row => row[0] === 'T-CORRECT')[11], '點名中');
@@ -583,11 +586,12 @@ test('attendance correction uses click time and returns to the student card', ()
 
   const teachingCorrection = externalTeaching.handleCommand('更正點名 T-LATE-TEACH S-LATE-TEACH 到場', context);
   assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-LATE-TEACH')[5], '遲到');
-  assert.match(teachingCorrection.text, /已更正點名：遲到/);
   assert.match(teachingCorrection.text, /遲到生目前出席狀態/);
+  assert.doesNotMatch(teachingCorrection.text, /已更正點名/);
   const examCorrection = externalTeaching.handleCommand('更正點名 T-LATE-EXAM S-LATE-EXAM 到場', context);
   assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-LATE-EXAM')[5], '取消資格');
-  assert.match(examCorrection.text, /已更正點名：取消資格/);
+  assert.match(examCorrection.text, /逾時生目前出席狀態：取消資格/);
+  assert.doesNotMatch(examCorrection.text, /已更正點名/);
   assert.equal(examCorrection.quickReply.items.some(item => /簡答|上機/.test(item.action.label)), false);
 });
 
@@ -632,14 +636,20 @@ test('one-hour reminder privately pushes the roster to the examiner', () => {
     assert.match(push.messages[0].text, /領取及核對保證金/);
     assert.match(push.messages[0].text, /簽出機單/);
     assert.match(push.messages[0].text, /開啟點名卡.*逐位點名及評分/);
-    assert.match(push.messages[0].text, /可現在開啟點名卡，也可稍後從「我的任務／對外任務」重新開啟/);
+    assert.match(push.messages[0].text, /按「放一邊」.*從「我的任務」的對外任務重新開啟/);
     assert.match(push.messages[0].text, /考制度 2 題＋器材 3 題，最多錯 1 題/);
     assert.match(push.messages[0].text, /上機考：最多錯 3 題/);
     assert.match(push.messages[0].text, /若考生未通過，請在評分後依該考生結果頁顯示的補考方式當場告知/);
     assert.doesNotMatch(push.messages[0].text, /簡答題未通過：補考週|上機未通過：請考生填寫/);
     assert.doesNotMatch(push.messages[0].text, /保證金單簽名|黃本簽退/);
     assert.equal(push.messages[0].quickReply.items[0].action.label, '開啟點名卡');
-    assert.equal(push.messages[0].quickReply.items[0].action.text, '開始點名 T-REMIND');
+    assert.equal(push.messages[0].quickReply.items[0].action.type, 'postback');
+    assert.equal(push.messages[0].quickReply.items[0].action.data, '開始點名 T-REMIND');
+    assert.equal(push.messages[0].quickReply.items[0].action.displayText, undefined);
+    assert.equal(push.messages[0].quickReply.items[1].action.label, '放一邊');
+    assert.equal(push.messages[0].quickReply.items[1].action.type, 'postback');
+    assert.equal(push.messages[0].quickReply.items[1].action.data, '提醒放一邊 T-REMIND');
+    assert.equal(push.messages[0].quickReply.items[1].action.displayText, undefined);
   }
 });
 

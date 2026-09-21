@@ -94,6 +94,9 @@ async function handleLineEvent(event) {
     const userId = context.userId;
     if (!userId) return;
     const command = String(event.postback?.data || '').trim();
+    // Acknowledge the reminder silently. The task remains available from the
+    // user's combined task menu; no extra chat bubble is needed here.
+    if (/^提醒放一邊\s+\S+$/.test(command)) return;
     const internal = internalTeaching.isInternalCommand(command);
     if (!internal && !externalTeaching.isExternalCommand(command)) return;
     await runtime.loadOnly(internal ? INTERNAL_WORKBOOKS : EXTERNAL_WORKBOOKS, { force: internal ? internalTeaching.requiresFreshData(command) : externalTeaching.requiresFreshData(command) });
