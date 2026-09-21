@@ -1397,7 +1397,7 @@ function examinerReminderText(task, roster = studentRosterText(task)) {
     '• 到場在黃本簽到並註記時間，簽出機單。',
     '• 到教學時間後，開啟點名卡逐位點名。'
   ];
-  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n若現在不處理，可按「放一邊」；之後可由「我的對內／對外任務」中再開啟「📝 點名卡」，已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}\n\n若考生未通過，請在評分後依該考生結果頁顯示的補考方式當場告知。` : ''}`;
+  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n若現在不處理，可按「回首頁」；之後可由「我的對內／對外任務」中再開啟「📝 點名卡」，已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}\n\n若考生未通過，請在評分後依該考生結果頁顯示的補考方式當場告知。` : ''}`;
 }
 
 function studentReminderText(task, student) {
@@ -1634,7 +1634,7 @@ function sendExternalReminders(now = new Date()) {
 
     const buttons = [
       { label: '開啟點名卡', postback: `開始點名 ${task.id}` },
-      { label: '放一邊', postback: `提醒放一邊 ${task.id}` }
+      { label: '🏠 回首頁', postback: `提醒回首頁 ${task.id}` }
     ];
     const roster = studentRosterText(task);
     const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;

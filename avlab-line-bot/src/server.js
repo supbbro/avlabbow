@@ -94,14 +94,15 @@ async function handleLineEvent(event) {
     const userId = context.userId;
     if (!userId) return;
     const command = String(event.postback?.data || '').trim();
-    // Acknowledge the reminder silently. The task remains available from the
-    // user's combined task menu; no extra chat bubble is needed here.
-    if (/^提醒放一邊\s+\S+$/.test(command)) return;
-    const internal = internalTeaching.isInternalCommand(command);
-    if (!internal && !externalTeaching.isExternalCommand(command)) return;
-    await runtime.loadOnly(internal ? INTERNAL_WORKBOOKS : EXTERNAL_WORKBOOKS, { force: internal ? internalTeaching.requiresFreshData(command) : externalTeaching.requiresFreshData(command) });
-    bot.recordUser(userId);
-    reply = internal ? internalTeaching.handleCommand(command, context) : externalTeaching.handleCommand(command, context);
+    if (/^提醒回首頁\s+\S+$/.test(command)) {
+      reply = bot.getMainMenu();
+    } else {
+      const internal = internalTeaching.isInternalCommand(command);
+      if (!internal && !externalTeaching.isExternalCommand(command)) return;
+      await runtime.loadOnly(internal ? INTERNAL_WORKBOOKS : EXTERNAL_WORKBOOKS, { force: internal ? internalTeaching.requiresFreshData(command) : externalTeaching.requiresFreshData(command) });
+      bot.recordUser(userId);
+      reply = internal ? internalTeaching.handleCommand(command, context) : externalTeaching.handleCommand(command, context);
+    }
   } else if (event.type === 'message') {
     const userId = context.userId;
     if (!userId) return;

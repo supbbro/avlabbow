@@ -657,7 +657,7 @@ test('one-hour reminder privately pushes the roster to the examiner', () => {
     assert.match(push.messages[0].text, /領取及核對保證金/);
     assert.match(push.messages[0].text, /簽出機單/);
     assert.match(push.messages[0].text, /開啟點名卡.*逐位點名及評分/);
-    assert.match(push.messages[0].text, /按「放一邊」.*由「我的對內／對外任務」中再開啟「📝 點名卡」/);
+    assert.match(push.messages[0].text, /按「回首頁」.*由「我的對內／對外任務」中再開啟「📝 點名卡」/);
     assert.match(push.messages[0].text, /考制度 2 題＋器材 3 題，最多錯 1 題/);
     assert.match(push.messages[0].text, /上機考：最多錯 3 題/);
     assert.match(push.messages[0].text, /若考生未通過，請在評分後依該考生結果頁顯示的補考方式當場告知/);
@@ -667,9 +667,9 @@ test('one-hour reminder privately pushes the roster to the examiner', () => {
     assert.equal(push.messages[0].quickReply.items[0].action.type, 'postback');
     assert.equal(push.messages[0].quickReply.items[0].action.data, '開始點名 T-REMIND');
     assert.equal(push.messages[0].quickReply.items[0].action.displayText, undefined);
-    assert.equal(push.messages[0].quickReply.items[1].action.label, '放一邊');
+    assert.equal(push.messages[0].quickReply.items[1].action.label, '🏠 回首頁');
     assert.equal(push.messages[0].quickReply.items[1].action.type, 'postback');
-    assert.equal(push.messages[0].quickReply.items[1].action.data, '提醒放一邊 T-REMIND');
+    assert.equal(push.messages[0].quickReply.items[1].action.data, '提醒回首頁 T-REMIND');
     assert.equal(push.messages[0].quickReply.items[1].action.displayText, undefined);
   }
 });
