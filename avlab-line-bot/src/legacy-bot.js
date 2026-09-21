@@ -830,8 +830,20 @@ function selectIdentity(role,userId){
 }
 
 // ========== 選單 ==========
-function getMainMenu(){return{text:'🤖 歡迎使用影音實驗室教學部機器人！\n\n請選擇您的身份並完成綁定：',quickReply:qr([{label:'👨‍🎓 對外學生',text:'選擇對外學生'},{label:'👩‍💼 中心助理',text:'選擇中心助理'}])};}
-function getExternalMainMenu(){return{text:'請選擇您想查詢的對外學生資訊：',quickReply:qr([{label:'📋 流程',text:'流程'},{label:'📅 時程',text:'對外時程'},{label:'📚 題庫/講義',text:'題庫講義'},{label:'📊 工作坊簡報',text:'對外工作坊簡報'},{label:'💰 保證金',text:'保證金'},{label:'🚫 學生請假',text:'學生請假'},{label:'🔑 借器材',text:'借用規定'},{label:'🔧 器材練習',text:'器材練習'},{label:'🌐 影音實驗室平台',uri:'https://avlol.nccu.edu.tw/'},{label:'📣 臉書粉專',uri:'https://www.facebook.com/nccuavlab'},{label:'🔍 更多',text:'對外更多'},{label:'🏠 回首頁',text:'主選單'}])};}
+function getIdentitySelectionMenu(){return{text:'🤖 歡迎使用影音實驗室教學部機器人！\n\n請選擇您的身份並完成綁定：',quickReply:qr([{label:'👨‍🎓 對外學生',text:'選擇對外學生'},{label:'👩‍💼 中心助理',text:'選擇中心助理'}])};}
+function getMainMenu(userId){
+  var bound=userId?getBoundRecord(userId):null,role=identityRole(bound);
+  return role?Object.assign(identityMenu(role),{navigationPage:identityRoleLabel(role)}):getIdentitySelectionMenu();
+}
+function getIdentityChangeMenu(userId){
+  var bound=getBoundRecord(userId),role=identityRole(bound);
+  return{text:(role?'目前身份：'+identityRoleLabel(role)+'｜'+bound.name+'\n\n':'')+'請選擇要使用的身份：',quickReply:qr([
+    {label:'👨‍🎓 對外學生',text:'選擇對外學生'},
+    {label:'👩‍💼 中心助理',text:'選擇中心助理'},
+    {label:'🏠 回首頁',text:'主選單'}
+  ])};
+}
+function getExternalMainMenu(){return{text:'請選擇您想查詢的對外學生資訊：',quickReply:qr([{label:'📋 流程',text:'流程'},{label:'📅 時程',text:'對外時程'},{label:'📚 題庫/講義',text:'題庫講義'},{label:'📊 工作坊簡報',text:'對外工作坊簡報'},{label:'💰 保證金',text:'保證金'},{label:'🚫 學生請假',text:'學生請假'},{label:'🔑 借器材',text:'借用規定'},{label:'🔧 器材練習',text:'器材練習'},{label:'🌐 影音實驗室平台',uri:'https://avlol.nccu.edu.tw/'},{label:'📣 臉書粉專',uri:'https://www.facebook.com/nccuavlab'},{label:'🔍 更多',text:'對外更多'},{label:'🔄 更改身份',text:'身份設定'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getExternalMoreMenu(){return{text:'更多對外學生資訊：',quickReply:qr([{label:'⏰ 營業時間',text:'營業時間'},{label:'🚫 額滿',text:'額滿'},{label:'🔙 回上一頁',text:'回上一頁'},{label:'🏠 回首頁',text:'主選單'}])};}
 function getInternalMainMenu(){
   return {
@@ -848,6 +860,7 @@ function getInternalMainMenu(){
       {label:'📖 越級考', text:'越級考'},
       {label:'✅ 助理認證狀況', uri:'https://docs.google.com/spreadsheets/d/1vUnpcRVsQmUH9zjqic8KFf5IlGk0E5GSH-rkhBGE7bk/edit?gid=0#gid=0'},
       {label:'🎲 休閒工具', text:'助理工具'},
+      {label:'🔄 更改身份', text:'身份設定'},
       {label:'🏠 回首頁', text:'主選單'}
     ])
   };
@@ -3229,7 +3242,7 @@ function handleDragonCommand(userId, text) {
   var cmd = text.trim();
   var now = Date.now();
   var cache = CacheService.getScriptCache();
-  var isIdentityCommand=/^(?:選擇中心助理|選擇對外學生|繼續使用目前身份|更改身份\s+|更改名字\s+|我是(?:\s|$)|綁定(?:\s|$))/.test(cmd);
+  var isIdentityCommand=/^(?:主選單$|身份設定$|選擇中心助理|選擇對外學生|繼續使用目前身份|更改身份\s+|更改名字\s+|我是(?:\s|$)|綁定(?:\s|$))/.test(cmd);
   
   // 防抖：1秒內相同指令忽略（使用快取，不再依賴全域物件）
   var antiSpamKey = 'spam_' + userId + '_' + cmd;
@@ -3405,7 +3418,8 @@ function getReply(u, i) {
 
   // ===== 導航選單 =====
   var nav = {
-    '主選單': getMainMenu,
+    '主選單': function(){return getMainMenu(i);},
+    '身份設定': function(){return getIdentityChangeMenu(i);},
     '對外學生': getExternalMainMenu,
     '對外更多': getExternalMoreMenu,
     '中心助理': getInternalMainMenu,
@@ -3460,7 +3474,7 @@ function doPost(e) {
       var tk = ev.replyToken;
 
       if (ev.type === 'follow') {
-        replyToUser(tk, getMainMenu());
+        replyToUser(tk, getMainMenu(uid));
       } else if (ev.type === 'message') {
         var rep = null;
         recordUser(uid);

@@ -83,7 +83,8 @@ async function handleLineEvent(event) {
     chatId: event.source?.groupId || event.source?.roomId || event.source?.userId || ''
   };
   if (event.type === 'follow') {
-    reply = bot.getMainMenu();
+    await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit]);
+    reply = bot.getMainMenu(context.userId);
   } else if (event.type === 'join') {
     // 群組採安靜模式：加入時不主動發話，只有排程推播或明確的群組指令才回覆。
     reply = null;
@@ -95,7 +96,8 @@ async function handleLineEvent(event) {
     if (!userId) return;
     const command = String(event.postback?.data || '').trim();
     if (/^提醒回首頁\s+\S+$/.test(command)) {
-      reply = bot.getMainMenu();
+      await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit]);
+      reply = bot.getMainMenu(userId);
     } else {
       const internal = internalTeaching.isInternalCommand(command);
       if (!internal && !externalTeaching.isExternalCommand(command)) return;
@@ -129,7 +131,9 @@ async function handleLineEvent(event) {
           const personalQueryIds = personalQueryWorkbooks(text);
           const bindingCommand = /^(?:我是|綁定)[\s　]*/.test(text);
           const identityFlowCommand = text === '繼續使用目前身份' || /^(?:更改身份|更改名字)\s+(?:中心助理|對外學生)$/.test(text);
-          if (teachingSchedule.isCommand(text)) {
+          if (text === '主選單' || text === '身份設定') {
+            await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalRegistration, ids.deposit]);
+          } else if (teachingSchedule.isCommand(text)) {
             await runtime.loadOnly(TEACHING_SCHEDULE_WORKBOOKS, { force: true });
             await teachingSchedule.loadDocumentLabels(runtime.api, { force: true });
           } else if (bindingCommand || identityFlowCommand) {

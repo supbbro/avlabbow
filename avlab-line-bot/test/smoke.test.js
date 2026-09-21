@@ -762,6 +762,13 @@ test('an external student can bind before registering and remain bound', () => {
   assert.match(bound.text, /報名成功後會再通知你/);
   assert.ok(bound.text.length < 80);
   assert.match(bot.getReply('選擇對外學生', userId).text, /對外學生資訊/);
+  const home = bot.getReply('主選單', userId);
+  assert.match(home.text, /對外學生資訊/);
+  assert.equal(home.quickReply.items.some(item => item.action.text === '選擇中心助理'), false);
+  assert.equal(home.quickReply.items.some(item => item.action.text === '身份設定'), true);
+  const identitySettings = bot.getReply('身份設定', userId);
+  assert.match(identitySettings.text, /目前身份：對外學生/);
+  assert.deepEqual(identitySettings.quickReply.items.slice(0, 2).map(item => item.action.text), ['選擇對外學生', '選擇中心助理']);
 });
 
 test('an external student can still bind after appearing in the deposit sheet', () => {
@@ -792,6 +799,7 @@ test('assistant identity binding only accepts the active attendance roster', () 
   bindingSheet.appendRow(['U-active-assistant-old','現役01','','','assistant']);
   bindingSheet.appendRow(['U-active-assistant-confirm','現役02','','','assistant','']);
 
+  assert.match(bot.getReply('主選單', 'U-active-assistant-confirm').text, /助理資訊/);
   const initialConfirmation = bot.getReply('選擇中心助理', 'U-active-assistant-confirm');
   assert.match(initialConfirmation.text, /更改名字/);
   assert.deepEqual(initialConfirmation.quickReply.items.slice(0, 2).map(item => item.action.text), ['繼續使用目前身份', '更改名字 中心助理']);
@@ -810,6 +818,10 @@ test('assistant identity binding only accepts the active attendance roster', () 
   const bindingRows = bindingSheet.getDataRange().getValues();
   assert.equal(bindingRows.find(row => row[0] === 'U-active-assistant-old')[1], '');
   assert.equal(bindingRows.find(row => row[0] === 'U-active-assistant')[4], 'assistant');
+  const assistantHome = bot.getReply('主選單', 'U-active-assistant');
+  assert.match(assistantHome.text, /助理資訊/);
+  assert.equal(assistantHome.quickReply.items.some(item => item.action.text === '選擇對外學生'), false);
+  assert.equal(assistantHome.quickReply.items.some(item => item.action.text === '身份設定'), true);
 
   bot.getReply('選擇中心助理', 'U-teaching-assistant');
   const teachingAssistant = bot.getReply('我是 林宇俊', 'U-teaching-assistant');
