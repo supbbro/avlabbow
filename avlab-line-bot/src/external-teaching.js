@@ -975,11 +975,17 @@ function editRecordPrompt(task, student) {
   const actions = [{ label: '修正點名', postback: `修改步驟 ${task.id} ${student.id} attendance` }];
   const [shortAnswer, practical] = resultParts(student.result);
   if (isExam(task) && ['到場', '遲到'].includes(student.attendance)) {
-    if (['通過', '未通過'].includes(shortAnswer)) actions.push({ label: '修正簡答題', postback: `修改步驟 ${task.id} ${student.id} short` });
-    if (['通過', '未通過'].includes(practical)) actions.push({ label: '修正上機考', postback: `修改步驟 ${task.id} ${student.id} practical` });
+    if (['通過', '未通過'].includes(shortAnswer)) {
+      const opposite = shortAnswer === '通過' ? '未通過' : '通過';
+      actions.push({ label: `簡答改為${opposite}`, postback: `更正評分 ${task.id} ${student.id} short ${opposite}` });
+    }
+    if (['通過', '未通過'].includes(practical)) {
+      const opposite = practical === '通過' ? '未通過' : '通過';
+      actions.push({ label: `上機改為${opposite}`, postback: `更正評分 ${task.id} ${student.id} practical ${opposite}` });
+    }
   }
   const grades = isExam(task) ? `\n本次簡答：${shortAnswer}｜本次上機：${practical}` : '';
-  return reply(`【修改 ${student.name} 的紀錄】\n${task.equipment}\n目前點名：${student.attendance}${grades}\n\n請先選擇要修正的步驟；每次只修改一項。${isExam(task) ? '\n簡答題未通過時，上機結果會清除。' : ''}`,
+  return reply(`【修改 ${student.name} 的紀錄】\n${task.equipment}\n目前點名：${student.attendance}${grades}\n\n請選擇要修正的項目；每次只修改一項。${isExam(task) ? '\n考試結果按鈕會直接顯示目前結果的相反，點下後立即更新。\n簡答題改為未通過時，上機結果會清除。' : ''}`,
     externalNav([...actions, { label: '回這位考生', postback: `查看考生 ${task.id} ${student.id}` }], `查看任務 ${task.id}`, '回任務'));
 }
 

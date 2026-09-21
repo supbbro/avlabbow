@@ -510,14 +510,18 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.match(externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT short 通過', context).text, /簡答題尚未評分/);
   externalTeaching.handleCommand('簡答登記 T-CORRECT S-CORRECT 通過', context);
   const beforePractical = externalTeaching.handleCommand('修改紀錄 T-CORRECT S-CORRECT', context);
-  assert.deepEqual(beforePractical.quickReply.items.filter(item => item.action.label.startsWith('修正')).map(item => item.action.label), ['修正點名', '修正簡答題']);
+  assert.deepEqual(beforePractical.quickReply.items.slice(0, 2).map(item => item.action.label), ['修正點名', '簡答改為未通過']);
+  assert.equal(beforePractical.quickReply.items[1].action.data, '更正評分 T-CORRECT S-CORRECT short 未通過');
   assert.match(externalTeaching.handleCommand('修改步驟 T-CORRECT S-CORRECT practical', context).text, /上機考尚未評分/);
   externalTeaching.handleCommand('上機登記 T-CORRECT S-CORRECT 通過', context);
   externalTeaching.handleCommand('完成點名 T-CORRECT', context);
   const beforePushes = runtime.httpOperations.length;
   const edit = externalTeaching.handleCommand('修改出席 T-CORRECT S-CORRECT', context);
   const labels = edit.quickReply.items.map(item => item.action.label);
-  assert.deepEqual(labels.slice(0, 3), ['修正點名', '修正簡答題', '修正上機考']);
+  assert.deepEqual(labels.slice(0, 3), ['修正點名', '簡答改為未通過', '上機改為未通過']);
+  assert.equal(edit.quickReply.items[1].action.data, '更正評分 T-CORRECT S-CORRECT short 未通過');
+  assert.equal(edit.quickReply.items[2].action.data, '更正評分 T-CORRECT S-CORRECT practical 未通過');
+  assert.match(edit.text, /直接顯示目前結果的相反/);
   const shortStep = externalTeaching.handleCommand('修改步驟 T-CORRECT S-CORRECT short', context);
   assert.deepEqual(shortStep.quickReply.items.slice(0, 2).map(item => item.action.label), ['通過', '未通過']);
   assert.equal(shortStep.quickReply.items.some(item => item.action.label.includes('上機')), false);
@@ -530,6 +534,8 @@ test('examiner can correct attendance and both exam parts without another retest
   let record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
   assert.deepEqual(record.slice(10, 13), ['通過', '未通過', '僅簡答題通過']);
   assert.equal(record[18], '不可退保證金');
+  const practicalFailedEdit = externalTeaching.handleCommand('修改紀錄 T-CORRECT S-CORRECT', context);
+  assert.equal(practicalFailedEdit.quickReply.items.some(item => item.action.label === '上機改為通過'), true);
 
   const shortFailed = externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT short 未通過', context);
   record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
@@ -539,6 +545,9 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.match(shortFailed.text, /簡答題未通過：補考週/);
   assert.doesNotMatch(shortFailed.text, /請考生填寫第一次補考上機考報名表/);
   assert.equal(shortFailed.quickReply.items.some(item => item.action.label.includes('修正上機')), false);
+  const shortFailedEdit = externalTeaching.handleCommand('修改紀錄 T-CORRECT S-CORRECT', context);
+  assert.equal(shortFailedEdit.quickReply.items.some(item => item.action.label === '簡答改為通過'), true);
+  assert.equal(shortFailedEdit.quickReply.items.some(item => item.action.label.startsWith('上機改為')), false);
   assert.match(externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 通過', context).text, /上機考尚未評分/);
   assert.equal(runtime.httpOperations.length, beforePushes);
 
