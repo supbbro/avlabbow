@@ -838,7 +838,6 @@ function getInternalMainMenu(){
     text:'請選擇您想查詢的助理資訊：',
     quickReply:qr([
       {label:'📋 點名', text:'點名'},
-      {label:'🧪 開始練習', text:'開始練習'},
       {label:'🗣️ 對外簡答補考', text:'簡答補考'},
       {label:'⏰ 我的對內／對外任務', text:'我的任務'},
       {label:'🔍 個人查詢', text:'查詢'},
@@ -3315,6 +3314,10 @@ function getReply(u, i) {
   if (!u) return '請輸入文字問題';
   
   u = u.toString().trim();
+
+  if (/^(?:練習|練習點名|開始練習|開始教學練習|開始補考練習|練習重來|結束練習)(?:$|\s)/.test(u)) {
+    return { text: '練習功能目前已關閉。', quickReply: qr([{ label: '🏠 回首頁', text: '主選單' }]) };
+  }
 
   // ===== 先處理射龍門遊戲指令 =====
   var gameReply = handleDragonCommand(i, u);

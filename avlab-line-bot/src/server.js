@@ -15,7 +15,6 @@ installGlobals(runtime);
 const bot = require('./legacy-bot');
 const internalTeaching = require('./internal-teaching');
 const externalTeaching = require('./external-teaching');
-const practiceMode = require('./practice-mode');
 const teachingSchedule = require('./teaching-schedule');
 const externalGroupSync = require('./external-group-sync');
 const { sendRegistrationConfirmations } = require('./registration-confirmations');
@@ -95,15 +94,11 @@ async function handleLineEvent(event) {
     const userId = context.userId;
     if (!userId) return;
     const command = String(event.postback?.data || '').trim();
-    if (practiceMode.isPracticeCommand(command)) {
-      reply = practiceMode.handleCommand(command, context);
-    } else {
-      const internal = internalTeaching.isInternalCommand(command);
-      if (!internal && !externalTeaching.isExternalCommand(command)) return;
-      await runtime.loadOnly(internal ? INTERNAL_WORKBOOKS : EXTERNAL_WORKBOOKS, { force: internal ? internalTeaching.requiresFreshData(command) : externalTeaching.requiresFreshData(command) });
-      bot.recordUser(userId);
-      reply = internal ? internalTeaching.handleCommand(command, context) : externalTeaching.handleCommand(command, context);
-    }
+    const internal = internalTeaching.isInternalCommand(command);
+    if (!internal && !externalTeaching.isExternalCommand(command)) return;
+    await runtime.loadOnly(internal ? INTERNAL_WORKBOOKS : EXTERNAL_WORKBOOKS, { force: internal ? internalTeaching.requiresFreshData(command) : externalTeaching.requiresFreshData(command) });
+    bot.recordUser(userId);
+    reply = internal ? internalTeaching.handleCommand(command, context) : externalTeaching.handleCommand(command, context);
   } else if (event.type === 'message') {
     const userId = context.userId;
     if (!userId) return;
@@ -113,20 +108,17 @@ async function handleLineEvent(event) {
       const originalText = event.message.text.trim();
       const isGroupChat = ['group', 'room'].includes(sourceType);
       if (isGroupChat && !teachingSchedule.isCommand(originalText)) return;
-      if (!isGroupChat && practiceMode.isPracticeCommand(originalText)) {
-        reply = practiceMode.handleCommand(originalText, context);
+      // Back resumes an interrupted attendance flow. Home remains a real exit,
+      // so examiners can reopen the card later from their task list.
+      let activeAttendance = null;
+      if (!isGroupChat && originalText === '回上一頁') {
+        await runtime.loadOnly([ids.externalResults, ids.master], { maxAgeMs: 30_000 });
+        activeAttendance = externalTeaching.resumeActiveAttendance(context);
+      }
+      if (activeAttendance) {
+        bot.recordUser(userId);
+        reply = activeAttendance;
       } else {
-        // Back resumes an interrupted attendance flow. Home remains a real exit,
-        // so examiners can reopen the card later from their task list.
-        let activeAttendance = null;
-        if (!isGroupChat && originalText === '回上一頁') {
-          await runtime.loadOnly([ids.externalResults, ids.master], { maxAgeMs: 30_000 });
-          activeAttendance = externalTeaching.resumeActiveAttendance(context);
-        }
-        if (activeAttendance) {
-          bot.recordUser(userId);
-          reply = activeAttendance;
-        } else {
           const navigationResult = navigation.resolve(runtime.cache, userId, originalText);
           const text = navigationResult.command;
           const combinedTaskQuery = text === '我的任務';
@@ -161,7 +153,6 @@ async function handleLineEvent(event) {
           if (!isGroupChat) bot.recordUser(userId);
           reply = teachingSchedule.handleCommand(text, context) || internalTeaching.handleCommand(text, context) || externalTeaching.handleCommand(text, context) || bot.getReply(text, userId);
           if (!navigationResult.isBack) navigation.remember(runtime.cache, userId, reply?.navigationPage || text, Boolean(reply));
-        }
       }
     } else if (event.message.type === 'sticker') {
       if (['group', 'room'].includes(sourceType)) return;
