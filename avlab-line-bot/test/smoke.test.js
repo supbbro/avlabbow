@@ -338,9 +338,14 @@ test('my task query includes internal and external assignments', () => {
 
   const upcoming = new Date(); upcoming.setDate(upcoming.getDate() + 2);
   tasks.appendRow(['EXT-NAME-UPCOMING','1151','考試',upcoming,'18:00','19:00','200W Par','417','黃忻妤','','','已排定']);
+  const recentlyCompleted = new Date(); recentlyCompleted.setDate(recentlyCompleted.getDate() - 1);
+  tasks.appendRow(['EXT-NAME-COMPLETED','1151','考試',recentlyCompleted,'18:00','19:00','H6','417','黃忻妤','','','已完成']);
   runtime.cache.remove('spam_U-COMBINED_我的任務');
   const reopened = bot.getReply('我的任務', 'U-COMBINED');
   assert.equal(reopened.quickReply.items.some(item => item.action.text === '開始點名 EXT-NAME-UPCOMING'), true);
+  const completedAction = reopened.quickReply.items.find(item => item.action.data === '查看點名結果 EXT-NAME-COMPLETED');
+  assert.equal(completedAction.action.type, 'postback');
+  assert.match(completedAction.action.label, /修改/);
 
   for (const command of ['個人點名統計', '代班查詢', '認證', '考試結果', '認證 其他人']) {
     const personal = bot.getReply(command, 'U-COMBINED');
@@ -412,8 +417,12 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.match(finished.text, /任務已完成/);
   assert.doesNotMatch(finished.text, /黃本簽退並註記時間/);
   assert.doesNotMatch(finished.text, /保證金單/);
-  assert.equal(finished.quickReply.items[0].action.type, 'uri');
-  assert.match(finished.quickReply.items[0].action.uri, new RegExp(ids.externalResults));
+  const modifyStatus = finished.quickReply.items.find(item => item.action.label.includes('修改狀態'));
+  assert.equal(modifyStatus.action.type, 'postback');
+  assert.equal(modifyStatus.action.data, '查看點名結果 T1');
+  const certificationStatus = finished.quickReply.items.find(item => item.action.label === '查看考生認證狀態');
+  assert.equal(certificationStatus.action.type, 'uri');
+  assert.match(certificationStatus.action.uri, new RegExp(ids.externalResults));
   const recentTasks = finished.quickReply.items.find(item => item.action.label.includes('回近期任務'));
   assert.equal(recentTasks.action.type, 'postback');
   assert.equal(recentTasks.action.data, '近期任務');
@@ -690,6 +699,7 @@ test('finishing an external exam reminds the examiner about deposit slips and ch
   const finished = externalTeaching.handleCommand('完成點名 T-EXAM-FINISH', context);
   assert.match(finished.text, /任務已完成/);
   assert.doesNotMatch(finished.text, /保證金單簽名/);
+  assert.equal(finished.quickReply.items.some(item => item.action.data === '查看點名結果 T-EXAM-FINISH'), true);
 });
 
 test('a roster student can bind LINE and receives a retest form after failed grading', () => {

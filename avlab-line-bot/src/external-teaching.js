@@ -1168,6 +1168,7 @@ function finishAttendance(taskId, context) {
     return `\n可退保證金 ${refundable}｜尚未符合 ${students.length - refundable}`;
   })() : '';
   return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}${refundSummary}\n\n點擊下方可查看考生認證狀態。`, externalNav([
+    { label: '✏️ 修改狀態', postback: `查看點名結果 ${task.id}` },
     { label: '查看考生認證狀態', uri: certificationStatusUrl() }
   ], '近期任務', '回近期任務'));
 }

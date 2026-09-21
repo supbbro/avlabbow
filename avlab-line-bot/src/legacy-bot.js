@@ -463,8 +463,12 @@ function showTasksForName(name) {
   var txt=(level==='見習'?apprenticeText+'\n\n':'')+'【' + name + ' 的對內＋對外教學官／考官任務】\n\n',q=[],td=new Date();
   var today=new Date(td);today.setHours(0,0,0,0);
   if (t.some(tk => tk.source === '對內')) q.push({ type: 'action', action: { type: 'uri', label: '📋 對內點名表', uri: 'https://docs.google.com/spreadsheets/d/' + INTERNAL_ATTENDANCE_SHEET_ID + '/edit#gid=653206596' } });
+  var completedCutoff=new Date(today);completedCutoff.setDate(completedCutoff.getDate()-14);
+  t.filter(tk => tk.source === '對外' && tk.status === '已完成' && tk.start >= completedCutoff && tk.start < td).sort((a,b)=>b.start-a.start).slice(0,3).forEach(tk => {
+    if(q.length<10)q.push({ type:'action', action:{ type:'postback', label:'✏️ 修改 '+tk.equipment.slice(0,11), data:'查看點名結果 '+tk.taskId } });
+  });
   t.filter(tk => tk.source === '對外' && tk.status !== '已完成' && tk.start >= today).slice(0, 9).forEach(tk => {
-    q.push({ type: 'action', action: { type: 'message', label: '📝 點名卡 ' + tk.equipment.slice(0, 10), text: '開始點名 ' + tk.taskId } });
+    if(q.length<10)q.push({ type: 'action', action: { type: 'message', label: '📝 點名卡 ' + tk.equipment.slice(0, 10), text: '開始點名 ' + tk.taskId } });
   });
   t.forEach((tk, i) => {
     txt += tk.summary + '\n';
