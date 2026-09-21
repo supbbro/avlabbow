@@ -1394,7 +1394,7 @@ function examinerReminderText(task, roster = studentRosterText(task)) {
     '• 到場在黃本簽到並註記時間，簽出機單。',
     '• 到教學時間後，開啟點名卡逐位點名。'
   ];
-  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n若現在不處理，可按「放一邊」；之後從「我的任務」的對外任務重新開啟，已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}\n\n若考生未通過，請在評分後依該考生結果頁顯示的補考方式當場告知。` : ''}`;
+  return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n若現在不處理，可按「放一邊」；之後可由「我的對內／對外任務」中再開啟「📝 點名卡」，已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}\n\n若考生未通過，請在評分後依該考生結果頁顯示的補考方式當場告知。` : ''}`;
 }
 
 function studentReminderText(task, student) {
