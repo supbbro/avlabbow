@@ -993,6 +993,21 @@ test('registration response is the deposit authority and counts each exam equipm
   assert.equal(registrations[0].number, '111101017');
 });
 
+test('duplicate registration submissions merge unique equipment for the deposit total', () => {
+  const headers = ['時間戳記', '姓名', '系級', '學號', 'X160考試', 'H6考試', 'Atomos考試', '姓名', '系級', '學號', 'H6考試', 'Atomos螢幕 考試', 'Par 200W考試'];
+  const rows = [
+    ['2026/9/20 09:00:00', '重複報名生', '廣電三', '111101999', true, true, true, '', '', '', '', '', ''],
+    ['2026/9/20 09:05:00', '', '', '', '', '', '', '重複報名生', '廣電三', '111101999', true, true, ''],
+    ['2026/9/20 09:10:00', '重複報名生', '廣電三', '111101999', '', '', '', '', '', '', '', '', true]
+  ];
+  const registrations = parseRegistrationRows([headers, ...rows]);
+  assert.equal(registrations.length, 1);
+  assert.deepEqual(registrations[0].equipment, ['X160', 'H6', 'Atomos', 'Par 200W']);
+  assert.equal(registrations[0].equipment.length, 4);
+  assert.equal(registrations[0].equipment.length * 50, 200);
+  assert.equal(registrations[0].department, '廣電三');
+});
+
 test('external data reset excludes dates before September 14, 2026', () => {
   const current = externalTeaching._test.isCurrentExternalData;
   assert.equal(current(new Date('2026-09-13T23:59:59+08:00')), false);
@@ -1172,10 +1187,12 @@ test('exam schedule students sync in row order even without a matching registrat
 
     const registration = isolated.openById(ids.externalRegistration).insertSheet('表單回覆 1');
     const header = Array(21).fill('');
-    Object.assign(header, { 0: '時間戳記', 4: '姓名', 6: '學號', 20: 'H6考試' });
+    Object.assign(header, { 0: '時間戳記', 4: '姓名', 6: '學號', 10: 'X160考試', 20: 'H6考試' });
     const response = Array(21).fill('');
     Object.assign(response, { 0: '2026/9/18 09:00:00', 4: '學生甲', 6: '1001', 20: true });
-    registration.appendRow(header); registration.appendRow(response);
+    const duplicateResponse = Array(21).fill('');
+    Object.assign(duplicateResponse, { 0: '2026/9/18 09:05:00', 4: '學生甲', 6: '1001', 10: true, 20: true });
+    registration.appendRow(header); registration.appendRow(response); registration.appendRow(duplicateResponse);
 
     const deposit = isolated.openById(ids.deposit).insertSheet('考試週保證金');
     deposit.appendRow(['姓名','系級','學號']);
@@ -1189,6 +1206,7 @@ test('exam schedule students sync in row order even without a matching registrat
       [taskId, '學生乙', '', 2]
     ]);
     assert.deepEqual(externalTeaching._test.studentsFor(taskId).map(student => student.name), ['學生甲', '學生乙']);
+    assert.deepEqual(deposit.getRange(4, 1, 1, 6).getValues()[0], ['學生甲', '', '1001', 'H6、X160', 2, 100]);
   } finally {
     installGlobals(runtime);
   }
