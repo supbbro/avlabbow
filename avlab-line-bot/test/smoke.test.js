@@ -1149,6 +1149,20 @@ test('teaching assignments are parsed from date, time, examiner and student rows
   assert.equal(tasks[0].date.getFullYear(), 2026);
 });
 
+test('teaching assignments propagate merged date headers across equipment columns', () => {
+  const rows = [
+    ['', '教學週I', ''], ['', '9/30（三）', ''], ['時間', '18:00-19:00', '18:00-19:00'],
+    ['項目', '基礎配件課程', '3play'], ['地點', '401', '新棚'], ['教學官', '考官甲', '黃忻妤'],
+    ['學生', '學生甲', '學生乙']
+  ];
+  const tasks = parseTeachingSheet(rows, '教學週分班表I', '1151');
+  assert.equal(tasks.length, 2);
+  assert.equal(tasks[1].equipment, '3play');
+  assert.equal(tasks[1].examiner, '黃忻妤');
+  assert.equal(tasks[1].date.getDate(), 30);
+  assert.deepEqual(tasks[1].students.map(student => student.name), ['學生乙']);
+});
+
 test('exam assignments propagate merged date headers and choose the correct examiner column', () => {
   const rows = [
     ['', '', '考試週'], ['一般器材', '燈光器材', '3/30(一)', ''], ['項目', '', 'X160', 'Lith LED'],

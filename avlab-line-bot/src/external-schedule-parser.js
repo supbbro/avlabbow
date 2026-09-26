@@ -71,14 +71,24 @@ function makeTask({ term, sheetName, itemRow, column, phase, date, time, equipme
 function parseTeachingSheet(data, sheetName, term) {
   if (!Array.isArray(data) || data.length < 7) return [];
   const dateRow = data[1] || [];
+  const width = data.reduce((max, row) => Math.max(max, row?.length || 0), 0);
+  const dateHeaders = [];
+  let currentDate = null;
+  // The schedule uses merged date cells when one day has multiple equipment
+  // columns. Google Sheets only returns the date in the merged cell's first
+  // column, so carry it across the following blank columns.
+  for (let column = 1; column < width; column++) {
+    const candidate = parseDateCell(dateRow[column], term);
+    if (candidate) currentDate = candidate;
+    dateHeaders[column] = currentDate ? new Date(currentDate) : null;
+  }
   const timeRows = [];
   data.forEach((row, index) => { if (text(row?.[0]) === '時間') timeRows.push(index); });
   const tasks = [];
   for (let block = 0; block < timeRows.length; block++) {
     const timeRow = timeRows[block], itemRow = timeRow + 1, endRow = timeRows[block + 1] ?? data.length;
-    const width = Math.max(dateRow.length, data[timeRow]?.length || 0, data[itemRow]?.length || 0);
     for (let column = 1; column < width; column++) {
-      const date = parseDateCell(dateRow[column], term);
+      const date = dateHeaders[column];
       const time = parseTimeRange(data[timeRow]?.[column]);
       const equipment = data[itemRow]?.[column];
       const examiner = data[itemRow + 2]?.[column];
