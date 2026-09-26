@@ -11,7 +11,7 @@ const SHEETS = {
   depositReminders: '保證金提醒紀錄'
 };
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
-const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
+const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '侯班影製提前考試週', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
 const REMINDER_LEAD_MINUTES = 60;
 const EXAM_PASSING_RULES = '【考試通過標準】\n• 簡答題：考制度 2 題＋器材 3 題，最多錯 1 題。\n• 上機考：最多錯 3 題。';
 const COMBINED_QUESTION_BANK_URL = 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X';

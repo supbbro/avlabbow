@@ -158,7 +158,7 @@ function parseWorkbook(sheets, term = process.env.ACADEMIC_TERM || '1151') {
   const tasks = [];
   for (const [sheetName, data] of Object.entries(sheets || {})) {
     if (/^教學週分班表/.test(sheetName)) tasks.push(...parseTeachingSheet(data, sheetName, term));
-    else if (/考試週分班表|補考週分班表/.test(sheetName)) tasks.push(...parseExamSheet(data, sheetName, term));
+    else if (/考試週|補考週分班表/.test(sheetName)) tasks.push(...parseExamSheet(data, sheetName, term));
   }
   return tasks;
 }

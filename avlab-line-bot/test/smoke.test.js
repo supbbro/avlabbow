@@ -15,7 +15,7 @@ const internalTeaching = require('../src/internal-teaching');
 const externalTeaching = require('../src/external-teaching');
 const teachingSchedule = require('../src/teaching-schedule');
 const externalGroupSync = require('../src/external-group-sync');
-const { parseTeachingSheet, parseExamSheet } = require('../src/external-schedule-parser');
+const { parseWorkbook, parseTeachingSheet, parseExamSheet } = require('../src/external-schedule-parser');
 const { parseInternalTaskWorkbook } = require('../src/internal-task-parser');
 const { parseDepositWorkbook } = require('../src/deposit-parser');
 const { parseRegistrationRows } = require('../src/external-registration-parser');
@@ -1176,6 +1176,22 @@ test('exam assignments propagate merged date headers and choose the correct exam
   assert.deepEqual(tasks[1].students.map(student => student.name), ['學生乙', '學生丙']);
   assert.deepEqual(tasks[1].students.map(student => student.scheduledStart), ['12:05', '12:20']);
   assert.equal(tasks[0].date.getFullYear(), 2027);
+});
+
+test('early film-production exam sheet is included in external tasks', () => {
+  const rows = [
+    ['', '', '侯班影製提前考試週'], ['一般器材', '燈光器材', '10/5（一）', '10/6（二）'],
+    ['項目', '', '', 'a7sII'], ['地點', '', '', '403'], ['考官', '', '', '黃忻妤'],
+    ['12:05-12:20', '12:05-12:15', '', '卓祺叡'], ['12:25-12:40', '12:20-12:30', '', '鄭哲宇']
+  ];
+  const tasks = parseWorkbook({ '侯班影製提前考試週': rows }, '1151');
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].phase, '考試');
+  assert.equal(tasks[0].equipment, 'a7sII');
+  assert.equal(tasks[0].examiner, '黃忻妤');
+  assert.equal(tasks[0].start, '12:05');
+  assert.equal(tasks[0].end, '12:40');
+  assert.deepEqual(tasks[0].students.map(student => student.name), ['卓祺叡', '鄭哲宇']);
 });
 
 test('exam schedule students sync in row order even without a matching registration', () => {
