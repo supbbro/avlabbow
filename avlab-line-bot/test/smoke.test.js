@@ -79,6 +79,15 @@ test('main menu survives the Apps Script to Node compatibility layer', () => {
   assert.deepEqual(reply.quickReply.items.map(item => item.action.text), ['選擇對外學生', '選擇中心助理']);
 });
 
+test('bound users receive no canned reply for unrecognized conversation', () => {
+  const master = runtime.openById(ids.master);
+  const bindings = master.getSheetByName('用戶綁定') || master.insertSheet('用戶綁定');
+  if (!bindings.getLastRow()) bindings.appendRow(['LINE User ID', '姓名', '綁定時間', '學號', '身分類型', '身分確認時間']);
+  bindings.appendRow(['U-SILENT-UNKNOWN', '靜默測試者', '', '', 'assistant']);
+  assert.equal(bot.getReply('隨便聊天', 'U-SILENT-UNKNOWN'), null);
+  assert.equal(bot.getReply('學長好強加油', 'U-SILENT-UNKNOWN'), null);
+});
+
 test('menus omit retired links and common links only show current 1151 files', () => {
   const common = bot.getReply('常用連結', 'U-test').text;
   assert.match(common, /1151 教學總排程/);

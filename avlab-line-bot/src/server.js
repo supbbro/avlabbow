@@ -163,13 +163,9 @@ async function handleLineEvent(event) {
           if (!navigationResult.isBack) navigation.remember(runtime.cache, userId, reply?.navigationPage || text, Boolean(reply));
       }
     } else if (event.message.type === 'sticker') {
-      if (['group', 'room'].includes(sourceType)) return;
-      await runtime.loadOnly([ids.master]);
-      bot.recordUser(userId);
-      reply = { text: '怎說', quickReply: { items: [
-        { type: 'action', action: { type: 'message', label: '👨‍🎓 對外學生', text: '對外學生' } },
-        { type: 'action', action: { type: 'message', label: '👩‍💼 中心助理', text: '中心助理' } }
-      ] } };
+      // Stickers are intentionally ignored. The bot replies only to explicit
+      // commands, buttons and postbacks.
+      return;
     }
   }
   await runtime.flush();

@@ -3452,9 +3452,10 @@ function getReply(u, i) {
     return { text: '💡 提醒：您尚未綁定姓名！請輸入「我是 您的姓名」完成綁定，才能接收個人化通知。\n\n例如：我是 徐嘉翔', quickReply: qr([{ label: '🔙 回主選單', text: '主選單' }]) };
   }
 
-  if (u.includes('學長') || u.includes('好強')) return { text: ['學長、、', '學姊、、'][Math.random() * 2 | 0], quickReply: qr([{ label: '🔙 回主選單', text: '主選單' }]) };
-  if (u.includes('加油')) return { text: ['好強', '真強', '怎這強'][Math.random() * 3 | 0], quickReply: qr([{ label: '🔙 回主選單', text: '主選單' }]) };
-  return { text: ['怎說', '好強', '真強'][Math.random() * 3 | 0], quickReply: qr([{ label: '🔙 回主選單', text: '主選單' }]) };
+  // Unknown private messages stay silent. Only explicit bot commands should
+  // produce a reply; this prevents conversational/canned responses from
+  // interrupting attendance and task flows.
+  return null;
 }
 
 // ========== doPost / doGet / replyToUser ==========
@@ -3500,17 +3501,11 @@ function doPost(e) {
         if (ev.message.type === 'text') {
           var txt = ev.message.text.trim();
           // ck 是你原本的檢查函式 (可能是防洗版邏輯)
-          rep = ck(uid, 'text:' + txt) ? '閉嘴' : getReply(txt, uid);
+          rep = ck(uid, 'text:' + txt) ? null : getReply(txt, uid);
           
         } else if (ev.message.type === 'sticker') {
-          var key = 'sticker:' + ev.message.packageId + ':' + ev.message.stickerId;
-          rep = ck(uid, key) ? '閉嘴' : { 
-            text: '怎說', 
-            quickReply: qr([
-              { label: '👨‍🎓 對外學生', text: '對外學生' }, 
-              { label: '👩‍💼 中心助理', text: '中心助理' }
-            ]) 
-          };
+          // Stickers are not bot commands, so do not send a canned reply.
+          rep = null;
         }
 
         // 4. 回覆使用者
