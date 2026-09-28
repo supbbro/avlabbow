@@ -1181,9 +1181,9 @@ test('deposit sync writes the effective LINE binding status beside each student'
       { name: '未綁學生', department: '廣電三', number: '111101992', equipment: ['CX350'], submissionCount: 1 }
     ]);
     assert.deepEqual(result, { rows: 2, updated: true, skipped: false });
-    assert.equal(deposits.getRange(1, 12).getValue(), 'LINE 綁定狀態');
-    assert.equal(deposits.getRange(4, 12).getValue(), '✅ 已綁定');
-    assert.equal(deposits.getRange(5, 12).getValue(), '⚠️ 未綁定');
+    assert.deepEqual(deposits.getRange(1, 10, 1, 3).getValues()[0], ['LINE 綁定狀態', '班長註記', '教學部註記']);
+    assert.equal(deposits.getRange(4, 10).getValue(), '✅ 已綁定');
+    assert.equal(deposits.getRange(5, 10).getValue(), '⚠️ 未綁定');
   } finally {
     installGlobals(runtime);
   }

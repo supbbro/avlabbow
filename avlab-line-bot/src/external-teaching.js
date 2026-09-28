@@ -240,10 +240,19 @@ function latestRegistrationRows({ includeEmpty = false } = {}) {
 function depositRows() {
   const target = SpreadsheetApp.openById(ids.deposit).getSheetByName('考試週保證金');
   if (!target) return [];
-  return target.getDataRange().getValues().slice(3).map((row, index) => ({
+  const values = target.getDataRange().getValues();
+  const headers = values[0] || [];
+  const columnIndex = (label, fallback) => {
+    const index = headers.findIndex(value => String(value || '').trim() === label);
+    return index >= 0 ? index : fallback;
+  };
+  const bindingIndex = columnIndex('LINE 綁定狀態', 9);
+  const captainIndex = columnIndex('班長註記', 10);
+  const teachingIndex = columnIndex('教學部註記', 11);
+  return values.slice(3).map((row, index) => ({
     phase: '考試', row: index + 4, name: String(row[0] || '').trim(), department: String(row[1] || '').trim(), number: String(row[2] || '').trim(),
     items: row[3], itemCount: row[4], requiredAmount: row[5], paidRaw: row[6], paid: paidFlag(row[6]), paidAmount: row[7],
-    processed: row[8], captainNote: row[9], teachingNote: row[10], bindingStatus: row[11]
+    processed: row[8], bindingStatus: row[bindingIndex], captainNote: row[captainIndex], teachingNote: row[teachingIndex]
   })).filter(row => row.name || row.number);
 }
 
@@ -260,9 +269,11 @@ function syncDepositFromRegistrations(registrations) {
   if (!registrations.length) return { rows: 0, updated: false, skipped: true, reason: 'empty-registration-source' };
   const target = SpreadsheetApp.openById(ids.deposit).getSheetByName('考試週保證金');
   if (!target) throw new Error('找不到「考試週保證金」分頁');
-  const bindingHeader = 'LINE 綁定狀態';
-  if (target.getRange(1, 12).getValue() !== bindingHeader) target.getRange(1, 12).setValue(bindingHeader);
   const existing = depositRows();
+  const detailHeaders = ['LINE 綁定狀態', '班長註記', '教學部註記'];
+  if (rowChanged(target.getRange(1, 10, 1, 3).getValues()[0], detailHeaders)) {
+    target.getRange(1, 10, 1, 3).setValues([detailHeaders]);
+  }
   const existingFor = registration => existing.find(row => norm(row.number) === norm(registration.number))
     || (existing.filter(row => norm(row.name) === norm(registration.name)).length === 1
       ? existing.find(row => norm(row.name) === norm(registration.name)) : null);
@@ -273,7 +284,7 @@ function syncDepositFromRegistrations(registrations) {
     const bindingStatus = userIdForName(registeredName, registration.number) ? '✅ 已綁定' : '⚠️ 未綁定';
     return [registration.name, registration.department, registration.number, registration.equipment.join('、'),
       registration.equipment.length, registration.equipment.length * 50, current?.paidRaw ?? false,
-      current?.paidAmount ?? '', current?.processed ?? '', current?.captainNote ?? '', teachingNote, bindingStatus];
+      current?.paidAmount ?? '', current?.processed ?? '', bindingStatus, current?.captainNote ?? '', teachingNote];
   });
   const rowsToWrite = Math.max(existing.length, desired.length);
   const padded = [...desired, ...Array.from({ length: rowsToWrite - desired.length }, () => Array(12).fill(''))];
