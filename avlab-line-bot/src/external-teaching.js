@@ -239,6 +239,15 @@ function depositRows() {
   })).filter(row => row.name || row.number);
 }
 
+function depositTeachingNote(registration, currentNote = '') {
+  const manual = String(currentNote || '').split('\n')
+    .filter(line => !line.startsWith('【系統】重複填寫')).join('\n').trim();
+  const automatic = registration.submissionCount > 1
+    ? `【系統】重複填寫 ${registration.submissionCount} 次，已以最新一筆覆蓋先前內容（${registration.timestamp}）`
+    : '';
+  return [manual, automatic].filter(Boolean).join('\n');
+}
+
 function syncDepositFromRegistrations(registrations) {
   if (!registrations.length) return { rows: 0, updated: false, skipped: true, reason: 'empty-registration-source' };
   const target = SpreadsheetApp.openById(ids.deposit).getSheetByName('考試週保證金');
@@ -249,9 +258,10 @@ function syncDepositFromRegistrations(registrations) {
       ? existing.find(row => norm(row.name) === norm(registration.name)) : null);
   const desired = registrations.filter(registration => registration.equipment.length).map(registration => {
     const current = existingFor(registration);
+    const teachingNote = depositTeachingNote(registration, current?.teachingNote);
     return [registration.name, registration.department, registration.number, registration.equipment.join('、'),
       registration.equipment.length, registration.equipment.length * 50, current?.paidRaw ?? false,
-      current?.paidAmount ?? '', current?.processed ?? '', current?.captainNote ?? '', current?.teachingNote ?? ''];
+      current?.paidAmount ?? '', current?.processed ?? '', current?.captainNote ?? '', teachingNote];
   });
   const rowsToWrite = Math.max(existing.length, desired.length);
   const padded = [...desired, ...Array.from({ length: rowsToWrite - desired.length }, () => Array(11).fill(''))];
@@ -1744,4 +1754,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };

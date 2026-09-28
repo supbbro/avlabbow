@@ -1025,7 +1025,7 @@ test('registration response is the deposit authority and counts each exam equipm
   assert.equal(registrations[0].number, '111101017');
 });
 
-test('duplicate registration submissions merge unique equipment for the deposit total', () => {
+test('a repeated registration replaces the previous submission and recounts the deposit', () => {
   const headers = ['時間戳記', '姓名', '系級', '學號', 'X160考試', 'H6考試', 'Atomos考試', '姓名', '系級', '學號', 'H6考試', 'Atomos螢幕 考試', 'Par 200W考試'];
   const rows = [
     ['2026/9/20 09:00:00', '重複報名生', '廣電三', '111101999', true, true, true, '', '', '', '', '', ''],
@@ -1034,10 +1034,54 @@ test('duplicate registration submissions merge unique equipment for the deposit 
   ];
   const registrations = parseRegistrationRows([headers, ...rows]);
   assert.equal(registrations.length, 1);
-  assert.deepEqual(registrations[0].equipment, ['X160', 'H6', 'Atomos', 'Par 200W']);
-  assert.equal(registrations[0].equipment.length, 4);
-  assert.equal(registrations[0].equipment.length * 50, 200);
+  assert.deepEqual(registrations[0].equipment, ['Par 200W']);
+  assert.equal(registrations[0].equipment.length, 1);
+  assert.equal(registrations[0].equipment.length * 50, 50);
   assert.equal(registrations[0].department, '廣電三');
+  assert.equal(registrations[0].submissionCount, 3);
+});
+
+test('a newer blank registration clears an older exam selection', () => {
+  const rows = [
+    ['時間戳記', '姓名', '系級', '學號', 'H6考試'],
+    ['2026/9/20 上午 9:00:00', '更改報名生', '廣電三', '111101998', true],
+    ['2026/9/20 上午 9:05:00', '更改報名生', '廣電三', '111101998', '']
+  ];
+  assert.deepEqual(parseRegistrationRows(rows), []);
+});
+
+test('registration replacement follows timestamps instead of appended row order', () => {
+  const rows = [
+    ['時間戳記', '姓名', '系級', '學號', 'H6考試', 'X160考試'],
+    ['2026/9/24 下午 8:43:29', '時間測試生', '廣電三', '111101997', true, ''],
+    ['2026/9/4 上午 10:00:00', '時間測試生', '廣電三', '111101997', '', true]
+  ];
+  const [registration] = parseRegistrationRows(rows);
+  assert.deepEqual(registration.equipment, ['H6']);
+  assert.equal(registration.submissionCount, 2);
+});
+
+test('a one-digit student-number typo is folded into the corrected registration', () => {
+  const rows = [
+    ['時間戳記', '姓名', '系級', '學號', 'H6考試'],
+    ['2026/9/24 下午 8:40:38', '呂世婷', '廣電三', '11345043', true],
+    ['2026/9/24 下午 8:43:29', '呂世婷', '廣電三', '113405043', true]
+  ];
+  const registrations = parseRegistrationRows(rows);
+  assert.equal(registrations.length, 1);
+  assert.equal(registrations[0].number, '113405043');
+  assert.equal(registrations[0].submissionCount, 2);
+});
+
+test('deposit notes identify overwritten registrations without removing manual notes', () => {
+  const note = externalTeaching._test.depositTeachingNote({
+    submissionCount: 3,
+    timestamp: '2026/9/22 下午 6:11:28'
+  }, '人工備註\n【系統】重複填寫 2 次，舊記錄');
+  assert.match(note, /^人工備註\n/);
+  assert.match(note, /重複填寫 3 次/);
+  assert.match(note, /已以最新一筆覆蓋先前內容/);
+  assert.doesNotMatch(note, /舊記錄/);
 });
 
 test('external data reset excludes dates before September 14, 2026', () => {
@@ -1268,7 +1312,7 @@ test('exam schedule students sync in row order even without a matching registrat
       [taskId, '學生乙', '', 2]
     ]);
     assert.deepEqual(externalTeaching._test.studentsFor(taskId).map(student => student.name), ['學生甲', '學生乙']);
-    assert.deepEqual(deposit.getRange(4, 1, 1, 6).getValues()[0], ['學生甲', '', '1001', 'H6、X160', 2, 100]);
+    assert.deepEqual(deposit.getRange(4, 1, 1, 6).getValues()[0], ['學生甲', '', '1001', 'X160、H6', 2, 100]);
   } finally {
     installGlobals(runtime);
   }

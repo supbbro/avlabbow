@@ -41,6 +41,34 @@ function mergeUnique(values, keyFor) {
   return [...merged.values()];
 }
 
+function timestampOrder(value, fallback) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getTime();
+  const raw = text(value);
+  const localized = raw.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})\s*(上午|下午)?\s*(\d{1,2})?:(\d{2})?(?::(\d{2}))?/);
+  if (localized) {
+    let hour = Number(localized[5] || 0);
+    if (localized[4] === '下午' && hour < 12) hour += 12;
+    if (localized[4] === '上午' && hour === 12) hour = 0;
+    return Date.UTC(Number(localized[1]), Number(localized[2]) - 1, Number(localized[3]), hour, Number(localized[6] || 0), Number(localized[7] || 0));
+  }
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
+
+function editDistance(left, right) {
+  const a = norm(left), b = norm(right);
+  const row = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    let previous = row[0]; row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const current = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, previous + (a[i - 1] === b[j - 1] ? 0 : 1));
+      previous = current;
+    }
+  }
+  return row[b.length];
+}
+
 function parseRegistrationRows(rows) {
   if (!Array.isArray(rows) || !rows.length) return [];
   const headerIndex = rows.findIndex(row => row.some(value => text(value) === '學號') && row.some(value => text(value) === '姓名'));
@@ -59,29 +87,47 @@ function parseRegistrationRows(rows) {
   const itemColumns = headers.map((header, index) => ({ header, index })).filter(({ header }) => registrationItem(header));
   const equipmentColumns = itemColumns.filter(({ header }) => /考試/u.test(header)
     || ['Teradek無線追焦組', 'Teradek無線追'].includes(header));
+  const validNumbersByName = new Map();
+  for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex++) for (const [nameColumn, numberColumn] of identityPairs) {
+    const name = norm(rows[rowIndex]?.[nameColumn]), number = norm(rows[rowIndex]?.[numberColumn]);
+    if (!name || !/^\d{9}$/.test(number)) continue;
+    if (!validNumbersByName.has(name)) validNumbersByName.set(name, new Set());
+    validNumbersByName.get(name).add(number);
+  }
   const registrations = new Map();
+  const submissionCounts = new Map();
   for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex] || [];
     const registeredItems = mergeUnique(itemColumns.filter(({ index }) => selected(row[index]))
       .map(({ header }) => header.replace(/\s+/g, ' ').trim()), itemKey);
     const equipment = mergeUnique(equipmentColumns.filter(({ index }) => selected(row[index]))
       .map(({ header }) => equipmentName(header)).filter(Boolean), equipmentKey);
-    if (!registeredItems.length) continue;
     for (const [nameColumn, numberColumn, departmentColumn] of identityPairs) {
       const name = text(row[nameColumn]);
-      const number = text(row[numberColumn]);
+      let number = text(row[numberColumn]);
       if (!name || !number) continue;
+      const validNumbers = validNumbersByName.get(norm(name));
+      if (!/^\d{9}$/.test(norm(number)) && validNumbers?.size === 1) {
+        const candidate = [...validNumbers][0];
+        if (editDistance(number, candidate) <= 1) number = candidate;
+      }
       const key = norm(number) || `NAME:${norm(name)}`;
+      submissionCounts.set(key, (submissionCounts.get(key) || 0) + 1);
       const previous = registrations.get(key);
+      const order = timestampOrder(row[0], rowIndex + 1);
+      if (previous && previous._order > order) continue;
       registrations.set(key, {
-        name: name || previous?.name || '', department: text(row[departmentColumn]) || previous?.department || '', number,
-        equipment: mergeUnique([...(previous?.equipment || []), ...equipment], equipmentKey),
-        registeredItems: mergeUnique([...(previous?.registeredItems || []), ...registeredItems], itemKey),
-        timestamp: row[0] || '', sourceRow: rowIndex + 1
+        name, department: text(row[departmentColumn]), number,
+        equipment, registeredItems,
+        timestamp: row[0] || '', sourceRow: rowIndex + 1, _order: order
       });
     }
   }
-  return [...registrations.values()];
+  return [...registrations.entries()].flatMap(([key, registration]) => {
+    if (!registration.registeredItems.length) return [];
+    const { _order, ...result } = registration;
+    return [{ ...result, submissionCount: submissionCounts.get(key) || 1 }];
+  });
 }
 
 module.exports = { parseRegistrationRows, selected, equipmentName };
