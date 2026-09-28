@@ -79,6 +79,21 @@ test('main menu survives the Apps Script to Node compatibility layer', () => {
   assert.deepEqual(reply.quickReply.items.map(item => item.action.text), ['選擇對外學生', '選擇中心助理']);
 });
 
+test('certification levels follow the updated 11, 10, and 7 item rules', () => {
+  const { LEVEL_REQUIREMENTS, requirementLabel, requirementPassed } = bot._test;
+  assert.deepEqual(Object.fromEntries(Object.entries(LEVEL_REQUIREMENTS).map(([level, value]) => [level, value.all.length])), {
+    見習: 11, 二級: 10, 一級: 7
+  });
+  const apprentice = LEVEL_REQUIREMENTS.見習.all.map(requirementLabel);
+  assert.equal(apprentice.includes('燈盤'), true);
+  assert.equal(apprentice.includes('字幕機'), false);
+  const levelTwo = LEVEL_REQUIREMENTS.二級.all;
+  const studio = levelTwo.find(item => requirementLabel(item).includes('導播台'));
+  assert.equal(requirementPassed(studio, ['導播台', '錄放影機']), true);
+  assert.equal(requirementPassed(studio, ['導播台']), false);
+  assert.equal(levelTwo.map(requirementLabel).includes('燈盤'), true);
+});
+
 test('bound users receive no canned reply for unrecognized conversation', () => {
   const master = runtime.openById(ids.master);
   const bindings = master.getSheetByName('用戶綁定') || master.insertSheet('用戶綁定');

@@ -96,22 +96,33 @@ var FOOD_LIST = {
 const LEVEL_REQUIREMENTS={
   '見習':{
     'all':[
-      'X160','A7SII','Atomos','CX350','3Play','字幕機','H6',
-      '軟殼燈','Lith LED','Zoom350','Par 200W'
+      'X160','A7SII',{label:'Atomos螢幕',all:['Atomos']},
+      '軟殼燈','Lith LED','Zoom350','Par 200W','H6',
+      {label:'新棚－3Play',all:['3Play']},'燈盤',{label:'棚內機 CX350',all:['CX350']}
     ]
   },
   '二級':{
     'all':[
-      'FS7','Teradek圖傳','Dwarf圖傳','Vortex 4S/8S','F8n','聲音工作區',
-      '導播台','錄放影機','成音台','字幕機'
+      'FS7','Teradek圖傳','Dwarf圖傳',
+      {label:'Creamsource Vortex 4S/8S',all:['Vortex 4S/8S']},'F8n','聲音工作區',
+      {label:'新棚－導播台＋錄放機',all:['導播台','錄放影機']},'成音台','字幕機','燈盤'
     ]
   },
   '一級':{
     'all':[
-      'KOMODO 6K','A7S3','Teradek無線追','Flo Box','ARRI S60 Pro','833','633'
+      'KOMODO 6K','A7S3',{label:'無線追焦器',all:['Teradek無線追']},
+      'Flo Box','ARRI S60 Pro','633','833'
     ]
   }
 };
+function certificationKey(value){return String(value||'').trim().toUpperCase();}
+function requirementLabel(requirement){return typeof requirement==='string'?requirement:requirement.label;}
+function requirementItems(requirement){
+  return (typeof requirement==='string'?[requirement]:requirement.all||[requirement.label]).map(certificationKey);
+}
+function requirementPassed(requirement,passed){
+  return requirementItems(requirement).every(function(item){return passed.includes(item);});
+}
 const LEVEL_MAP={'徐嘉翔':'一級','毛成甄':'一級','王鈺慈':'一級','王師湲':'一級','梁文宜':'一級','陳逸璇':'一級','詹詠丞':'一級','施少涵':'二級','洪子雲':'二級','吳靜宜':'二級','江哲維':'二級','蔡季妍':'二級','吳欣芸':'二級','趙志僖':'二級','黃忻妤':'二級','陳胤之':'二級','賈茹茵':'二級','吳青璇':'二級','侯沛岑':'二級','許彤瑜':'二級','劉謹誼':'二級','陳奕穎':'二級','張馨元':'二級','許韶恩':'二級','蔡亞芯':'二級','朱曼禎':'二級','劉祐臻':'二級','胡邵晴':'二級','蔡妍安':'二級','曾郁淳':'二級','鄭書羽':'二級','鍾采彤':'見習','楊媛祺':'見習','張競云':'見習','李芸欣':'見習','林芷晴':'見習','葉秉勛':'見習','萬佳嫻':'見習','李子煊':'見習','徐晨瑋':'見習','張珉寧':'見習','李慈恩':'見習','劉俊睿':'見習','蔡璨遠':'見習','黃鈺琇':'見習','賴奕倫':'見習','李愉瑩':'見習','謝培愉':'見習','施語柔':'見習','韓睿森':'見習','王祥宇':'見習','林芫希':'見習','曾澧翔':'見習','侯少恩':'見習','黃浩霖':'見習','黃萱':'見習','陳逸朗':'見習','張庭瑄':'見習','莊馥瑄':'見習','杜宥萱':'見習','王絜薷':'見習'};
 
 // ========== 原有輔助函數 ==========
@@ -508,9 +519,10 @@ function getCertificationData(){
         else if(cv===true) is=true;
         if(is) psd.push(eq[j]);
       }
-      var req=LEVEL_REQUIREMENTS[lv].all.map(function(e){ return e.toUpperCase(); });
-      var miss=req.filter(e=>!psd.includes(e));
-      cm[nm]={name:n.toString(), level:lv, passed:psd, missing:miss, required:req};
+      var req=LEVEL_REQUIREMENTS[lv].all;
+      var labels=req.map(function(e){return requirementLabel(e);});
+      var miss=req.filter(function(e){return !requirementPassed(e,psd);}).map(function(e){return requirementLabel(e);});
+      cm[nm]={name:n.toString(), level:lv, passed:psd, missing:miss, required:labels};
     }
     cache.put('CERT_DATA', JSON.stringify(cm), 30);
     return cm;
@@ -545,14 +557,15 @@ function showCertificationProgress(name) {
   var text = '【' + certData.name + ' 的認證進度】\n📌 目前級別：' + currentLevel + '\n\n';
   
   displayLevels.forEach(function(level) {
-    var required = LEVEL_REQUIREMENTS[level] ? LEVEL_REQUIREMENTS[level].all.map(function(e){ return e.toUpperCase(); }) : [];
+    var required = LEVEL_REQUIREMENTS[level] ? LEVEL_REQUIREMENTS[level].all : [];
     var passedInLevel = [];
     var missingInLevel = [];
-    required.forEach(function(eq) {
-      if (passedAll.includes(eq)) {
-        passedInLevel.push(eq);
+    required.forEach(function(requirement) {
+      var label=requirementLabel(requirement);
+      if (requirementPassed(requirement,passedAll)) {
+        passedInLevel.push(label);
       } else {
-        missingInLevel.push(eq);
+        missingInLevel.push(label);
       }
     });
     
@@ -1900,7 +1913,7 @@ function isQualifiedForItem(item, normName, certData) {
   // 若認證資料缺失，則根據級別判斷
   var requiredLevel = null;
   for (var lvl in LEVEL_REQUIREMENTS) {
-    if (LEVEL_REQUIREMENTS[lvl].all.map(function(e){ return e.toUpperCase(); }).includes(itemUpper)) {
+    if (LEVEL_REQUIREMENTS[lvl].all.some(function(requirement){return requirementItems(requirement).includes(itemUpper);})) {
       requiredLevel = lvl;
       break;
     }
@@ -3563,5 +3576,6 @@ module.exports = {
   onRetestFormSubmit,
   onAvailabilityFormSubmit,
   onMasterSheetEdit,
-  onTaskSheetEdit
+  onTaskSheetEdit,
+  _test: { LEVEL_REQUIREMENTS, requirementLabel, requirementItems, requirementPassed }
 };
