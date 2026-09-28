@@ -15,6 +15,8 @@ const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '侯班影�
 const REMINDER_LEAD_MINUTES = 60;
 const EXAM_PASSING_RULES = '【考試通過標準】\n• 簡答題：考制度 2 題＋器材 3 題，最多錯 1 題。\n• 上機考：最多錯 3 題。';
 const COMBINED_QUESTION_BANK_URL = 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X';
+const EXTERNAL_CLASS_SCHEDULE_URL = 'https://docs.google.com/spreadsheets/d/1oaEKt3JVxcdy8yPBGZAuRh3lkhnvRoIJ9rTNbj-Gh9I/edit?gid=0#gid=0';
+const DEPOSIT_CORRECTION_CAMPAIGN = '2026-09-28-LATEST-REGISTRATION';
 // Records before this reset date were cleared from the derived task, student,
 // and deposit sheets. Keep their source rows from rebuilding those records.
 const EXTERNAL_DATA_START_DATE = '2026-09-14';
@@ -226,6 +228,12 @@ function enrichStudentsFromRoster(tasks, roster) {
 function registrationRows() {
   const target = SpreadsheetApp.openById(ids.externalRegistration).getSheetByName('表單回覆 1');
   return target ? parseRegistrationRows(target.getDataRange().getValues())
+    .filter(registration => isCurrentExternalData(registration.timestamp)) : [];
+}
+
+function latestRegistrationRows({ includeEmpty = false } = {}) {
+  const target = SpreadsheetApp.openById(ids.externalRegistration).getSheetByName('表單回覆 1');
+  return target ? parseRegistrationRows(target.getDataRange().getValues(), { includeEmpty })
     .filter(registration => isCurrentExternalData(registration.timestamp)) : [];
 }
 
@@ -1528,6 +1536,64 @@ function depositReminderText(kind, task, student, deadline) {
   return `【考試前保證金提醒】\n${student.name}你好，目前對帳表仍顯示尚未繳交考試保證金。\n\n你的最早考試：${formatDate(task.date)} ${formatTime(student.scheduledStart || task.start)}｜${task.equipment}\n請最遲於考試前一天完成繳費；若考試開始前仍未繳交，將取消考試資格。`;
 }
 
+function displayRegistrationName(value) {
+  return String(value || '').replace(/\s*更改表單\s*$/u, '').trim();
+}
+
+function depositCorrectionMessage(registration, { paid = false } = {}) {
+  const name = displayRegistrationName(registration.name);
+  const items = registration.equipment || [];
+  const amount = items.length * 50;
+  const lines = [
+    '【保證金資料更正＋分班表公告】',
+    `${name}你好，先前通知的報名項目或金額可能因重複填表計算有誤，請以本次更正為準。`,
+    '',
+    '最新報名考試項目：',
+    ...(items.length ? items.map(item => `• ${item}`) : ['• 無']),
+    `共 ${items.length} 項｜應繳保證金 ${amount} 元`
+  ];
+  if (!items.length) {
+    lines.push('', '你最新一次報名沒有考試項目；若先前收到繳費通知，請以本次 0 元為準。');
+  } else if (paid) {
+    lines.push('', '✅ 對帳表目前顯示已繳交，本訊息僅更正項目與應繳金額，不需重複繳費。');
+  } else if (registration.houbanFilm) {
+    lines.push('', '⚠️ 侯班影製學生：保證金請於 10/2（五）前完成繳交。');
+  } else {
+    lines.push('', '保證金請於 10/9（五）前完成繳交。');
+  }
+  lines.push('', '📋 分班表已公布：', EXTERNAL_CLASS_SCHEDULE_URL);
+  if (items.length) lines.push('', '若已繳交但本次項目或金額不同，請聯絡影音實驗室確認。');
+  return lines.join('\n');
+}
+
+function correctionCampaignKey(registration) {
+  return `DEPOSIT-CORRECTION:${DEPOSIT_CORRECTION_CAMPAIGN}:${norm(registration.number) || `NAME-${norm(displayRegistrationName(registration.name))}`}`;
+}
+
+function sendDepositCorrectionCampaign(now = new Date()) {
+  const today = taipeiDate(now);
+  if (today < '2026-09-28' || today > '2026-10-09') return 0;
+  const registrations = latestRegistrationRows({ includeEmpty: true });
+  if (!registrations.length) return 0;
+  const records = depositRows();
+  const logSheet = depositLogSheet();
+  const logged = depositLogKeys(logSheet);
+  let queued = 0;
+  for (const registration of registrations) {
+    const key = correctionCampaignKey(registration);
+    if (logged.has(key) || pendingReminderKeys.has(key)) continue;
+    const name = displayRegistrationName(registration.name);
+    const studentUserId = userIdForName(name, registration.number);
+    if (!studentUserId) continue;
+    const record = depositRecordFor({ ...registration, name }, '考試', records);
+    if (queuePush(studentUserId, reply(depositCorrectionMessage({ ...registration, name }, { paid: Boolean(record?.paid) })), {
+      key,
+      onSuccess: () => logDepositAction(logSheet, key, '保證金資料更正重發', { ...registration, name }, null, now, '已送')
+    })) queued++;
+  }
+  return queued;
+}
+
 function setScheduleStudentStrikethrough(task, student, struck) {
   const match = String(student.sourceCell || '').match(/^([A-Z]+)(\d+)$/i);
   if (!match || !task.sourceSheet) return false;
@@ -1590,7 +1656,9 @@ function processDepositRequirements(now = new Date()) {
     if (record?.paid) continue;
     const personKey = norm(registration.number);
     const initialKey = `DEPOSIT-START:${personKey}:${taipeiDate(reminderStart)}`;
-    if (!personKey || logged.has(initialKey) || pendingReminderKeys.has(initialKey)) continue;
+    const correctionKey = correctionCampaignKey(registration);
+    if (!personKey || logged.has(initialKey) || pendingReminderKeys.has(initialKey)
+      || logged.has(correctionKey) || pendingReminderKeys.has(correctionKey)) continue;
     const studentUserId = userIdForName(registration.name, registration.number);
     if (!studentUserId) continue;
     const entry = firstExams.find(candidate => norm(candidate.student.number) === personKey);
@@ -1672,6 +1740,7 @@ function expireExamQualifications(now = new Date()) {
 
 function sendExternalReminders(now = new Date()) {
   syncFromSchedule();
+  const corrected = sendDepositCorrectionCampaign(now);
   const deposit = processDepositRequirements(now);
   expireExamQualifications(now);
   let sent = 0;
@@ -1723,7 +1792,7 @@ function sendExternalReminders(now = new Date()) {
       sent++;
     }
   }
-  return sent + deposit.reminders;
+  return sent + deposit.reminders + corrected;
 }
 
 function replayDailyReminders(now, replay) {
@@ -1754,4 +1823,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };

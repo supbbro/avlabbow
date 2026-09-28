@@ -1048,6 +1048,72 @@ test('a newer blank registration clears an older exam selection', () => {
     ['2026/9/20 上午 9:05:00', '更改報名生', '廣電三', '111101998', '']
   ];
   assert.deepEqual(parseRegistrationRows(rows), []);
+  const [latest] = parseRegistrationRows(rows, { includeEmpty: true });
+  assert.deepEqual(latest.equipment, []);
+  assert.equal(latest.submissionCount, 2);
+});
+
+test('registration parser identifies Houban film students from the latest course selection', () => {
+  const rows = [
+    ['時間戳記', '姓名', '學號', '請勾選本學期所選之課程', '是否修習 一D56 侯志欽老師 影像製作', 'H6考試'],
+    ['2026/9/20 09:00:00', '侯班學生', '111101996', '一D56 侯志欽老師 影像製作', '是', true]
+  ];
+  const [registration] = parseRegistrationRows(rows);
+  assert.equal(registration.houbanFilm, true);
+});
+
+test('corrected deposit notice uses latest total, Houban deadline, and published schedule', () => {
+  const message = externalTeaching._test.depositCorrectionMessage({
+    name: '測試學生 更改表單', number: '111101995', equipment: ['H6', 'Par 200W'], houbanFilm: true
+  });
+  assert.match(message, /可能因重複填表計算有誤/);
+  assert.match(message, /H6/);
+  assert.match(message, /Par 200W/);
+  assert.match(message, /共 2 項｜應繳保證金 100 元/);
+  assert.match(message, /侯班影製學生.*10\/2/);
+  assert.match(message, /分班表已公布/);
+  assert.match(message, /1oaEKt3JVxcdy8yPBGZAuRh3lkhnvRoIJ9rTNbj-Gh9I/);
+  assert.doesNotMatch(message, /更改表單/);
+});
+
+test('corrected deposit notice does not ask paid or zero-item students to pay again', () => {
+  const paid = externalTeaching._test.depositCorrectionMessage({ name: '已繳學生', equipment: ['H6'], houbanFilm: true }, { paid: true });
+  assert.match(paid, /不需重複繳費/);
+  assert.doesNotMatch(paid, /10\/2（五）前完成繳交/);
+  const empty = externalTeaching._test.depositCorrectionMessage({ name: '零項學生', equipment: [], houbanFilm: true });
+  assert.match(empty, /應繳保證金 0 元/);
+  assert.doesNotMatch(empty, /前完成繳交/);
+});
+
+test('deposit correction campaign records success once and suppresses the old initial reminder', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  try {
+    const results = isolated.openById(ids.externalResults);
+    results.insertSheet('對外任務').appendRow(['任務ID', '學期', '階段']);
+    results.insertSheet('任務學生').appendRow(['任務ID', '學生ID', '學生姓名', '學號']);
+    const deposits = isolated.openById(ids.deposit).insertSheet('考試週保證金');
+    deposits.appendRow(['姓名', '系級', '學號', '項目', '項數', '應繳', '已繳']);
+    deposits.appendRow(['說明']);
+    deposits.appendRow(['範例']);
+    deposits.appendRow(['侯班學生', '', '111101994', 'H6', 1, 50, false]);
+    const response = isolated.openById(ids.externalRegistration).insertSheet('表單回覆 1');
+    response.appendRow(['時間戳記', '姓名', '學號', '請勾選本學期所選之課程', 'H6考試']);
+    response.appendRow(['2026/9/28 09:00:00', '侯班學生', '111101994', '一D56 侯志欽老師 影像製作', true]);
+    const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
+    bindings.appendRow(['LINE User ID', '姓名', '綁定時間', '學號', '身分類型']);
+    bindings.appendRow(['U-HOUBAN', '侯班學生', '', '111101994', 'external']);
+
+    assert.equal(externalTeaching.sendExternalReminders(new Date('2026-09-28T10:00:00+08:00')), 1);
+    assert.equal(isolated.httpOperations.length, 1);
+    assert.match(JSON.parse(isolated.httpOperations[0].options.payload).messages[0].text, /10\/2/);
+    isolated.httpOperations.shift().options.onSuccess();
+    assert.equal(results.getSheetByName('保證金提醒紀錄').getDataRange().getValues().length, 2);
+    assert.equal(externalTeaching.sendExternalReminders(new Date('2026-09-28T10:01:00+08:00')), 0);
+    assert.equal(isolated.httpOperations.length, 0);
+  } finally {
+    installGlobals(runtime);
+  }
 });
 
 test('registration replacement follows timestamps instead of appended row order', () => {

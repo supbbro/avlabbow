@@ -69,7 +69,7 @@ function editDistance(left, right) {
   return row[b.length];
 }
 
-function parseRegistrationRows(rows) {
+function parseRegistrationRows(rows, { includeEmpty = false } = {}) {
   if (!Array.isArray(rows) || !rows.length) return [];
   const headerIndex = rows.findIndex(row => row.some(value => text(value) === '學號') && row.some(value => text(value) === '姓名'));
   if (headerIndex < 0) return [];
@@ -87,6 +87,8 @@ function parseRegistrationRows(rows) {
   const itemColumns = headers.map((header, index) => ({ header, index })).filter(({ header }) => registrationItem(header));
   const equipmentColumns = itemColumns.filter(({ header }) => /考試/u.test(header)
     || ['Teradek無線追焦組', 'Teradek無線追'].includes(header));
+  const courseColumns = headers.map((header, index) => ({ header, index }))
+    .filter(({ header }) => /本學期所選之課程|侯志欽|影像製作/u.test(header));
   const validNumbersByName = new Map();
   for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex++) for (const [nameColumn, numberColumn] of identityPairs) {
     const name = norm(rows[rowIndex]?.[nameColumn]), number = norm(rows[rowIndex]?.[numberColumn]);
@@ -119,12 +121,14 @@ function parseRegistrationRows(rows) {
       registrations.set(key, {
         name, department: text(row[departmentColumn]), number,
         equipment, registeredItems,
+        houbanFilm: courseColumns.some(({ header, index }) => selected(row[index])
+          && /侯志欽|影像製作/u.test(`${header} ${text(row[index])}`)),
         timestamp: row[0] || '', sourceRow: rowIndex + 1, _order: order
       });
     }
   }
   return [...registrations.entries()].flatMap(([key, registration]) => {
-    if (!registration.registeredItems.length) return [];
+    if (!includeEmpty && !registration.registeredItems.length) return [];
     const { _order, ...result } = registration;
     return [{ ...result, submissionCount: submissionCounts.get(key) || 1 }];
   });
