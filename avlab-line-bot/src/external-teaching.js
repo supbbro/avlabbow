@@ -864,19 +864,27 @@ function candidateMenu(task, page = 1, notice = '') {
   const currentPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
   const visible = students.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const postbackAction = (label, data) => ({ type: 'postback', label, data });
-  const columns = visible.map((student, index) => ({
-    title: String(student.name || '未填姓名').slice(0, 40),
-    text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}${isExam(task) ? '｜先簽考生名條' : ''}`.slice(0, 60),
-    actions: student.attendance === '取消資格' ? [
-      postbackAction('查看狀態', `查看考生 ${task.id} ${student.id}`),
-      postbackAction('修改狀態', `修改紀錄 ${task.id} ${student.id}`)
-    ] : isExam(task) ? [
+  const candidateActions = student => {
+    if (student.attendance === '未點名') return isExam(task) ? [
       postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
       postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
     ] : [
       postbackAction('學生已到（自動判定）', `到場判定 ${task.id} ${student.id}`),
       postbackAction('缺席', `點名狀態 ${task.id} ${student.id} 缺席`)
-    ]
+    ];
+    if (isExam(task) && ['到場', '遲到'].includes(student.attendance) && examProgress(task, student).step !== 'done') return [
+      postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`),
+      postbackAction('修改紀錄', `修改紀錄 ${task.id} ${student.id}`)
+    ];
+    return [
+      postbackAction('查看狀態', `查看考生 ${task.id} ${student.id}`),
+      postbackAction('修改紀錄', `修改紀錄 ${task.id} ${student.id}`)
+    ];
+  };
+  const columns = visible.map((student, index) => ({
+    title: String(student.name || '未填姓名').slice(0, 40),
+    text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}${isExam(task) ? '｜先簽考生名條' : ''}`.slice(0, 60),
+    actions: candidateActions(student)
   }));
   const navActions = [];
   if (currentPage > 1) navActions.push({ label: '⬅️ 上一頁名單', postback: `考生名單 ${task.id} ${currentPage - 1}` });
@@ -1185,7 +1193,7 @@ function correctExamPart(taskId, studentId, part, value, context) {
   const progress = examProgress(task, student);
   if (task.status === '已完成' && progress.step !== 'done') updateTaskStatus(task, '點名中');
   const failedParts = progress.step !== 'done' ? [] : !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
-  const correctionNotice = failedParts.length
+  const correctionNotice = task.status === '已完成' && failedParts.length
     ? `\n\n${examinerRetestInstructions(task, failedParts)}\n⚠️ 更正評分不會自動重發考生私訊，請考官當場告知。`
     : value === '通過' ? '\n若先前已告知考生補考，請主動通知結果已更正。' : '';
   return correctedStudentCard(task, student, `${correctionNotice}\n請核對保證金單據。`, context);
@@ -1238,21 +1246,12 @@ function recordExamPart(taskId, studentId, part, value, context) {
   upsertAttendance(task, student, permission.name, context.userId);
   const progress = examProgress(task, student);
   if (progress.step === 'done') {
-    const failedParts = !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
-    const needsRetest = failedParts.length > 0;
-    const retest = retestForm(task);
-    const notification = needsRetest && previousProgress.step !== 'done' ? notifyStudentForRetest(task, student, failedParts) : { sent: false, configured: Boolean(retest.url), finalAttempt: retest.finalAttempt };
-    const needsPracticalForm = failedParts.includes('上機') && !retest.finalAttempt;
-    const examinerReminder = needsRetest
-      ? `\n\n${examinerRetestInstructions(task, failedParts)}\n${notification.sent ? '✅ 已排入考生 LINE 私訊，仍請當面確認。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定上機補考表單網址，暫時無法傳送表單。'}` : '';
-    const formActions = needsPracticalForm && retest.url ? [{ label: `上機${retest.label}報名`, uri: retest.url }] : [];
     const students = studentsFor(task.id);
     const allComplete = students.every(item => item.attendance !== '未點名' && (!['到場', '遲到'].includes(item.attendance) || examProgress(task, item).step === 'done'));
     const depositSignatureReminder = part === 'practical' && value === '通過' ? `\n\n🖊️ ${student.name}上機考通過，現在請考生在保證金單簽名。` : '';
     return resultPrompt(task, student,
-      `✅ ${student.name}本次評分完成${depositSignatureReminder}${examinerReminder}${allComplete ? `\n\n${completionReminderText(task)}` : ''}`,
+      `✅ ${student.name}本次評分完成${depositSignatureReminder}${allComplete ? '\n\n所有學生完成後，請按「完成點名」；屆時才會傳送考生後續指引。' : ''}`,
       [
-        ...formActions,
         ...(allComplete ? [{ label: '完成點名', postback: `完成點名 ${task.id}` }] : []),
         { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
         { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` }
@@ -1283,19 +1282,54 @@ function completionReminderText(task) {
   ].join('\n');
 }
 
+function completionStudentGuidance(task, students) {
+  if (!isExam(task)) return { text: '', actions: [] };
+  const failures = [];
+  for (const student of students) {
+    if (!['到場', '遲到'].includes(student.attendance)) continue;
+    const progress = examProgress(task, student);
+    if (progress.step !== 'done') continue;
+    const failedParts = !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
+    if (!failedParts.length) continue;
+    failures.push({ student, failedParts, notification: notifyStudentForRetest(task, student, failedParts) });
+  }
+  if (!failures.length) return { text: '\n\n【考生後續指引】本次沒有需要補考通知的考生。', actions: [] };
+  const sent = failures.filter(item => item.notification.sent).length;
+  const unbound = failures.filter(item => !item.notification.sent && item.notification.configured).map(item => item.student.name);
+  const unconfigured = failures.filter(item => !item.notification.configured).map(item => item.student.name);
+  const lines = [
+    '\n\n【考生後續指引】',
+    `需要後續處理 ${failures.length} 人；已傳送 LINE ${sent} 人。`,
+    ...failures.map(item => `• ${item.student.name}：${item.failedParts.join('、')}未通過`),
+    ...(unbound.length ? [`⚠️ 尚未綁定 LINE，請現場告知：${unbound.join('、')}`] : []),
+    ...(unconfigured.length ? [`⚠️ 上機補考表單尚未設定：${unconfigured.join('、')}`] : []),
+    '考生指引只會在完成點名時傳送一次。'
+  ];
+  const form = retestForm(task);
+  const actions = failures.some(item => item.failedParts.includes('上機')) && form.url && !form.finalAttempt
+    ? [{ label: `上機${form.label}報名`, uri: form.url }] : [];
+  return { text: lines.join('\n'), actions };
+}
+
 function finishAttendance(taskId, context) {
   const task = findTask(taskId); if (!task) return reply(`找不到任務 ${taskId}`);
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
+  if (task.status === '已完成') return reply('這個任務已完成；考生後續指引不會重複傳送。', externalNav([
+    { label: '✏️ 修改狀態', postback: `查看點名結果 ${task.id}` },
+    { label: '查看考生認證狀態', uri: certificationStatusUrl() }
+  ], '近期任務', '回近期任務'));
   const students = studentsFor(taskId);
   const pending = students.filter(student => student.attendance === '未點名' || (isExam(task) && ['到場', '遲到'].includes(student.attendance) && examProgress(task, student).step !== 'done'));
   if (pending.length) return reply(`尚有 ${pending.length} 位學生未完成登記。`, [{ label: '繼續點名', text: `開始點名 ${task.id}` }]);
+  const guidance = completionStudentGuidance(task, students);
   updateTaskStatus(task, '已完成');
   const counts = status => students.filter(student => student.attendance === status).length;
   const refundSummary = isExam(task) ? (() => {
     const refundable = students.filter(student => certificationForStudent(task, student).refundable).length;
     return `\n可退保證金 ${refundable}｜尚未符合 ${students.length - refundable}`;
   })() : '';
-  return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}${refundSummary}\n\n點擊下方可查看考生認證狀態。`, externalNav([
+  return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}${refundSummary}${guidance.text}${isExam(task) ? `\n\n${completionReminderText(task)}` : ''}\n\n點擊下方可查看考生認證狀態。`, externalNav([
+    ...guidance.actions,
     { label: '✏️ 修改狀態', postback: `查看點名結果 ${task.id}` },
     { label: '查看考生認證狀態', uri: certificationStatusUrl() }
   ], '近期任務', '回近期任務'));

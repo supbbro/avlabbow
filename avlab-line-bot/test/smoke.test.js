@@ -453,6 +453,8 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.equal(lastTeachingAttendance.lineMessage.type, 'flex');
   assert.match(lastTeachingAttendance.text, /目前出席：到場/);
   assert.equal(attendance.getRange(2, 10).getValue(), '到場');
+  const markedRoster = externalTeaching.handleCommand('考生名單 T1', context);
+  assert.deepEqual(markedRoster.lineMessage.template.columns[0].actions.map(action => action.label), ['查看狀態', '修改紀錄']);
   const readyHome = externalTeaching.handleCommand('點名首頁 T1', context);
   assert.match(readyHome.text, /所有考生已登記/);
   assert.equal(readyHome.quickReply.items.some(item => item.action.data === '完成點名 T1'), true);
@@ -514,11 +516,14 @@ test('retest preserves the passed written result and only asks for the practical
   assert.deepEqual(cardActions(practicalPrompt).slice(0, 2).map(action => action.label), ['上機 ✅', '上機 ❌']);
   assert.doesNotMatch(practicalPrompt.text, /保證金：/);
   const failed = externalTeaching.handleCommand('上機登記 T-EXAM-CUM S-EXAM-CUM 未通過', context);
-  assert.match(failed.text, /未通過時，請當場告知考生/);
-  assert.match(failed.text, /請考生填寫第一次補考上機考報名表：https:\/\/forms\.gle\//);
-  assert.doesNotMatch(failed.text, /簡答題未通過：補考週/);
-  assert.equal(allActions(failed).some(action => action.type === 'uri' && action.uri.includes('forms.gle')), true);
-  assert.match(failed.text, /考生尚未完成 LINE 姓名綁定/);
+  assert.match(failed.text, /完成點名.*才會傳送考生後續指引/);
+  assert.doesNotMatch(failed.text, /未通過時，請當場告知考生|補考上機考報名表|考生尚未完成 LINE 姓名綁定/);
+  assert.equal(allActions(failed).some(action => action.type === 'uri' && action.uri.includes('forms.gle')), false);
+  const examFinished = externalTeaching.handleCommand('完成點名 T-EXAM-CUM', context);
+  assert.match(examFinished.text, /【考生後續指引】/);
+  assert.match(examFinished.text, /補考學生：上機未通過/);
+  assert.match(examFinished.text, /尚未綁定 LINE，請現場告知/);
+  assert.equal(allActions(examFinished).some(action => action.type === 'uri' && action.uri.includes('forms.gle')), true);
 
   tasks.appendRow(['T-RETEST-CUM','1151','第一次補考',futureRetest,'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
   students.appendRow(['T-RETEST-CUM','S-RETEST-CUM','補考學生','999',1,'未點名','未記錄','']);
@@ -635,7 +640,7 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.match(fullRoster.text, /逾時更正生｜到場/);
   assert.match(fullRoster.text, /未繳測試生｜取消資格/);
   const unpaidCard = fullRoster.lineMessage.template.columns.find(column => column.title === '未繳測試生');
-  assert.deepEqual(unpaidCard.actions.map(action => action.label), ['查看狀態', '修改狀態']);
+  assert.deepEqual(unpaidCard.actions.map(action => action.label), ['查看狀態', '修改紀錄']);
   assert.equal(new Set(fullRoster.lineMessage.template.columns.map(column => column.actions.length)).size, 1);
   assert.equal(externalTeaching.handleCommand('查看任務 T-CORRECT', context).text.includes('取消資格 1'), true);
 
@@ -777,16 +782,19 @@ test('finishing an external exam reminds the examiner about deposit slips and ch
   externalTeaching.handleCommand('簡答登記 T-EXAM-FINISH S-EXAM-FINISH 通過', context);
   const lastExamResult = externalTeaching.handleCommand('上機登記 T-EXAM-FINISH S-EXAM-FINISH 通過', context);
   assert.match(lastExamResult.text, /保證金單簽名/);
-  assert.match(lastExamResult.text, /考生名條放到教學部助理櫃外資料夾/);
-  assert.match(lastExamResult.text, /黃本簽退並註記時間/);
+  assert.doesNotMatch(lastExamResult.text, /考生名條放到教學部助理櫃外資料夾|黃本簽退並註記時間/);
+  assert.match(lastExamResult.text, /完成點名.*才會傳送考生後續指引/);
   assert.equal(cardActions(lastExamResult).some(action => action.data === '完成點名 T-EXAM-FINISH'), true);
   const finished = externalTeaching.handleCommand('完成點名 T-EXAM-FINISH', context);
   assert.match(finished.text, /任務已完成/);
   assert.doesNotMatch(finished.text, /保證金單簽名/);
+  assert.match(finished.text, /本次沒有需要補考通知的考生/);
+  assert.match(finished.text, /考生名條放到教學部助理櫃外資料夾/);
+  assert.match(finished.text, /黃本簽退並註記時間/);
   assert.equal(finished.quickReply.items.some(item => item.action.data === '查看點名結果 T-EXAM-FINISH'), true);
 });
 
-test('a roster student can bind LINE and receives a retest form after failed grading', () => {
+test('a roster student can bind LINE and receives a retest form after attendance is completed', () => {
   const resultBook = runtime.openById(ids.externalResults);
   const tasks = resultBook.getSheetByName('對外任務');
   const students = resultBook.getSheetByName('任務學生');
@@ -835,9 +843,12 @@ test('a roster student can bind LINE and receives a retest form after failed gra
   process.env.EXTERNAL_FIRST_RETEST_FORM_URL = 'https://docs.google.com/forms/d/FAKE/viewform';
   runtime.httpOperations = [];
   const failed = externalTeaching.handleCommand('上機登記 EXT-BIND-TEST STU-BIND-TEST 未通過', context);
+  assert.match(failed.text, /完成點名.*才會傳送考生後續指引/);
+  assert.equal(runtime.httpOperations.length, 0);
+  const completedAttendance = externalTeaching.handleCommand('完成點名 EXT-BIND-TEST', context);
   if (previousUrl === undefined) delete process.env.EXTERNAL_FIRST_RETEST_FORM_URL;
   else process.env.EXTERNAL_FIRST_RETEST_FORM_URL = previousUrl;
-  assert.match(failed.text, /已排入考生 LINE 私訊，仍請當面確認/);
+  assert.match(completedAttendance.text, /已傳送 LINE 1 人/);
   const push = JSON.parse(runtime.httpOperations[0].options.payload);
   assert.equal(push.to, 'U-external-student-test');
   assert.match(push.messages[0].text, /上機/);
@@ -938,12 +949,15 @@ test('a failed short answer immediately ends the attempt without practical butto
   const completed = externalTeaching.handleCommand('簡答登記 EXT-SHORT-FAIL STU-SHORT-FAIL 未通過', context);
   assert.match(completed.text, /簡答題：❌ 未通過/);
   assert.match(completed.text, /上機：⛔ 簡答題未通過，無上機資格/);
-  assert.match(completed.text, /簡答題未通過：補考週可於影音實驗室開放時間到場口頭補考/);
-  assert.doesNotMatch(completed.text, /上機未通過：請考生填寫/);
+  assert.match(completed.text, /完成點名.*才會傳送考生後續指引/);
+  assert.doesNotMatch(completed.text, /簡答題未通過：補考週可於影音實驗室開放時間到場口頭補考|上機未通過：請考生填寫/);
   assert.equal(allActions(completed).some(action => action.type === 'uri' && action.uri.includes('forms.gle')), false);
   assert.equal(cardActions(completed).some(action => action.label.startsWith('上機 ')), false);
   const blocked = externalTeaching.handleCommand('上機登記 EXT-SHORT-FAIL STU-SHORT-FAIL 通過', context);
   assert.match(blocked.text, /沒有上機考試資格/);
+  const finished = externalTeaching.handleCommand('完成點名 EXT-SHORT-FAIL', context);
+  assert.match(finished.text, /簡答未過生：簡答題未通過/);
+  assert.match(finished.text, /尚未綁定 LINE，請現場告知/);
 });
 
 test('a bound student receives the teaching reminder with the fifteen-minute rule', () => {
