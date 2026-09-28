@@ -591,8 +591,14 @@ test('examiner can correct attendance and both exam parts without another retest
 
   const completedTaskCorrection = externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 未通過', context);
   assert.match(completedTaskCorrection.text, /✅ 修改完成/);
+  assert.match(completedTaskCorrection.text, /【更正測試生 接下來】/);
+  assert.match(completedTaskCorrection.text, /上機未過：請填第一次補考上機考表單/);
   assert.match(completedTaskCorrection.text, /【離開前請確認】/);
   assert.match(completedTaskCorrection.text, /黃本簽退並註記時間/);
+  assert.doesNotMatch(completedTaskCorrection.text, /https:\/\/forms\.gle/);
+  assert.deepEqual(cardActions(completedTaskCorrection).map(action => action.label), [
+    '第一次補考上機報名', '回考生卡片', '查看這位考生', '修改紀錄'
+  ]);
   let record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
   assert.deepEqual(record.slice(10, 13), ['通過', '未通過', '僅簡答題通過']);
   assert.equal(record[18], '不可退保證金');
@@ -604,7 +610,7 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.deepEqual(record.slice(10, 13), ['未通過', '未記錄', '簡答題未通過']);
   assert.match(shortFailed.text, /^【考試評分卡｜第 1\//);
   assert.doesNotMatch(shortFailed.text, /已更正簡答題/);
-  assert.match(shortFailed.text, /簡答題未通過：補考週/);
+  assert.match(shortFailed.text, /簡答未過：補考週/);
   assert.doesNotMatch(shortFailed.text, /請考生填寫第一次補考上機考報名表/);
   assert.equal(cardActions(shortFailed).some(action => action.label.includes('修正上機')), false);
   const shortFailedEdit = externalTeaching.handleCommand('修改紀錄 T-CORRECT S-CORRECT', context);

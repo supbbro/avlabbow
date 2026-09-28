@@ -1201,9 +1201,22 @@ function correctExamPart(taskId, studentId, part, value, context) {
   const progress = examProgress(task, student);
   if (task.status === '已完成' && progress.step !== 'done') updateTaskStatus(task, '點名中');
   const failedParts = progress.step !== 'done' ? [] : !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
-  const correctionNotice = wasCompleted && failedParts.length
-    ? `\n\n${examinerRetestInstructions(task, failedParts)}\n⚠️ 更正評分不會自動重發考生私訊，請考官當場告知。`
-    : value === '通過' ? '\n若先前已告知考生補考，請主動通知結果已更正。' : '';
+  if (wasCompleted && failedParts.length) {
+    const nextStep = examStudentNextStep(task, student);
+    const notice = [
+      '✅ 修改完成',
+      nextStep.text,
+      '⚠️ 更正評分不會自動重發考生私訊，請考官現場告知。',
+      '請核對保證金單據。',
+      completionReminderText(task)
+    ].filter(Boolean).join('\n\n');
+    return resultPrompt(task, student, notice, [
+      ...nextStep.actions,
+      { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
+      { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` }
+    ]);
+  }
+  const correctionNotice = value === '通過' ? '\n若先前已告知考生補考，請主動通知結果已更正。' : '';
   return correctedStudentCard(task, student, `${correctionNotice}\n請核對保證金單據。`, context, { wasCompleted });
 }
 
