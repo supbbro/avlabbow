@@ -105,7 +105,7 @@ const LEVEL_REQUIREMENTS={
     'all':[
       'FS7','Teradek圖傳','Dwarf圖傳',
       {label:'Creamsource Vortex 4S/8S',all:['Vortex 4S/8S']},'F8n','聲音工作區',
-      {label:'新棚－導播台＋錄放機',all:['導播台','錄放影機']},'成音台','字幕機','燈盤'
+      '導播台','錄放影機','成音台','字幕機','燈盤'
     ]
   },
   '一級':{
