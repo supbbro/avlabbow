@@ -88,7 +88,7 @@ function parseRegistrationRows(rows, { includeEmpty = false } = {}) {
   const equipmentColumns = itemColumns.filter(({ header }) => /考試/u.test(header)
     || ['Teradek無線追焦組', 'Teradek無線追'].includes(header));
   const courseColumns = headers.map((header, index) => ({ header, index }))
-    .filter(({ header }) => /本學期所選之課程|侯志欽|影像製作/u.test(header));
+    .filter(({ header }) => /本學期所選之課程/u.test(header));
   const validNumbersByName = new Map();
   for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex++) for (const [nameColumn, numberColumn] of identityPairs) {
     const name = norm(rows[rowIndex]?.[nameColumn]), number = norm(rows[rowIndex]?.[numberColumn]);
@@ -121,8 +121,9 @@ function parseRegistrationRows(rows, { includeEmpty = false } = {}) {
       registrations.set(key, {
         name, department: text(row[departmentColumn]), number,
         equipment, registeredItems,
-        houbanFilm: courseColumns.some(({ header, index }) => selected(row[index])
-          && /侯志欽|影像製作/u.test(`${header} ${text(row[index])}`)),
+        // Only the exact course/teacher combination has the early deposit
+        // deadline. Other film-production classes must keep the normal date.
+        houbanFilm: courseColumns.some(({ index }) => norm(row[index]).includes('一D56侯志欽')),
         timestamp: row[0] || '', sourceRow: rowIndex + 1, _order: order
       });
     }

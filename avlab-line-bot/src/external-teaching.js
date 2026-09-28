@@ -1501,6 +1501,11 @@ function dateAtTaipeiMidnight(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function depositDeadlineFor(registration, normalDeadline) {
+  if (!registration?.houbanFilm) return normalDeadline;
+  return dateAtTaipeiMidnight(process.env.EXTERNAL_HOUBAN_DEPOSIT_DEADLINE || '2026-10-02');
+}
+
 function dayBeforeDate(value) {
   const date = new Date(value);
   date.setUTCDate(date.getUTCDate() - 1);
@@ -1632,17 +1637,20 @@ function processDepositRequirements(now = new Date()) {
   const deadlineValue = !configuredDeadline || configuredDeadline === '2026-09-03' ? '2026-10-09' : configuredDeadline;
   const deadline = dateAtTaipeiMidnight(deadlineValue);
   if (!deadline) return { reminders: 0, canceled: 0 };
+  const houbanDeadline = depositDeadlineFor({ houbanFilm: true }, deadline);
+  if (!houbanDeadline) throw new Error('Invalid EXTERNAL_HOUBAN_DEPOSIT_DEADLINE; expected YYYY-MM-DD');
   const reminderStart = dateAtTaipeiMidnight(process.env.EXTERNAL_DEPOSIT_REMINDER_START || '2026-09-28');
   if (!reminderStart) throw new Error('Invalid EXTERNAL_DEPOSIT_REMINDER_START; expected YYYY-MM-DD');
   const registrations = registrationRows();
   // A newly connected/temporarily empty response sheet must never wipe or
   // disqualify current students.
   if (!registrations.length) return { reminders: 0, canceled: 0, restored: 0, skipped: true };
-  const registeredNumbers = new Set(registrations.map(item => norm(item.number)).filter(Boolean));
-  const registeredNames = new Set(registrations.map(item => norm(item.name)).filter(Boolean));
-  const isRegistered = student => norm(student.number)
-    ? registeredNumbers.has(norm(student.number))
-    : registeredNames.has(norm(student.name));
+  const registrationsByNumber = new Map(registrations.map(item => [norm(item.number), item]).filter(([number]) => number));
+  const registrationsByName = new Map(registrations.map(item => [norm(item.name), item]).filter(([name]) => name));
+  const registrationFor = student => norm(student.number)
+    ? registrationsByNumber.get(norm(student.number))
+    : registrationsByName.get(norm(student.name));
+  const isRegistered = student => Boolean(registrationFor(student));
   const today = taipeiDate(now);
   const records = depositRows();
   const logSheet = depositLogSheet();
@@ -1651,7 +1659,9 @@ function processDepositRequirements(now = new Date()) {
   const restored = restorePaidDepositCancellations(records, logSheet, logged, now);
 
   const firstExams = earliestInitialExams();
-  if (now >= reminderStart && now < deadline) for (const registration of registrations) {
+  if (now >= reminderStart) for (const registration of registrations) {
+    const personDeadline = depositDeadlineFor(registration, deadline);
+    if (now >= personDeadline) continue;
     const record = depositRecordFor(registration, '考試', records);
     if (record?.paid) continue;
     const personKey = norm(registration.number);
@@ -1663,11 +1673,11 @@ function processDepositRequirements(now = new Date()) {
     if (!studentUserId) continue;
     const entry = firstExams.find(candidate => norm(candidate.student.number) === personKey);
     const sameDayDue = [];
-    if (entry && today === dayBeforeDate(deadline)) sameDayDue.push(['deadline', `DEPOSIT-DEADLINE:${personKey}:${taipeiDate(deadline)}`]);
+    if (entry && today === dayBeforeDate(personDeadline)) sameDayDue.push(['deadline', `DEPOSIT-DEADLINE:${personKey}:${taipeiDate(personDeadline)}`]);
     if (entry && today === dayBeforeDate(entry.start)) sameDayDue.push(['exam-day-before', `DEPOSIT-EXAM:${personKey}:${taipeiDate(entry.start)}`]);
     const pendingDue = sameDayDue.filter(([, key]) => !logged.has(key));
     const kind = pendingDue.some(([type]) => type === 'exam-day-before') ? 'exam-day-before' : pendingDue.length ? 'deadline' : 'start';
-    queuePush(studentUserId, reply(depositReminderText(kind, entry?.task, kind === 'start' ? registration : entry.student, deadline)), {
+    queuePush(studentUserId, reply(depositReminderText(kind, entry?.task, kind === 'start' ? registration : entry.student, personDeadline)), {
       key: initialKey, onSuccess: () => {
         logDepositAction(logSheet, initialKey, '開始繳費提醒', registration, entry?.task, now, '已合併推播');
         for (const [type, key] of pendingDue) logDepositAction(logSheet, key, type, registration, entry?.task, now, '已合併推播');
@@ -1678,20 +1688,23 @@ function processDepositRequirements(now = new Date()) {
     reminders++;
   }
 
-  if (now >= reminderStart && now < deadline) for (const entry of firstExams) {
+  if (now >= reminderStart) for (const entry of firstExams) {
     const { task, student, start } = entry;
-    if (!isRegistered(student)) continue;
+    const registration = registrationFor(student);
+    if (!registration) continue;
+    const personDeadline = depositDeadlineFor(registration, deadline);
+    if (now >= personDeadline) continue;
     const record = depositRecordFor(student, '考試', records);
     if (record?.paid) continue;
     const personKey = norm(student.number) || `NAME-${norm(student.name)}`;
     const studentUserId = userIdForName(student.name, student.number);
     const remindersDue = [];
-    if (today === dayBeforeDate(deadline)) remindersDue.push(['deadline', `DEPOSIT-DEADLINE:${personKey}:${taipeiDate(deadline)}`]);
+    if (today === dayBeforeDate(personDeadline)) remindersDue.push(['deadline', `DEPOSIT-DEADLINE:${personKey}:${taipeiDate(personDeadline)}`]);
     if (today === dayBeforeDate(start)) remindersDue.push(['exam-day-before', `DEPOSIT-EXAM:${personKey}:${taipeiDate(start)}`]);
     const pendingReminders = remindersDue.filter(([, key]) => !logged.has(key) && !pendingReminderKeys.has(key));
     if (pendingReminders.length && studentUserId) {
       const messageKind = pendingReminders.some(([kind]) => kind === 'exam-day-before') ? 'exam-day-before' : 'deadline';
-      queuePush(studentUserId, reply(depositReminderText(messageKind, task, student, deadline)), {
+      queuePush(studentUserId, reply(depositReminderText(messageKind, task, student, personDeadline)), {
         key: pendingReminders[0][1],
         onSuccess: () => { for (const [kind, key] of pendingReminders) logDepositAction(logSheet, key, kind, student, task, now, '已合併推播'); }
       });
@@ -1700,10 +1713,10 @@ function processDepositRequirements(now = new Date()) {
     }
   }
 
-  if (now < deadline) return { reminders, canceled, restored };
   for (const task of allTasks().filter(task => task.phase === '考試' && ['已排定', '點名中'].includes(task.status))) {
     for (const student of studentsFor(task.id)) {
-      if (!isRegistered(student) || student.attendance !== '未點名') continue;
+      const registration = registrationFor(student);
+      if (!registration || now < depositDeadlineFor(registration, deadline) || student.attendance !== '未點名') continue;
       if (depositRecordFor(student, '考試', records)?.paid) continue;
       const key = `DEPOSIT-CANCEL:${task.id}:${student.id}`;
       if (logged.has(key)) continue;
@@ -1823,4 +1836,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };

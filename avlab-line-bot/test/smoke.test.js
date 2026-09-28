@@ -1056,10 +1056,14 @@ test('a newer blank registration clears an older exam selection', () => {
 test('registration parser identifies Houban film students from the latest course selection', () => {
   const rows = [
     ['時間戳記', '姓名', '學號', '請勾選本學期所選之課程', '是否修習 一D56 侯志欽老師 影像製作', 'H6考試'],
-    ['2026/9/20 09:00:00', '侯班學生', '111101996', '一D56 侯志欽老師 影像製作', '是', true]
+    ['2026/9/20 09:00:00', '侯班學生', '111101996', '一D56 侯志欽老師 影像製作', '是', true],
+    ['2026/9/20 09:01:00', '李智文班學生', '111101993', '一D56 李智文老師 影像製作', '是', true]
   ];
-  const [registration] = parseRegistrationRows(rows);
-  assert.equal(registration.houbanFilm, true);
+  const registrations = parseRegistrationRows(rows);
+  assert.equal(registrations.find(item => item.name === '侯班學生').houbanFilm, true);
+  assert.equal(registrations.find(item => item.name === '李智文班學生').houbanFilm, false);
+  assert.equal(externalTeaching._test.dateKey(externalTeaching._test.depositDeadlineFor(registrations[0], new Date('2026-10-09T00:00:00+08:00'))), '2026-10-02');
+  assert.equal(externalTeaching._test.dateKey(externalTeaching._test.depositDeadlineFor(registrations[1], new Date('2026-10-09T00:00:00+08:00'))), '2026-10-09');
 });
 
 test('corrected deposit notice uses latest total, Houban deadline, and published schedule', () => {
@@ -1449,23 +1453,26 @@ test('deposit payment reminders begin on September 28 and skip paid students', (
     deposits.appendRow(['範例']);
     deposits.appendRow(['未繳學生', '', '111101021', 'H6', 1, 50, false]);
     deposits.appendRow(['已繳學生', '', '111101022', 'H6', 1, 50, true]);
+    deposits.appendRow(['侯班未繳學生', '', '111101023', 'H6', 1, 50, false]);
     const response = isolated.openById(ids.externalRegistration).insertSheet('表單回覆 1');
-    response.appendRow(['時間戳記', '姓名', '學號', 'H6考試']);
-    response.appendRow(['2026/9/20 09:00:00', '未繳學生', '111101021', '是']);
-    response.appendRow(['2026/9/20 09:01:00', '已繳學生', '111101022', '是']);
+    response.appendRow(['時間戳記', '姓名', '學號', '請勾選本學期所選之課程', 'H6考試']);
+    response.appendRow(['2026/9/20 09:00:00', '未繳學生', '111101021', '一D56 李智文老師 影像製作', '是']);
+    response.appendRow(['2026/9/20 09:01:00', '已繳學生', '111101022', '', '是']);
+    response.appendRow(['2026/9/20 09:02:00', '侯班未繳學生', '111101023', '一D56 侯志欽老師 影像製作', '是']);
     const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
     bindings.appendRow(['LINE User ID', '姓名', '綁定時間', '學號', '身分類型']);
     bindings.appendRow(['U-UNPAID', '未繳學生', '', '111101021', 'external']);
     bindings.appendRow(['U-PAID', '已繳學生', '', '111101022', 'external']);
+    bindings.appendRow(['U-HOUBAN-UNPAID', '侯班未繳學生', '', '111101023', 'external']);
 
     assert.equal(externalTeaching._test.processDepositRequirements(new Date('2026-09-27T23:59:00+08:00')).reminders, 0);
     assert.equal(isolated.httpOperations.length, 0);
-    assert.equal(externalTeaching._test.processDepositRequirements(new Date('2026-09-28T00:00:00+08:00')).reminders, 1);
-    const push = JSON.parse(isolated.httpOperations[0].options.payload);
-    assert.equal(push.to, 'U-UNPAID');
-    assert.match(push.messages[0].text, /應繳保證金：50 元/);
+    assert.equal(externalTeaching._test.processDepositRequirements(new Date('2026-09-28T00:00:00+08:00')).reminders, 2);
+    const pushes = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload));
+    assert.match(pushes.find(push => push.to === 'U-UNPAID').messages[0].text, /繳費期限：10\/09/);
+    assert.match(pushes.find(push => push.to === 'U-HOUBAN-UNPAID').messages[0].text, /繳費期限：10\/02/);
     assert.equal(externalTeaching._test.processDepositRequirements(new Date('2026-09-28T00:01:00+08:00')).reminders, 0);
-    assert.equal(isolated.httpOperations.length, 1);
+    assert.equal(isolated.httpOperations.length, 2);
   } finally {
     installGlobals(runtime);
   }
