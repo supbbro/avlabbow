@@ -1088,7 +1088,7 @@ function showStudent(taskId, studentId, context, notice = '') {
       ...(allComplete ? [{ label: '完成點名', postback: `完成點名 ${task.id}` }] : []),
       { label: '繼續依序點名', postback: `開始點名 ${task.id}` }
     ],
-    note: [notice, allComplete ? completionReminderText(task) : ''].filter(Boolean).join('\n\n'),
+    note: notice,
     navigation: [
       { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
       { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
@@ -1248,9 +1248,8 @@ function recordExamPart(taskId, studentId, part, value, context) {
   if (progress.step === 'done') {
     const students = studentsFor(task.id);
     const allComplete = students.every(item => item.attendance !== '未點名' && (!['到場', '遲到'].includes(item.attendance) || examProgress(task, item).step === 'done'));
-    const depositSignatureReminder = part === 'practical' && value === '通過' ? `\n\n🖊️ ${student.name}上機考通過，現在請考生在保證金單簽名。` : '';
     return resultPrompt(task, student,
-      `✅ ${student.name}本次評分完成${depositSignatureReminder}${allComplete ? '\n\n所有學生完成後，請按「完成點名」；屆時才會傳送考生後續指引。' : ''}`,
+      `✅ ${student.name}本次評分完成${allComplete ? '\n\n所有學生完成後，請按「完成點名」；屆時才會顯示考官指引並傳送考生後續指引。' : ''}`,
       [
         ...(allComplete ? [{ label: '完成點名', postback: `完成點名 ${task.id}` }] : []),
         { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
@@ -1280,6 +1279,25 @@ function completionReminderText(task) {
     '• 在黃本簽退並註記時間。',
     '• 簽還出機單、確認器材測完並放回架上，提醒值班助理幫忙簽線上。'
   ].join('\n');
+}
+
+function completionExaminerGuidance(task, students) {
+  const lines = ['【考官完成後指引】'];
+  if (isExam(task)) {
+    const refundable = students.filter(student => ['到場', '遲到'].includes(student.attendance) && certificationForStudent(task, student).refundable);
+    if (refundable.length) lines.push(`• 請讓可退保證金的考生在保證金單簽名：${refundable.map(student => student.name).join('、')}`);
+    for (const student of students) {
+      if (!['到場', '遲到'].includes(student.attendance)) continue;
+      const progress = examProgress(task, student);
+      if (progress.step !== 'done') continue;
+      const failedParts = !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
+      if (!failedParts.length) continue;
+      lines.push(`\n【${student.name}｜${failedParts.join('、')}未通過】`);
+      lines.push(examinerRetestInstructions(task, failedParts));
+    }
+  }
+  lines.push('', completionReminderText(task));
+  return lines.join('\n');
 }
 
 function completionStudentGuidance(task, students) {
@@ -1328,7 +1346,8 @@ function finishAttendance(taskId, context) {
     const refundable = students.filter(student => certificationForStudent(task, student).refundable).length;
     return `\n可退保證金 ${refundable}｜尚未符合 ${students.length - refundable}`;
   })() : '';
-  return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}${refundSummary}${guidance.text}${isExam(task) ? `\n\n${completionReminderText(task)}` : ''}\n\n點擊下方可查看考生認證狀態。`, externalNav([
+  const examinerGuidance = completionExaminerGuidance(task, students);
+  return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}${refundSummary}${guidance.text}\n\n${examinerGuidance}\n\n點擊下方可查看考生認證狀態。`, externalNav([
     ...guidance.actions,
     { label: '✏️ 修改狀態', postback: `查看點名結果 ${task.id}` },
     { label: '查看考生認證狀態', uri: certificationStatusUrl() }
