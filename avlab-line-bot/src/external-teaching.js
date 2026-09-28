@@ -1229,8 +1229,35 @@ function recordAttendance(taskId, studentId, status, context) {
   updateStudent(student, status, result);
   upsertAttendance(task, student, permission.name, context.userId);
   if (isExam(task) && ['到場', '遲到'].includes(status) && examProgress(task, student).step !== 'done') return resultPrompt(task, student);
+  const students = studentsFor(task.id, { includeDisqualified: true });
+  const allComplete = students.every(item => item.attendance !== '未點名' && (!isExam(task) || !['到場', '遲到'].includes(item.attendance) || examProgress(task, item).step === 'done'));
+  if (allComplete) return finishAttendance(task.id, context);
   const notice = status === '取消資格' ? `🚫 ${student.name} 已超過個別時段 5 分鐘，取消本次考試資格。` : `✅ 已登記 ${student.name}：${status}`;
   return showStudent(task.id, student.id, context, notice);
+}
+
+function examStudentNextStep(task, student, { notify = false } = {}) {
+  const progress = examProgress(task, student);
+  if (progress.step !== 'done') return { text: '', actions: [] };
+  if (progress.shortPassed && progress.practicalPassed) return {
+    text: `【${student.name} 接下來】\n✅ 通過，請考生在保證金單簽名。`, actions: []
+  };
+  const failedParts = !progress.shortPassed ? ['簡答題'] : ['上機'];
+  const form = retestForm(task);
+  const notification = notify ? notifyStudentForRetest(task, student, failedParts) : null;
+  const lines = [`【${student.name} 接下來】`];
+  if (failedParts.includes('簡答題')) lines.push('❌ 簡答未過：補考週到影音實驗室補考，不用填表。');
+  else if (form.finalAttempt) lines.push('❌ 上機未過：第二次補考結束，請依實驗室規定處理。');
+  else {
+    lines.push(`❌ 上機未過：請填${form.label}上機考表單。`);
+    if (form.label === '第二次補考') lines.push('第二次補考須繳 100 元，且不退費。');
+  }
+  if (notification && !notification.sent) lines.push(notification.configured
+    ? '⚠️ 考生尚未綁定 LINE，請現場告知。'
+    : '⚠️ 補考表單尚未設定，請聯絡教學部。');
+  const actions = failedParts.includes('上機') && form.url && !form.finalAttempt
+    ? [{ label: `${form.label}上機報名`, uri: form.url }] : [];
+  return { text: lines.join('\n'), actions };
 }
 
 function recordExamPart(taskId, studentId, part, value, context) {
@@ -1243,20 +1270,21 @@ function recordExamPart(taskId, studentId, part, value, context) {
     { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` },
     { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
   ], `查看任務 ${task.id}`, '回任務'));
+  if (previousProgress.step === 'done') return resultPrompt(task, student, '這位考生的評分已完成；如需更正請按「修改紀錄」。');
   const result = mergeExamPart(student.result, part, value === '通過');
   updateStudent(student, student.attendance, result);
   upsertAttendance(task, student, permission.name, context.userId);
   const progress = examProgress(task, student);
   if (progress.step === 'done') {
-    const students = studentsFor(task.id);
+    const nextStep = examStudentNextStep(task, student, { notify: true });
+    const students = studentsFor(task.id, { includeDisqualified: true });
     const allComplete = students.every(item => item.attendance !== '未點名' && (!['到場', '遲到'].includes(item.attendance) || examProgress(task, item).step === 'done'));
-    return resultPrompt(task, student,
-      `✅ ${student.name}本次評分完成${allComplete ? '\n\n所有學生完成後，請按「完成點名」；屆時才會顯示考官指引並傳送考生後續指引。' : ''}`,
-      [
-        ...(allComplete ? [{ label: '完成點名', postback: `完成點名 ${task.id}` }] : []),
-        { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
-        { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` }
-      ]);
+    if (allComplete) return finishAttendance(task.id, context, { studentNextStep: nextStep });
+    return resultPrompt(task, student, `✅ ${student.name}本次評分完成\n\n${nextStep.text}`, [
+      ...nextStep.actions,
+      { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
+      { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` }
+    ]);
   }
   return resultPrompt(task, student, `✅ ${student.name}的${part === 'short' ? '簡答題' : '上機'}已登記：${value}`);
 }
@@ -1283,75 +1311,62 @@ function completionReminderText(task) {
   ].join('\n');
 }
 
-function completionFailures(task, students) {
-  if (!isExam(task)) return [];
-  const failures = [];
-  for (const student of students) {
-    if (!['到場', '遲到'].includes(student.attendance)) continue;
-    const progress = examProgress(task, student);
-    if (progress.step !== 'done') continue;
-    const failedParts = !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
-    if (!failedParts.length) continue;
-    failures.push({ student, failedParts });
-  }
-  return failures;
+function completionTaskCard(task, students, studentNextStep = null) {
+  const counts = status => students.filter(student => student.attendance === status).length;
+  const summary = `到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}`;
+  const refundSummary = isExam(task) ? (() => {
+    const refundable = students.filter(student => certificationForStudent(task, student).refundable).length;
+    return `可退保證金 ${refundable}｜尚未符合 ${students.length - refundable}`;
+  })() : '';
+  const note = [studentNextStep?.text, completionReminderText(task)].filter(Boolean).join('\n\n');
+  const actions = [
+    ...(studentNextStep?.actions || []),
+    { label: '修改結果', postback: `查看點名結果 ${task.id}` },
+    { label: '查看考生狀態', uri: certificationStatusUrl() }
+  ];
+  const actionObject = action => action.uri
+    ? { type: 'uri', label: action.label, uri: action.uri }
+    : { type: 'postback', label: action.label, data: action.postback };
+  const text = `✅ 任務已完成\n${taskText(task)}\n\n${summary}${refundSummary ? `\n${refundSummary}` : ''}\n\n${note}`;
+  return {
+    text,
+    fallbackQuickReply: qr(externalNav(actions, '近期任務', '回近期任務')),
+    lineMessage: {
+      type: 'flex', altText: `${task.equipment} ${task.phase}已完成`,
+      contents: {
+        type: 'bubble', size: 'kilo',
+        header: { type: 'box', layout: 'vertical', paddingAll: '14px', backgroundColor: '#E8F5E9', contents: [
+          { type: 'text', text: '✅ 任務已完成', size: 'sm', color: '#2E7D32', weight: 'bold' },
+          { type: 'text', text: `${task.phase}｜${task.equipment}`, size: 'xl', color: '#222222', weight: 'bold', margin: 'sm', wrap: true }
+        ] },
+        body: { type: 'box', layout: 'vertical', paddingAll: '16px', spacing: 'md', contents: [
+          { type: 'text', text: `${formatDate(task.date)} ${formatTime(task.start)}-${formatTime(task.end)}｜${task.location || '未填'}`, size: 'sm', color: '#555555', wrap: true },
+          { type: 'text', text: summary, size: 'sm', color: '#222222', weight: 'bold', wrap: true },
+          ...(refundSummary ? [{ type: 'text', text: refundSummary, size: 'sm', color: '#555555', wrap: true }] : []),
+          { type: 'separator', color: '#DDDDDD' },
+          { type: 'text', text: note, size: 'sm', color: '#444444', wrap: true }
+        ] },
+        footer: { type: 'box', layout: 'vertical', paddingAll: '12px', spacing: 'sm', contents: actions.map((action, index) => ({
+          type: 'button', height: 'sm', style: index === 0 ? 'primary' : 'secondary', action: actionObject(action)
+        })) }
+      },
+      quickReply: qr(externalNav([], '近期任務', '回近期任務'))
+    }
+  };
 }
 
-function completionExaminerGuidance(task, students) {
-  const lines = ['【考官指引】'];
-  if (isExam(task)) {
-    const failures = completionFailures(task, students);
-    const refundable = students.filter(student => ['到場', '遲到'].includes(student.attendance) && certificationForStudent(task, student).refundable);
-    const shortFailed = failures.filter(item => item.failedParts.includes('簡答題')).map(item => item.student.name);
-    const practicalFailed = failures.filter(item => item.failedParts.includes('上機')).map(item => item.student.name);
-    const unbound = failures.filter(item => !userIdForName(item.student.name, item.student.number)).map(item => item.student.name);
-    const form = retestForm(task);
-    if (refundable.length) lines.push(`• 保證金單簽名：${refundable.map(student => student.name).join('、')}`);
-    if (shortFailed.length) lines.push(`• 簡答未過：${shortFailed.join('、')}（補考週到實驗室補考，不用填表）`);
-    if (practicalFailed.length) lines.push(form.finalAttempt
-      ? `• 上機未過：${practicalFailed.join('、')}（第二次補考結束，依規定處理）`
-      : `• 上機未過：${practicalFailed.join('、')}（請填${form.label}上機考表單）`);
-    if (practicalFailed.length && form.label === '第二次補考') lines.push('• 第二次補考須繳 100 元，且不退費。');
-    if (unbound.length) lines.push(`• 未綁定 LINE，請現場告知：${unbound.join('、')}`);
-    if (practicalFailed.length && !form.finalAttempt && !form.url) lines.push('• 補考表單尚未設定，請聯絡教學部。');
-  }
-  lines.push('', completionReminderText(task));
-  return lines.join('\n');
-}
-
-function completionStudentGuidance(task, students) {
-  if (!isExam(task)) return { actions: [] };
-  const failures = completionFailures(task, students);
-  failures.forEach(item => notifyStudentForRetest(task, item.student, item.failedParts));
-  const form = retestForm(task);
-  const actions = failures.some(item => item.failedParts.includes('上機')) && form.url && !form.finalAttempt
-    ? [{ label: `上機${form.label}報名`, uri: form.url }] : [];
-  return { actions };
-}
-
-function finishAttendance(taskId, context) {
+function finishAttendance(taskId, context, { studentNextStep = null } = {}) {
   const task = findTask(taskId); if (!task) return reply(`找不到任務 ${taskId}`);
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
   if (task.status === '已完成') return reply('這個任務已完成；考生後續指引不會重複傳送。', externalNav([
     { label: '✏️ 修改狀態', postback: `查看點名結果 ${task.id}` },
     { label: '查看考生認證狀態', uri: certificationStatusUrl() }
   ], '近期任務', '回近期任務'));
-  const students = studentsFor(taskId);
+  const students = studentsFor(taskId, { includeDisqualified: true });
   const pending = students.filter(student => student.attendance === '未點名' || (isExam(task) && ['到場', '遲到'].includes(student.attendance) && examProgress(task, student).step !== 'done'));
   if (pending.length) return reply(`尚有 ${pending.length} 位學生未完成登記。`, [{ label: '繼續點名', text: `開始點名 ${task.id}` }]);
-  const guidance = completionStudentGuidance(task, students);
   updateTaskStatus(task, '已完成');
-  const counts = status => students.filter(student => student.attendance === status).length;
-  const refundSummary = isExam(task) ? (() => {
-    const refundable = students.filter(student => certificationForStudent(task, student).refundable).length;
-    return `\n可退保證金 ${refundable}｜尚未符合 ${students.length - refundable}`;
-  })() : '';
-  const examinerGuidance = completionExaminerGuidance(task, students);
-  return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}${refundSummary}\n\n${examinerGuidance}\n\n點擊下方可查看考生認證狀態。`, externalNav([
-    ...guidance.actions,
-    { label: '✏️ 修改狀態', postback: `查看點名結果 ${task.id}` },
-    { label: '查看考生認證狀態', uri: certificationStatusUrl() }
-  ], '近期任務', '回近期任務'));
+  return completionTaskCard(task, students, studentNextStep);
 }
 
 function handleCommand(text, context, { skipScheduleSync = false } = {}) {
