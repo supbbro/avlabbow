@@ -144,6 +144,13 @@ function userIdForExaminerName(name) {
   return candidates.length === 1 ? String(candidates[0][0]) : '';
 }
 
+function studentIsTaskExaminer(task, student, studentUserId = '') {
+  if (studentUserId && task.examinerUserId && studentUserId === task.examinerUserId) return true;
+  const studentName = norm(student.name);
+  return String(task.examiner || '').split(/[,，、/&+＋\n]/)
+    .map(norm).filter(Boolean).some(name => name === studentName);
+}
+
 function taskFromRow(row, rowNumber) {
   return {
     row: rowNumber, id: String(row[0] || '').trim(), term: row[1], phase: String(row[2] || '').trim(),
@@ -975,6 +982,11 @@ function examProgress(task, student) {
   };
 }
 
+function examOutcome(progress) {
+  if (!progress || progress.step !== 'done') return 'pending';
+  return progress.shortPassed && progress.practicalPassed ? 'passed' : 'retest';
+}
+
 function mergeExamPart(currentResult, part, passed) {
   let [shortAnswer, practical] = resultParts(currentResult);
   if (!['通過', '未通過'].includes(shortAnswer)) shortAnswer = '未記錄';
@@ -1196,10 +1208,23 @@ function correctExamPart(taskId, studentId, part, value, context) {
   if (part === 'short' && !['通過', '未通過'].includes(shortAnswer)) return reply('簡答題尚未評分，請先完成簡答題登記，之後才能修正。');
   if (part === 'practical' && !['通過', '未通過'].includes(practical)) return reply('上機考尚未評分，請先完成上機考登記，之後才能修正。');
   if (part === 'practical' && !examProgress(task, student).shortPassed) return reply('簡答題尚未通過，不能更正上機結果。');
+  const previousOutcome = examOutcome(examProgress(task, student));
   const result = part === 'short' && value === '未通過' ? '簡答題未通過' : mergeExamPart(student.result, part, value === '通過');
   updateStudent(student, student.attendance, result);
   upsertAttendance(task, student, permission.name, context.userId);
   const progress = examProgress(task, student);
+  const currentOutcome = examOutcome(progress);
+  const outcomeChanged = previousOutcome !== 'pending' && currentOutcome !== 'pending' && previousOutcome !== currentOutcome;
+  const correctionNotification = outcomeChanged ? notifyStudentForExamOutcome(task, student, { corrected: true }) : null;
+  const correctionDeliveryText = !outcomeChanged
+    ? '本次只更新卡片；通過／需補考狀態未改變，不重複傳送考生私訊。'
+    : correctionNotification?.sent
+      ? `📨 已通知考生：結果已改為${currentOutcome === 'passed' ? '通過' : '需補考'}。`
+      : correctionNotification?.skippedExaminer
+        ? '考生同時為本場考官，不另行推播考生結果。'
+      : correctionNotification?.configured === false
+        ? '⚠️ 結果已改為需補考，但補考表單尚未設定，請聯絡教學部並現場告知考生。'
+        : '⚠️ 結果已改變，但考生尚未綁定 LINE，請考官現場告知。';
   if (task.status === '已完成' && progress.step !== 'done') updateTaskStatus(task, '點名中');
   const failedParts = progress.step !== 'done' ? [] : !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
   if (progress.step === 'done' && (wasCompleted || failedParts.length)) {
@@ -1207,9 +1232,7 @@ function correctExamPart(taskId, studentId, part, value, context) {
     const notice = [
       '✅ 修改完成',
       nextStep.text,
-      failedParts.length
-        ? '⚠️ 更正評分不會自動重發考生私訊，請考官現場告知。'
-        : '若先前已告知考生補考，請主動通知結果已更正。',
+      correctionDeliveryText,
       '請核對保證金單據。',
       wasCompleted ? completionReminderText(task) : ''
     ].filter(Boolean).join('\n\n');
@@ -1226,8 +1249,7 @@ function correctExamPart(taskId, studentId, part, value, context) {
       ...correctionActions
     ], { includeModify: false });
   }
-  const correctionNotice = value === '通過' ? '\n若先前已告知考生補考，請主動通知結果已更正。' : '';
-  return correctedStudentCard(task, student, `${correctionNotice}\n請核對保證金單據。`, context, { wasCompleted });
+  return correctedStudentCard(task, student, `${correctionDeliveryText}\n請核對保證金單據。`, context, { wasCompleted });
 }
 
 function startAttendance(taskId, context) {
@@ -1268,12 +1290,14 @@ function recordAttendance(taskId, studentId, status, context) {
 function examStudentNextStep(task, student, { notify = false } = {}) {
   const progress = examProgress(task, student);
   if (progress.step !== 'done') return { text: '', actions: [] };
-  if (progress.shortPassed && progress.practicalPassed) return {
-    text: `【${student.name} 接下來】\n✅ 通過，請考生在保證金單簽名。`, actions: []
-  };
+  const notification = notify ? notifyStudentForExamOutcome(task, student) : null;
+  if (progress.shortPassed && progress.practicalPassed) {
+    const lines = [`【${student.name} 接下來】`, '✅ 通過，請考生在保證金單簽名。'];
+    if (notification && !notification.sent && !notification.skippedExaminer) lines.push('⚠️ 考生尚未綁定 LINE，請現場告知。');
+    return { text: lines.join('\n'), actions: [] };
+  }
   const failedParts = !progress.shortPassed ? ['簡答題'] : ['上機'];
   const form = retestForm(task);
-  const notification = notify ? notifyStudentForRetest(task, student, failedParts) : null;
   const lines = [`【${student.name} 接下來】`];
   if (failedParts.includes('簡答題')) lines.push('❌ 簡答未過：補考週到影音實驗室補考，不用填表。');
   else if (form.finalAttempt) lines.push('❌ 上機未過：第二次補考結束，請依實驗室規定處理。');
@@ -1544,7 +1568,7 @@ function examinerRetestInstructions(task, failedParts) {
   return lines.join('\n');
 }
 
-function retestMessage(task, student, failedParts, label, url) {
+function retestMessage(task, student, failedParts, label, url, corrected = false) {
   const feeNotice = label === '第二次補考'
     ? '\n\n💰 第二次補考須繳交 100 元，且不退費。'
     : '\n\n提醒：若第一次補考仍未通過，申請第二次補考須繳交 100 元，且不退費。';
@@ -1554,18 +1578,31 @@ function retestMessage(task, student, failedParts, label, url) {
     short ? '🗣️ 簡答題：請在補考週期間，於影音實驗室開放時間隨時到場進行口頭補考；不必填寫上機報名表。現場助理會登記結果。' : '',
     practical ? `🎬 上機考：請填寫${label}上機考報名表，依後續安排應試。${short ? '須先通過簡答題，才可參加上機考。' : ''}${url ? `\n報名連結：${url}` : ''}` : ''
   ].filter(Boolean).join('\n\n');
-  return `【${label || '補考'}提醒】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n${instructions}${feeNotice}`;
+  const heading = corrected ? `考試結果更正｜${label || '補考'}提醒` : `${label || '補考'}提醒`;
+  return `【${heading}】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n${instructions}${feeNotice}`;
 }
 
-function notifyStudentForRetest(task, student, failedParts) {
+function passedExamMessage(task, student, corrected = false) {
+  return `【考試結果${corrected ? '更正' : ''}】\n${student.name}你好，你的 ${task.equipment} 考試已${corrected ? '更正為' : ''}通過。\n\n✅ 簡答題：通過\n✅ 上機考：通過\n💰 已符合退還保證金資格，請依現場指示完成簽名。`;
+}
+
+function notifyStudentForExamOutcome(task, student, { corrected = false } = {}) {
+  const progress = examProgress(task, student);
+  if (progress.step !== 'done') return { sent: false, configured: true, pending: true };
+  const studentUserId = userIdForName(student.name, student.number);
+  if (!studentUserId) return { sent: false, configured: true, unbound: true };
+  if (studentIsTaskExaminer(task, student, studentUserId)) return { sent: false, configured: true, skippedExaminer: true };
+  if (progress.shortPassed && progress.practicalPassed) {
+    queuePush(studentUserId, reply(passedExamMessage(task, student, corrected)));
+    return { sent: true, configured: true, outcome: 'passed' };
+  }
+  const failedParts = !progress.shortPassed ? ['簡答題'] : ['上機'];
   const form = retestForm(task);
   const needsForm = failedParts.includes('上機') && !form.finalAttempt;
   if (needsForm && !form.url) return { sent: false, configured: false, finalAttempt: form.finalAttempt };
-  const studentUserId = userIdForName(student.name, student.number);
-  if (!studentUserId) return { sent: false, configured: true, finalAttempt: form.finalAttempt };
   const actions = needsForm ? [{ label: '上機補考報名', uri: form.url }] : [];
-  queuePush(studentUserId, reply(retestMessage(task, student, failedParts, form.label, needsForm ? form.url : ''), actions));
-  return { sent: true, configured: true, finalAttempt: form.finalAttempt };
+  queuePush(studentUserId, reply(retestMessage(task, student, failedParts, form.label, needsForm ? form.url : '', corrected), actions));
+  return { sent: true, configured: true, finalAttempt: form.finalAttempt, outcome: 'retest' };
 }
 
 function oralRetestCandidates() {

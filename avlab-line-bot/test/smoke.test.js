@@ -678,6 +678,52 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-TEACH-CORRECT')[5], '遲到');
 });
 
+test('student gets one final exam result and correction pushes only when pass or retest changes', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務');
+  const students = resultBook.getSheetByName('任務學生');
+  const bindings = runtime.openById(ids.master).getSheetByName('用戶綁定');
+  const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
+  tasks.appendRow(['T-RESULT-NOTICE','1151','考試',new Date('2026-09-29'),'12:00','13:00','H6','401','測試者','','G1','已排定',true,true,'','','','']);
+  students.appendRow(['T-RESULT-NOTICE','S-RESULT-NOTICE','結果通知生','NOTICE001',1,'未點名','未記錄','']);
+  bindings.appendRow(['U-RESULT-NOTICE','結果通知生','','NOTICE001','external_student']);
+
+  externalTeaching.handleCommand('點名狀態 T-RESULT-NOTICE S-RESULT-NOTICE 到場', context);
+  const before = runtime.httpOperations.length;
+  externalTeaching.handleCommand('簡答登記 T-RESULT-NOTICE S-RESULT-NOTICE 通過', context);
+  assert.equal(runtime.httpOperations.length, before, '簡答評分過程不應推播');
+
+  externalTeaching.handleCommand('上機登記 T-RESULT-NOTICE S-RESULT-NOTICE 通過', context);
+  assert.equal(runtime.httpOperations.length, before + 1, '整位考生完成後只推一次最終結果');
+  let payload = JSON.parse(runtime.httpOperations.at(-1).options.payload);
+  assert.match(payload.messages[0].text, /【考試結果】/);
+  assert.match(payload.messages[0].text, /已通過/);
+
+  externalTeaching.handleCommand('更正評分 T-RESULT-NOTICE S-RESULT-NOTICE practical 未通過', context);
+  assert.equal(runtime.httpOperations.length, before + 2, '通過改為需補考時應通知');
+  payload = JSON.parse(runtime.httpOperations.at(-1).options.payload);
+  assert.match(payload.messages[0].text, /【考試結果更正｜第一次補考提醒】/);
+
+  externalTeaching.handleCommand('更正評分 T-RESULT-NOTICE S-RESULT-NOTICE practical 未通過', context);
+  assert.equal(runtime.httpOperations.length, before + 2, '需補考狀態未改變時不應重複通知');
+
+  externalTeaching.handleCommand('更正評分 T-RESULT-NOTICE S-RESULT-NOTICE practical 通過', context);
+  assert.equal(runtime.httpOperations.length, before + 3, '需補考改回通過時應通知');
+  payload = JSON.parse(runtime.httpOperations.at(-1).options.payload);
+  assert.match(payload.messages[0].text, /【考試結果更正】/);
+  assert.match(payload.messages[0].text, /更正為通過/);
+
+  tasks.appendRow(['T-RESULT-EXAMINER','1151','考試',new Date('2026-09-29'),'14:00','15:00','H6','401','結果通知生','U-RESULT-NOTICE','G1','已排定',true,true,'','','','']);
+  students.appendRow(['T-RESULT-EXAMINER','S-RESULT-EXAMINER','結果通知生','NOTICE001',1,'未點名','未記錄','']);
+  const examinerContext = { sourceType: 'group', chatId: 'G1', userId: 'U-RESULT-NOTICE' };
+  const beforeExaminerResult = runtime.httpOperations.length;
+  externalTeaching.handleCommand('點名狀態 T-RESULT-EXAMINER S-RESULT-EXAMINER 到場', examinerContext);
+  externalTeaching.handleCommand('簡答登記 T-RESULT-EXAMINER S-RESULT-EXAMINER 通過', examinerContext);
+  const examinerFinished = externalTeaching.handleCommand('上機登記 T-RESULT-EXAMINER S-RESULT-EXAMINER 通過', examinerContext);
+  assert.equal(runtime.httpOperations.length, beforeExaminerResult, '考生同時為本場考官時不推播考生結果');
+  assert.doesNotMatch(examinerFinished.text, /考生尚未綁定 LINE/);
+});
+
 test('correcting a non-final short answer failure immediately shows oral retest guidance', () => {
   const resultBook = runtime.openById(ids.externalResults);
   const tasks = resultBook.getSheetByName('對外任務');
