@@ -1536,9 +1536,16 @@ function earliestInitialExams() {
 }
 
 function depositReminderText(kind, task, student, deadline) {
-  if (kind === 'start') return `【保證金繳費提醒】\n${student.name}你好，保證金繳費提醒自 9/28 開始。目前對帳表顯示你尚未繳交。\n\n報名項目：${student.equipment.join('、')}\n應繳保證金：${student.equipment.length * 50} 元\n繳費期限：${formatDate(deadline)}\n\n若已繳費但對帳表尚未更新，請稍後再確認；逾期未繳將影響考試資格。`;
-  if (kind === 'deadline') return `【考試保證金提醒】\n${student.name}你好，目前對帳表仍顯示尚未繳交考試保證金。\n\n繳費期限：${formatDate(deadline)}\n最早考試：${formatDate(task.date)} ${formatTime(student.scheduledStart || task.start)}｜${task.equipment}\n\n請於期限內完成繳費；未繳者將取消考試資格。`;
-  return `【考試前保證金提醒】\n${student.name}你好，目前對帳表仍顯示尚未繳交考試保證金。\n\n你的最早考試：${formatDate(task.date)} ${formatTime(student.scheduledStart || task.start)}｜${task.equipment}\n請最遲於考試前一天完成繳費；若考試開始前仍未繳交，將取消考試資格。`;
+  const consequence = '若到了某項器材考試的前一天仍未繳交，才會取消該項器材的考試資格；不會連帶取消其他器材。';
+  if (kind === 'start') return `【保證金繳費提醒】\n${student.name}你好，保證金繳費提醒自 9/28 開始。目前對帳表顯示你尚未繳交。\n\n報名項目：${student.equipment.join('、')}\n應繳保證金：${student.equipment.length * 50} 元\n繳費期限：${formatDate(deadline)}\n\n若已繳費但對帳表尚未更新，請稍後再確認。${consequence}`;
+  if (kind === 'deadline') return `【考試保證金期限提醒】\n${student.name}你好，目前對帳表仍顯示尚未繳交考試保證金。\n\n繳費期限：${formatDate(deadline)}\n最早考試：${formatDate(task.date)} ${formatTime(student.scheduledStart || task.start)}｜${task.equipment}\n\n請儘快完成繳費。${consequence}`;
+  if (kind === 'overdue') return `【保證金逾期提醒】\n${student.name}你好，對帳表目前仍顯示尚未繳交，且已超過 ${formatDate(deadline)} 的繳費期限。\n\n報名項目：${student.equipment.join('、')}\n應繳保證金：${student.equipment.length * 50} 元\n\n目前不會一次取消全部考試資格。${consequence}\n如仍需參加考試，請儘快完成繳費並確認對帳表已更新。`;
+  return `【考試前保證金提醒】\n${student.name}你好，目前對帳表仍顯示尚未繳交考試保證金。\n\n你的最早考試：${formatDate(task.date)} ${formatTime(student.scheduledStart || task.start)}｜${task.equipment}\n${consequence}`;
+}
+
+function registrationCoversTask(registration, task) {
+  const taskKey = equipmentKey(task?.equipment);
+  return Boolean(taskKey) && (registration?.equipment || []).some(item => equipmentKey(item) === taskKey);
 }
 
 function displayRegistrationName(value) {
@@ -1661,22 +1668,32 @@ function processDepositRequirements(now = new Date()) {
   const firstExams = earliestInitialExams();
   if (now >= reminderStart) for (const registration of registrations) {
     const personDeadline = depositDeadlineFor(registration, deadline);
-    if (now >= personDeadline) continue;
     const record = depositRecordFor(registration, '考試', records);
     if (record?.paid) continue;
     const personKey = norm(registration.number);
+    if (!personKey) continue;
+    const studentUserId = userIdForName(registration.name, registration.number);
+    if (now >= personDeadline) {
+      const overdueKey = `DEPOSIT-OVERDUE:${personKey}:${taipeiDate(personDeadline)}`;
+      if (logged.has(overdueKey) || pendingReminderKeys.has(overdueKey) || !studentUserId) continue;
+      const entry = firstExams.find(candidate => norm(candidate.student.number) === personKey);
+      queuePush(studentUserId, reply(depositReminderText('overdue', entry?.task, registration, personDeadline)), {
+        key: overdueKey,
+        onSuccess: () => logDepositAction(logSheet, overdueKey, '保證金逾期提醒', registration, entry?.task, now, '已送')
+      });
+      logged.add(overdueKey); reminders++;
+      continue;
+    }
     const initialKey = `DEPOSIT-START:${personKey}:${taipeiDate(reminderStart)}`;
     const correctionKey = correctionCampaignKey(registration);
-    if (!personKey || logged.has(initialKey) || pendingReminderKeys.has(initialKey)
+    if (logged.has(initialKey) || pendingReminderKeys.has(initialKey)
       || logged.has(correctionKey) || pendingReminderKeys.has(correctionKey)) continue;
-    const studentUserId = userIdForName(registration.name, registration.number);
     if (!studentUserId) continue;
     const entry = firstExams.find(candidate => norm(candidate.student.number) === personKey);
     const sameDayDue = [];
     if (entry && today === dayBeforeDate(personDeadline)) sameDayDue.push(['deadline', `DEPOSIT-DEADLINE:${personKey}:${taipeiDate(personDeadline)}`]);
-    if (entry && today === dayBeforeDate(entry.start)) sameDayDue.push(['exam-day-before', `DEPOSIT-EXAM:${personKey}:${taipeiDate(entry.start)}`]);
     const pendingDue = sameDayDue.filter(([, key]) => !logged.has(key));
-    const kind = pendingDue.some(([type]) => type === 'exam-day-before') ? 'exam-day-before' : pendingDue.length ? 'deadline' : 'start';
+    const kind = pendingDue.length ? 'deadline' : 'start';
     queuePush(studentUserId, reply(depositReminderText(kind, entry?.task, kind === 'start' ? registration : entry.student, personDeadline)), {
       key: initialKey, onSuccess: () => {
         logDepositAction(logSheet, initialKey, '開始繳費提醒', registration, entry?.task, now, '已合併推播');
@@ -1700,11 +1717,9 @@ function processDepositRequirements(now = new Date()) {
     const studentUserId = userIdForName(student.name, student.number);
     const remindersDue = [];
     if (today === dayBeforeDate(personDeadline)) remindersDue.push(['deadline', `DEPOSIT-DEADLINE:${personKey}:${taipeiDate(personDeadline)}`]);
-    if (today === dayBeforeDate(start)) remindersDue.push(['exam-day-before', `DEPOSIT-EXAM:${personKey}:${taipeiDate(start)}`]);
     const pendingReminders = remindersDue.filter(([, key]) => !logged.has(key) && !pendingReminderKeys.has(key));
     if (pendingReminders.length && studentUserId) {
-      const messageKind = pendingReminders.some(([kind]) => kind === 'exam-day-before') ? 'exam-day-before' : 'deadline';
-      queuePush(studentUserId, reply(depositReminderText(messageKind, task, student, personDeadline)), {
+      queuePush(studentUserId, reply(depositReminderText('deadline', task, student, personDeadline)), {
         key: pendingReminders[0][1],
         onSuccess: () => { for (const [kind, key] of pendingReminders) logDepositAction(logSheet, key, kind, student, task, now, '已合併推播'); }
       });
@@ -1716,7 +1731,10 @@ function processDepositRequirements(now = new Date()) {
   for (const task of allTasks().filter(task => task.phase === '考試' && ['已排定', '點名中'].includes(task.status))) {
     for (const student of studentsFor(task.id)) {
       const registration = registrationFor(student);
-      if (!registration || now < depositDeadlineFor(registration, deadline) || student.attendance !== '未點名') continue;
+      const start = studentTaskStart(task, student);
+      const cancellationDate = start ? dateAtTaipeiMidnight(dayBeforeDate(start)) : null;
+      if (!registration || !registrationCoversTask(registration, task) || !cancellationDate
+        || now < cancellationDate || student.attendance !== '未點名') continue;
       if (depositRecordFor(student, '考試', records)?.paid) continue;
       const key = `DEPOSIT-CANCEL:${task.id}:${student.id}`;
       if (logged.has(key)) continue;
@@ -1724,10 +1742,10 @@ function processDepositRequirements(now = new Date()) {
       upsertAttendance(task, student, '保證金未繳', 'SYSTEM');
       setScheduleStudentStrikethrough(task, student, true);
       const studentUserId = userIdForName(student.name, student.number);
-      const message = `【考試資格取消】\n${student.name}你好，因考試開始前對帳表仍顯示未繳交保證金，本次 ${task.equipment} 考試資格已取消。\n\n如仍需參加考試，請直接聯絡影音實驗室。`;
+      const message = `【單項考試資格取消】\n${student.name}你好，因到了 ${formatDate(task.date)}「${task.equipment}」考試的前一天，對帳表仍顯示未繳交該項器材的考試保證金，因此只取消本次 ${task.equipment} 考試資格。\n\n其他器材考試資格不受影響。如仍需參加本項考試，請直接聯絡影音實驗室。`;
       if (studentUserId) queuePush(studentUserId, reply(message));
       const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
-      if (examinerUserId) queuePush(examinerUserId, reply(`🚫 ${student.name} 因未繳交保證金，已取消 ${task.equipment} 考試資格。若學生仍需考試，請其聯絡影音實驗室。`));
+      if (examinerUserId) queuePush(examinerUserId, reply(`🚫 ${student.name} 到了考試前一天仍未繳交該項器材保證金，已取消本次 ${task.equipment} 考試資格；其他器材不受影響。若學生仍需考試，請其聯絡影音實驗室。`));
       logDepositAction(logSheet, key, '取消資格', student, task, now, '保證金未繳');
       logged.add(key); canceled++;
     }
@@ -1836,4 +1854,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };

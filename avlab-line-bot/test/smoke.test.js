@@ -1089,6 +1089,16 @@ test('corrected deposit notice does not ask paid or zero-item students to pay ag
   assert.doesNotMatch(empty, /前完成繳交/);
 });
 
+test('overdue deposit notice explains that only the unpaid equipment is canceled on the day before its exam', () => {
+  const deadline = new Date('2026-10-09T00:00:00+08:00');
+  const message = externalTeaching._test.depositReminderText('overdue', null, {
+    name: '逾期學生', equipment: ['H6', 'CX350']
+  }, deadline);
+  assert.match(message, /已超過 10\/09 的繳費期限/);
+  assert.match(message, /考試的前一天仍未繳交，才會取消該項器材/);
+  assert.match(message, /不會連帶取消其他器材/);
+});
+
 test('deposit correction campaign records success once and suppresses the old initial reminder', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);
@@ -1478,13 +1488,13 @@ test('deposit payment reminders begin on September 28 and skip paid students', (
   }
 });
 
-test('unpaid registered students are canceled at the deadline, struck from schedule, and hidden from attendance', () => {
+test('unpaid students are canceled only on the day before that equipment exam and restored after payment', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);
   const resultBook = isolated.openById(ids.externalResults);
   const tasks = resultBook.insertSheet('對外任務');
   tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','考官','考官LINE User ID','群組ID','狀態']);
-  tasks.appendRow(['DEPOSIT-TASK','1151','考試',new Date('2026-10-10'),'12:00','12:15','H6','401','考官甲','U-EXAM','','已排定',true,true,'','','考試週分班表I','C3']);
+  tasks.appendRow(['DEPOSIT-TASK','1151','考試',new Date('2026-10-12'),'12:00','12:15','H6','401','考官甲','U-EXAM','','已排定',true,true,'','','考試週分班表I','C3']);
   const students = resultBook.insertSheet('任務學生');
   students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間','個別開始時間','個別結束時間','提醒時間','來源儲存格']);
   students.appendRow(['DEPOSIT-TASK','DEPOSIT-STUDENT','學生甲','1001',1,'未點名','未記錄','','12:00','12:15','','C3']);
@@ -1507,17 +1517,24 @@ test('unpaid registered students are canceled at the deadline, struck from sched
   bindings.appendRow(['LINE User ID','姓名','綁定時間','學號']);
   bindings.appendRow(['U-STUDENT','學生甲','','1001']);
 
-  const result = externalTeaching._test.processDepositRequirements(new Date('2026-10-10T12:00:00+08:00'));
+  const overdue = externalTeaching._test.processDepositRequirements(new Date('2026-10-10T12:00:00+08:00'));
+  assert.deepEqual(overdue, { reminders: 1, canceled: 0, restored: 0 });
+  assert.equal(students.getRange(2, 6).getValue(), '未點名');
+  const overduePush = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload)).find(push => push.to === 'U-STUDENT');
+  assert.match(overduePush.messages[0].text, /目前不會一次取消全部考試資格/);
+
+  const result = externalTeaching._test.processDepositRequirements(new Date('2026-10-11T00:00:00+08:00'));
   assert.deepEqual(result, { reminders: 0, canceled: 1, restored: 0 });
   assert.equal(students.getRange(2, 6).getValue(), '取消資格');
   assert.equal(resultBook.getSheetByName('LINE點名紀錄').getRange(2, 14).getValue(), '保證金未繳');
   assert.equal(resultBook.getSheetByName('保證金提醒紀錄').getRange(2, 2).getValue(), '取消資格');
   const pushes = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload));
   assert.deepEqual(new Set(pushes.map(push => push.to)), new Set(['U-STUDENT', 'U-EXAM']));
+  assert.match(pushes.filter(push => push.to === 'U-STUDENT').at(-1).messages[0].text, /只取消本次 H6/);
   assert.equal(isolated.operations.some(operation => operation.kind === 'fontLine' && operation.value === 'line-through'), true);
   assert.equal(externalTeaching._test.studentsFor('DEPOSIT-TASK').length, 0);
   deposits.getRange(4, 7).setValue(true);
-  const restored = externalTeaching._test.processDepositRequirements(new Date('2026-10-10T12:01:00+08:00'));
+  const restored = externalTeaching._test.processDepositRequirements(new Date('2026-10-11T00:01:00+08:00'));
   assert.deepEqual(restored, { reminders: 0, canceled: 0, restored: 1 });
   assert.equal(students.getRange(2, 6).getValue(), '未點名');
   assert.equal(resultBook.getSheetByName('LINE點名紀錄').getRange(2, 14).getValue(), '保證金已確認');
