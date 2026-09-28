@@ -769,8 +769,73 @@ function automaticArrivalStatus(task, student, now = new Date()) {
   return isExam(task) ? '取消資格' : '遲到';
 }
 
-function attendancePrompt(task, student) {
+function studentStateCard(task, student, options = {}) {
   const { position, total } = studentPosition(task, student);
+  const title = options.title || `${task.phase}學生卡片`;
+  const rows = options.rows || [];
+  const actions = options.actions || [];
+  const navigation = options.navigation || [];
+  const parentText = options.parentText || `查看任務 ${task.id}`;
+  const parentLabel = options.parentLabel || '回任務';
+  const note = String(options.note || '').trim();
+  const actionObject = action => action.uri
+    ? { type: 'uri', label: action.label, uri: action.uri }
+    : action.postback
+      ? { type: 'postback', label: action.label, data: action.postback }
+      : { type: 'message', label: action.label, text: action.text };
+  const cardRows = rows.map(row => ({
+    type: 'box', layout: 'horizontal', spacing: 'md',
+    contents: [
+      { type: 'text', text: String(row.label), size: 'sm', color: '#777777', flex: 3 },
+      { type: 'text', text: String(row.value), size: 'sm', color: '#222222', weight: 'bold', flex: 7, wrap: true, align: 'end' }
+    ]
+  }));
+  const fallback = [
+    `【${title}｜第 ${position}/${total} 位】`,
+    `${task.equipment}｜${student.name}${student.number ? `（${student.number}）` : ''}`,
+    ...rows.map(row => `${row.label}：${row.value}`),
+    note
+  ].filter(Boolean).join('\n');
+  const fallbackActions = externalNav([...actions, ...navigation], parentText, parentLabel);
+  return {
+    text: fallback,
+    fallbackQuickReply: qr(fallbackActions),
+    lineMessage: {
+      type: 'flex',
+      altText: `${student.name}｜${title}`,
+      contents: {
+        type: 'bubble', size: 'kilo',
+        header: {
+          type: 'box', layout: 'vertical', paddingAll: '14px', backgroundColor: '#F5F5F5',
+          contents: [
+            { type: 'text', text: title, size: 'sm', color: '#666666', weight: 'bold' },
+            { type: 'text', text: String(student.name || '未填姓名'), size: 'xl', color: '#222222', weight: 'bold', margin: 'sm', wrap: true },
+            { type: 'text', text: `${task.equipment}｜第 ${position}/${total} 位`, size: 'xs', color: '#888888', margin: 'sm', wrap: true }
+          ]
+        },
+        body: {
+          type: 'box', layout: 'vertical', paddingAll: '16px', spacing: 'md',
+          contents: [
+            ...(student.number ? [{ type: 'text', text: `學號 ${student.number}`, size: 'sm', color: '#555555' }] : []),
+            ...cardRows,
+            ...(note ? [{ type: 'separator', color: '#DDDDDD' }, { type: 'text', text: note, size: 'xs', color: '#666666', wrap: true }] : [])
+          ]
+        },
+        ...(actions.length ? {
+          footer: {
+            type: 'box', layout: 'vertical', paddingAll: '12px', spacing: 'sm',
+            contents: actions.map((action, index) => ({
+              type: 'button', height: 'sm', style: index === 0 ? 'primary' : 'secondary', action: actionObject(action)
+            }))
+          }
+        } : {})
+      },
+      quickReply: qr(externalNav(navigation, parentText, parentLabel))
+    }
+  };
+}
+
+function attendancePrompt(task, student, notice = '') {
   const attendanceActions = isExam(task) ? [
     { label: '✅ 考生已到', postback: `到場判定 ${task.id} ${student.id}` }
   ] : [
@@ -778,11 +843,19 @@ function attendancePrompt(task, student) {
     { label: '❌ 缺席', postback: `點名狀態 ${task.id} ${student.id} 缺席` }
   ];
   const rule = isExam(task) ? '個別時段開始 5 分鐘後尚未點名，將取消考試資格。' : '系統會依開始時間自動判定：15 分鐘後點名為遲到。';
-  return reply(`👤【學生 ${position}/${total}】\n━━━━━━━━━━━━\n🧰 ${task.equipment}\n👤 ${student.name}${student.number ? `\n🆔 ${student.number}` : ''}\n⏰ ${formatTime(student.scheduledStart || task.start)}\n🏷️ 目前出席：${student.attendance}\n━━━━━━━━━━━━\nℹ️ ${rule}`, externalNav([
-    ...attendanceActions,
-    { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
-    { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
-  ], `查看任務 ${task.id}`, '回任務'));
+  return studentStateCard(task, student, {
+    title: `${task.phase}點名`,
+    rows: [
+      { label: '個別時間', value: formatTime(student.scheduledStart || task.start) },
+      { label: '目前出席', value: student.attendance }
+    ],
+    actions: attendanceActions,
+    note: [notice, rule].filter(Boolean).join('\n\n'),
+    navigation: [
+      { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
+      { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
+    ]
+  });
 }
 
 function candidateMenu(task, page = 1, notice = '') {
@@ -791,84 +864,33 @@ function candidateMenu(task, page = 1, notice = '') {
   const currentPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
   const visible = students.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const postbackAction = (label, data) => ({ type: 'postback', label, data });
-  const candidateActions = student => student.attendance === '取消資格' ? [
-    postbackAction('查看狀態', `查看考生 ${task.id} ${student.id}`),
-    postbackAction('修改狀態', `修改紀錄 ${task.id} ${student.id}`)
-  ] : isExam(task) ? [
-    postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
-    postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
-  ] : [
-    postbackAction('學生已到（自動判定）', `到場判定 ${task.id} ${student.id}`),
-    postbackAction('缺席', `點名狀態 ${task.id} ${student.id} 缺席`)
-  ];
-  const statusTheme = status => ({
-    未點名: { icon: '⚪', background: '#F1F3F4', foreground: '#5F6368' },
-    到場: { icon: '✅', background: '#E6F4EA', foreground: '#137333' },
-    遲到: { icon: '🟠', background: '#FEF7E0', foreground: '#B06000' },
-    缺席: { icon: '❌', background: '#FCE8E6', foreground: '#C5221F' },
-    取消資格: { icon: '⛔', background: '#FCE8E6', foreground: '#A50E0E' }
-  })[status] || { icon: '•', background: '#F1F3F4', foreground: '#5F6368' };
-  const bubbles = visible.map((student, index) => {
-    const position = (currentPage - 1) * pageSize + index + 1;
-    const theme = statusTheme(student.attendance);
-    const actions = candidateActions(student);
-    return {
-      type: 'bubble',
-      size: 'kilo',
-      header: {
-        type: 'box', layout: 'vertical', paddingAll: '14px',
-        backgroundColor: isExam(task) ? '#5B4B8A' : '#356954',
-        contents: [
-          { type: 'text', text: `${isExam(task) ? '📝 考試' : '📚 教學'}｜${task.equipment}`, color: '#FFFFFF', size: 'sm', weight: 'bold', wrap: true },
-          { type: 'text', text: `第 ${position}/${students.length} 位`, color: '#E8EAED', size: 'xs', margin: 'sm' }
-        ]
-      },
-      body: {
-        type: 'box', layout: 'vertical', paddingAll: '16px', spacing: 'md',
-        contents: [
-          { type: 'text', text: String(student.name || '未填姓名'), size: 'xl', weight: 'bold', color: '#202124', wrap: true },
-          ...(student.number ? [{ type: 'text', text: `學號 ${student.number}`, size: 'sm', color: '#5F6368' }] : []),
-          { type: 'separator', color: '#E0E0E0' },
-          {
-            type: 'box', layout: 'horizontal', spacing: 'sm', alignItems: 'center',
-            contents: [
-              { type: 'text', text: '⏰', flex: 0, size: 'sm' },
-              { type: 'text', text: formatTime(student.scheduledStart || task.start), size: 'sm', color: '#3C4043', weight: 'bold' }
-            ]
-          },
-          {
-            type: 'box', layout: 'vertical', backgroundColor: theme.background, cornerRadius: '8px', paddingAll: '10px',
-            contents: [{ type: 'text', text: `${theme.icon} ${student.attendance}`, color: theme.foreground, size: 'sm', weight: 'bold', align: 'center' }]
-          },
-          ...(isExam(task) ? [{ type: 'text', text: '先簽考生名條', size: 'xs', color: '#B06000', align: 'center' }] : [])
-        ]
-      },
-      footer: {
-        type: 'box', layout: 'vertical', paddingAll: '12px', spacing: 'sm',
-        contents: actions.map((action, actionIndex) => ({
-          type: 'button', height: 'sm', style: actionIndex === 0 ? 'primary' : 'secondary',
-          color: actionIndex === 0 ? (isExam(task) ? '#5B4B8A' : '#356954') : undefined,
-          action
-        }))
-      }
-    };
-  });
+  const columns = visible.map((student, index) => ({
+    title: String(student.name || '未填姓名').slice(0, 40),
+    text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}${isExam(task) ? '｜先簽考生名條' : ''}`.slice(0, 60),
+    actions: student.attendance === '取消資格' ? [
+      postbackAction('查看狀態', `查看考生 ${task.id} ${student.id}`),
+      postbackAction('修改狀態', `修改紀錄 ${task.id} ${student.id}`)
+    ] : isExam(task) ? [
+      postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
+      postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
+    ] : [
+      postbackAction('學生已到（自動判定）', `到場判定 ${task.id} ${student.id}`),
+      postbackAction('缺席', `點名狀態 ${task.id} ${student.id} 缺席`)
+    ]
+  }));
   const navActions = [];
   if (currentPage > 1) navActions.push({ label: '⬅️ 上一頁名單', postback: `考生名單 ${task.id} ${currentPage - 1}` });
   if (currentPage < totalPages) navActions.push({ label: '下一頁名單 ➡️', postback: `考生名單 ${task.id} ${currentPage + 1}` });
-  const rows = visible.map((student, index) => {
-    const theme = statusTheme(student.attendance);
-    return `${theme.icon} ${(currentPage - 1) * pageSize + index + 1}. ${student.name}｜${student.attendance}`;
-  }).join('\n');
-  const fallbackText = `${notice ? `${notice}\n\n` : ''}👥【${task.equipment} 考生名單｜${currentPage}/${totalPages}】\n━━━━━━━━━━━━\n${rows}\n\n左右滑動卡片，直接操作每位考生。`;
+  const rows = visible.map((student, index) => `${(currentPage - 1) * pageSize + index + 1}. ${student.name}｜${student.attendance}`).join('\n');
+  const fallbackText = `${notice ? `${notice}\n\n` : ''}【${task.equipment} 考生名單｜${currentPage}/${totalPages}】\n${rows}\n\n請左右滑動卡片並直接點選考生。`;
   const fallbackItems = visible.slice(0, 9).map(student => ({ label: `查看 ${String(student.name).slice(0, 12)}`, postback: `查看考生 ${task.id} ${student.id}` }));
   return {
     text: fallbackText,
     fallbackQuickReply: qr(externalNav(fallbackItems, `查看任務 ${task.id}`, '回任務')),
     lineMessage: {
-      type: 'flex',
+      type: 'template',
       altText: `${task.equipment} 考生卡片名單（${students.length} 人）`,
-      contents: { type: 'carousel', contents: bubbles },
+      template: { type: 'carousel', columns },
       quickReply: qr(externalNav([
         ...navActions,
         { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
@@ -990,24 +1012,8 @@ function upsertAttendance(task, student, operatorName, operatorId) {
   return { shortAnswer: cumulativeShort, practical: cumulativePractical, refundable, shortEvaluated, practicalEvaluated, depositStatus };
 }
 
-function nextPrompt(task, context) {
-  const students = studentsFor(task.id);
-  const pendingResult = students.find(student => isExam(task) && ['到場', '遲到'].includes(student.attendance) && examProgress(task, student).step !== 'done');
-  if (pendingResult) return resultPrompt(task, pendingResult);
-  const pending = students.filter(student => student.attendance === '未點名');
-  if (!pending.length) {
-    return reply(`✅ ${task.equipment} 已完成所有學生的點名與結果登記。\n\n${completionReminderText(task)}`, externalNav([
-      { label: '完成點名', postback: `完成點名 ${task.id}` },
-      { label: '查看認證狀態', uri: certificationStatusUrl() },
-      { label: '查看統計', text: `查看任務 ${task.id}` }
-    ], `查看任務 ${task.id}`, '回任務'));
-  }
-  return attendanceBoard(task, pending);
-}
-
-function resultPrompt(task, student) {
+function resultPrompt(task, student, notice = '', extraActions = []) {
   const progress = examProgress(task, student);
-  const { position, total } = studentPosition(task, student);
   const actions = [];
   if (!progress.shortRecorded) actions.push(
     { label: '簡答題 ✅', postback: `簡答登記 ${task.id} ${student.id} 通過` },
@@ -1017,17 +1023,25 @@ function resultPrompt(task, student) {
     { label: '上機 ✅', postback: `上機登記 ${task.id} ${student.id} 通過` },
     { label: '上機 ❌', postback: `上機登記 ${task.id} ${student.id} 未通過` }
   );
-  actions.push(
-    { label: '修改紀錄', postback: `修改紀錄 ${task.id} ${student.id}` },
-    { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
-    { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
-  );
+  actions.push(...extraActions, { label: '修改紀錄', postback: `修改紀錄 ${task.id} ${student.id}` });
   const stateText = (recorded, passed) => !recorded ? '⏳ 尚未評分' : passed ? '✅ 通過' : '❌ 未通過';
   const practicalText = progress.shortRecorded && !progress.shortPassed ? '⛔ 簡答題未通過，無上機資格' : stateText(progress.practicalRecorded, progress.practicalPassed);
-  const depositText = progress.shortRecorded && progress.practicalRecorded
-    ? `\n保證金：${progress.shortPassed && progress.practicalPassed ? '✅ 可退保證金' : '❌ 不可退保證金'}` : '';
-  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n出席：${student.attendance}\n\n簡答題：${stateText(progress.shortRecorded, progress.shortPassed)}\n上機：${practicalText}${depositText}\n\n${EXAM_PASSING_RULES}\n${progress.step === 'done' ? '本次評分已完成。' : '請直接選擇簡答題或上機結果。'}`,
-    externalNav(actions, `查看任務 ${task.id}`, '回任務'));
+  const rows = [
+    { label: '出席', value: student.attendance },
+    { label: '簡答題', value: stateText(progress.shortRecorded, progress.shortPassed) },
+    { label: '上機', value: practicalText }
+  ];
+  if (progress.shortRecorded && progress.practicalRecorded) rows.push({
+    label: '保證金', value: progress.shortPassed && progress.practicalPassed ? '✅ 可退保證金' : '❌ 不可退保證金'
+  });
+  return studentStateCard(task, student, {
+    title: '考試評分卡', rows, actions,
+    note: [notice, EXAM_PASSING_RULES, progress.step === 'done' ? '本次評分已完成。' : '請直接在卡片上選擇本階段結果。'].filter(Boolean).join('\n\n'),
+    navigation: [
+      { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
+      { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
+    ]
+  });
 }
 
 function attendanceSummary(taskId) {
@@ -1049,16 +1063,29 @@ function attendanceSummary(taskId) {
   ], `查看任務 ${task.id}`, '回任務'));
 }
 
-function showStudent(taskId, studentId, context) {
+function showStudent(taskId, studentId, context, notice = '') {
   const task = findTask(taskId), student = findStudent(taskId, studentId);
   if (!task || !student) return reply('找不到指定的任務或學生。');
-  if (student.attendance === '未點名') return attendancePrompt(task, student);
-  if (isExam(task) && ['到場', '遲到'].includes(student.attendance)) return resultPrompt(task, student);
-  return reply(`${student.name}目前出席狀態：${student.attendance}`, externalNav([
-    { label: '修改紀錄', postback: `修改紀錄 ${task.id} ${student.id}` },
-    { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
-    { label: '繼續依序點名', postback: `開始點名 ${task.id}` }
-  ], `查看任務 ${task.id}`, '回任務'));
+  if (student.attendance === '未點名') return attendancePrompt(task, student, notice);
+  if (isExam(task) && ['到場', '遲到'].includes(student.attendance)) return resultPrompt(task, student, notice);
+  const allComplete = studentsFor(task.id).every(item => item.attendance !== '未點名');
+  return studentStateCard(task, student, {
+    title: `${task.phase}學生卡片`,
+    rows: [
+      { label: '個別時間', value: formatTime(student.scheduledStart || task.start) },
+      { label: '目前出席', value: student.attendance }
+    ],
+    actions: [
+      { label: '修改紀錄', postback: `修改紀錄 ${task.id} ${student.id}` },
+      ...(allComplete ? [{ label: '完成點名', postback: `完成點名 ${task.id}` }] : []),
+      { label: '繼續依序點名', postback: `開始點名 ${task.id}` }
+    ],
+    note: [notice, allComplete ? completionReminderText(task) : ''].filter(Boolean).join('\n\n'),
+    navigation: [
+      { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
+      { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
+    ]
+  });
 }
 
 function attendanceCorrectionActions(task, student) {
@@ -1085,9 +1112,16 @@ function editRecordPrompt(task, student) {
       actions.push({ label: `上機改為${opposite}`, postback: `更正評分 ${task.id} ${student.id} practical ${opposite}` });
     }
   }
-  const grades = isExam(task) ? `\n本次簡答：${shortAnswer}｜本次上機：${practical}` : '';
-  return reply(`【修改 ${student.name} 的紀錄】\n${task.equipment}\n目前點名：${student.attendance}${grades}\n\n請選擇要修正的項目；每次只修改一項。\n點名修正會直接套用所選狀態，不會依現在時間重新判定。${isExam(task) ? '\n考試結果按鈕會直接顯示目前結果的相反，點下後立即更新。\n簡答題改為未通過時，上機結果會清除。' : ''}`,
-    externalNav([...actions, { label: '回這位考生', postback: `查看考生 ${task.id} ${student.id}` }], `查看任務 ${task.id}`, '回任務'));
+  return studentStateCard(task, student, {
+    title: '修改學生紀錄',
+    rows: [
+      { label: '目前點名', value: student.attendance },
+      ...(isExam(task) ? [{ label: '本次簡答', value: shortAnswer }, { label: '本次上機', value: practical }] : [])
+    ],
+    actions,
+    note: `請直接在卡片上選擇要修正的項目；每次只修改一項。\n點名修正會直接套用所選狀態，不會依現在時間重新判定。${isExam(task) ? '\n考試結果按鈕會顯示目前結果的相反；簡答題改為未通過時，上機結果會清除。' : ''}`,
+    navigation: [{ label: '回這位考生', postback: `查看考生 ${task.id} ${student.id}` }]
+  });
 }
 
 function editStepPrompt(task, student, step) {
@@ -1102,20 +1136,19 @@ function editStepPrompt(task, student, step) {
   ];
   const label = { attendance: '點名', short: '簡答題', practical: '上機考' }[step];
   const value = step === 'attendance' ? student.attendance : resultParts(student.result)[step === 'short' ? 0 : 1];
-  return reply(`【${student.name}｜修正${label}】\n目前：${value}\n\n只會修改${label}；完成後返回學生卡片。${step === 'attendance' ? '\n點名修正會直接套用所選狀態，不會依現在時間重新判定。' : ''}`,
-    externalNav([...actions, { label: '回修改選單', postback: `修改紀錄 ${task.id} ${student.id}` }], `查看考生 ${task.id} ${student.id}`, '回這位考生'));
+  return studentStateCard(task, student, {
+    title: `修正${label}`,
+    rows: [{ label: `目前${label}`, value }],
+    actions,
+    note: `只會修改${label}；完成後返回更新後的學生卡片。${step === 'attendance' ? '\n點名修正會直接套用所選狀態，不會依現在時間重新判定。' : ''}`,
+    navigation: [{ label: '回修改選單', postback: `修改紀錄 ${task.id} ${student.id}` }],
+    parentText: `查看考生 ${task.id} ${student.id}`,
+    parentLabel: '回這位考生'
+  });
 }
 
 function correctedStudentCard(task, student, followUp, context) {
-  const card = showStudent(task.id, student.id, context);
-  card.text = card.text.replace('請直接選擇簡答題或上機結果。', '狀態已即時更新；如需繼續評分，請重新開啟這位考生。');
-  if (followUp) card.text += `\n\n${String(followUp).trim()}`;
-  card.quickReply = qr(externalNav([
-    { label: '重新開啟學生卡片', postback: `查看考生 ${task.id} ${student.id}` },
-    { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
-    { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
-  ], `查看任務 ${task.id}`, '回任務'));
-  return card;
+  return showStudent(task.id, student.id, context, ['✅ 狀態已即時更新。', String(followUp || '').trim()].filter(Boolean).join('\n\n'));
 }
 
 function correctAttendance(taskId, studentId, status, context) {
@@ -1187,13 +1220,7 @@ function recordAttendance(taskId, studentId, status, context) {
   upsertAttendance(task, student, permission.name, context.userId);
   if (isExam(task) && ['到場', '遲到'].includes(status) && examProgress(task, student).step !== 'done') return resultPrompt(task, student);
   const notice = status === '取消資格' ? `🚫 ${student.name} 已超過個別時段 5 分鐘，取消本次考試資格。` : `✅ 已登記 ${student.name}：${status}`;
-  const remaining = studentsFor(task.id).some(item => item.attendance === '未點名' || (isExam(task) && ['到場', '遲到'].includes(item.attendance) && examProgress(task, item).step !== 'done'));
-  if (!remaining) {
-    const done = nextPrompt(task, context);
-    done.text = `${notice}\n\n${done.text}`;
-    return done;
-  }
-  return candidateMenu(task, 1, notice);
+  return showStudent(task.id, student.id, context, notice);
 }
 
 function recordExamPart(taskId, studentId, part, value, context) {
@@ -1208,7 +1235,7 @@ function recordExamPart(taskId, studentId, part, value, context) {
   ], `查看任務 ${task.id}`, '回任務'));
   const result = mergeExamPart(student.result, part, value === '通過');
   updateStudent(student, student.attendance, result);
-  const certification = upsertAttendance(task, student, permission.name, context.userId);
+  upsertAttendance(task, student, permission.name, context.userId);
   const progress = examProgress(task, student);
   if (progress.step === 'done') {
     const failedParts = !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
@@ -1219,20 +1246,19 @@ function recordExamPart(taskId, studentId, part, value, context) {
     const examinerReminder = needsRetest
       ? `\n\n${examinerRetestInstructions(task, failedParts)}\n${notification.sent ? '✅ 已排入考生 LINE 私訊，仍請當面確認。' : notification.configured ? 'ℹ️ 考生尚未完成 LINE 姓名綁定，請考官現場提醒。' : '⚠️ 尚未設定上機補考表單網址，暫時無法傳送表單。'}` : '';
     const formActions = needsPracticalForm && retest.url ? [{ label: `上機${retest.label}報名`, uri: retest.url }] : [];
-    const practicalSummary = progress.shortPassed ? (progress.practicalPassed ? '✅ 通過' : '❌ 未通過') : '⛔ 無上機資格';
     const students = studentsFor(task.id);
     const allComplete = students.every(item => item.attendance !== '未點名' && (!['到場', '遲到'].includes(item.attendance) || examProgress(task, item).step === 'done'));
     const depositSignatureReminder = part === 'practical' && value === '通過' ? `\n\n🖊️ ${student.name}上機考通過，現在請考生在保證金單簽名。` : '';
-    return reply(`✅ ${student.name}本次評分完成\n\n簡答題：${progress.shortPassed ? '✅ 通過' : '❌ 未通過'}\n上機：${practicalSummary}\n\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}${depositSignatureReminder}${examinerReminder}${allComplete ? `\n\n${completionReminderText(task)}` : ''}`, externalNav([
-      ...formActions,
-      ...(allComplete ? [{ label: '完成點名', postback: `完成點名 ${task.id}` }] : []),
-      { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
-      { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` }
-    ], `查看任務 ${task.id}`, '回任務'));
+    return resultPrompt(task, student,
+      `✅ ${student.name}本次評分完成${depositSignatureReminder}${examinerReminder}${allComplete ? `\n\n${completionReminderText(task)}` : ''}`,
+      [
+        ...formActions,
+        ...(allComplete ? [{ label: '完成點名', postback: `完成點名 ${task.id}` }] : []),
+        { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
+        { label: '查看這位考生', postback: `查看考生 ${task.id} ${student.id}` }
+      ]);
   }
-  const next = resultPrompt(task, student);
-  next.text = `✅ ${student.name}的${part === 'short' ? '簡答題' : '上機'}已登記：${value}\n\n${next.text}`;
-  return next;
+  return resultPrompt(task, student, `✅ ${student.name}的${part === 'short' ? '簡答題' : '上機'}已登記：${value}`);
 }
 
 function recordResult(taskId, studentId, result, context) {
