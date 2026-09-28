@@ -1283,27 +1283,8 @@ function completionReminderText(task) {
   ].join('\n');
 }
 
-function completionExaminerGuidance(task, students) {
-  const lines = ['【考官完成後指引】'];
-  if (isExam(task)) {
-    const refundable = students.filter(student => ['到場', '遲到'].includes(student.attendance) && certificationForStudent(task, student).refundable);
-    if (refundable.length) lines.push(`• 請讓可退保證金的考生在保證金單簽名：${refundable.map(student => student.name).join('、')}`);
-    for (const student of students) {
-      if (!['到場', '遲到'].includes(student.attendance)) continue;
-      const progress = examProgress(task, student);
-      if (progress.step !== 'done') continue;
-      const failedParts = !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
-      if (!failedParts.length) continue;
-      lines.push(`\n【${student.name}｜${failedParts.join('、')}未通過】`);
-      lines.push(examinerRetestInstructions(task, failedParts));
-    }
-  }
-  lines.push('', completionReminderText(task));
-  return lines.join('\n');
-}
-
-function completionStudentGuidance(task, students) {
-  if (!isExam(task)) return { text: '', actions: [] };
+function completionFailures(task, students) {
+  if (!isExam(task)) return [];
   const failures = [];
   for (const student of students) {
     if (!['到場', '遲到'].includes(student.attendance)) continue;
@@ -1311,24 +1292,41 @@ function completionStudentGuidance(task, students) {
     if (progress.step !== 'done') continue;
     const failedParts = !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
     if (!failedParts.length) continue;
-    failures.push({ student, failedParts, notification: notifyStudentForRetest(task, student, failedParts) });
+    failures.push({ student, failedParts });
   }
-  if (!failures.length) return { text: '\n\n【考生後續指引】本次沒有需要補考通知的考生。', actions: [] };
-  const sent = failures.filter(item => item.notification.sent).length;
-  const unbound = failures.filter(item => !item.notification.sent && item.notification.configured).map(item => item.student.name);
-  const unconfigured = failures.filter(item => !item.notification.configured).map(item => item.student.name);
-  const lines = [
-    '\n\n【考生後續指引】',
-    `需要後續處理 ${failures.length} 人；已傳送 LINE ${sent} 人。`,
-    ...failures.map(item => `• ${item.student.name}：${item.failedParts.join('、')}未通過`),
-    ...(unbound.length ? [`⚠️ 尚未綁定 LINE，請現場告知：${unbound.join('、')}`] : []),
-    ...(unconfigured.length ? [`⚠️ 上機補考表單尚未設定：${unconfigured.join('、')}`] : []),
-    '考生指引只會在完成點名時傳送一次。'
-  ];
+  return failures;
+}
+
+function completionExaminerGuidance(task, students) {
+  const lines = ['【考官指引】'];
+  if (isExam(task)) {
+    const failures = completionFailures(task, students);
+    const refundable = students.filter(student => ['到場', '遲到'].includes(student.attendance) && certificationForStudent(task, student).refundable);
+    const shortFailed = failures.filter(item => item.failedParts.includes('簡答題')).map(item => item.student.name);
+    const practicalFailed = failures.filter(item => item.failedParts.includes('上機')).map(item => item.student.name);
+    const unbound = failures.filter(item => !userIdForName(item.student.name, item.student.number)).map(item => item.student.name);
+    const form = retestForm(task);
+    if (refundable.length) lines.push(`• 保證金單簽名：${refundable.map(student => student.name).join('、')}`);
+    if (shortFailed.length) lines.push(`• 簡答未過：${shortFailed.join('、')}（補考週到實驗室補考，不用填表）`);
+    if (practicalFailed.length) lines.push(form.finalAttempt
+      ? `• 上機未過：${practicalFailed.join('、')}（第二次補考結束，依規定處理）`
+      : `• 上機未過：${practicalFailed.join('、')}（請填${form.label}上機考表單）`);
+    if (practicalFailed.length && form.label === '第二次補考') lines.push('• 第二次補考須繳 100 元，且不退費。');
+    if (unbound.length) lines.push(`• 未綁定 LINE，請現場告知：${unbound.join('、')}`);
+    if (practicalFailed.length && !form.finalAttempt && !form.url) lines.push('• 補考表單尚未設定，請聯絡教學部。');
+  }
+  lines.push('', completionReminderText(task));
+  return lines.join('\n');
+}
+
+function completionStudentGuidance(task, students) {
+  if (!isExam(task)) return { actions: [] };
+  const failures = completionFailures(task, students);
+  failures.forEach(item => notifyStudentForRetest(task, item.student, item.failedParts));
   const form = retestForm(task);
   const actions = failures.some(item => item.failedParts.includes('上機')) && form.url && !form.finalAttempt
     ? [{ label: `上機${form.label}報名`, uri: form.url }] : [];
-  return { text: lines.join('\n'), actions };
+  return { actions };
 }
 
 function finishAttendance(taskId, context) {
@@ -1349,7 +1347,7 @@ function finishAttendance(taskId, context) {
     return `\n可退保證金 ${refundable}｜尚未符合 ${students.length - refundable}`;
   })() : '';
   const examinerGuidance = completionExaminerGuidance(task, students);
-  return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}${refundSummary}${guidance.text}\n\n${examinerGuidance}\n\n點擊下方可查看考生認證狀態。`, externalNav([
+  return reply(`✅ 任務已完成\n${taskText(task)}\n\n到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}${refundSummary}\n\n${examinerGuidance}\n\n點擊下方可查看考生認證狀態。`, externalNav([
     ...guidance.actions,
     { label: '✏️ 修改狀態', postback: `查看點名結果 ${task.id}` },
     { label: '查看考生認證狀態', uri: certificationStatusUrl() }
