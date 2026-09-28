@@ -597,8 +597,15 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.match(completedTaskCorrection.text, /黃本簽退並註記時間/);
   assert.doesNotMatch(completedTaskCorrection.text, /https:\/\/forms\.gle/);
   assert.deepEqual(cardActions(completedTaskCorrection).map(action => action.label), [
-    '第一次補考上機報名', '回考生卡片', '查看這位考生', '修改紀錄'
+    '第一次補考上機報名', '修改紀錄', '修改完成'
   ]);
+  assert.equal(cardActions(completedTaskCorrection)[1].data, '修改紀錄 T-CORRECT S-CORRECT');
+  assert.equal(cardActions(completedTaskCorrection)[2].data, '修改完成 T-CORRECT S-CORRECT');
+  const correctionFinished = externalTeaching.handleCommand('修改完成 T-CORRECT S-CORRECT', context);
+  assert.match(correctionFinished.text, /任務已完成/);
+  assert.match(correctionFinished.text, /【更正測試生 接下來】/);
+  assert.match(correctionFinished.text, /【離開前請確認】/);
+  assert.equal(cardActions(correctionFinished).some(action => action.data === '修改紀錄 T-CORRECT S-CORRECT'), true);
   let record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
   assert.deepEqual(record.slice(10, 13), ['通過', '未通過', '僅簡答題通過']);
   assert.equal(record[18], '不可退保證金');
