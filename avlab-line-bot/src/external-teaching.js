@@ -883,7 +883,7 @@ function candidateMenu(task, page = 1, notice = '') {
   };
   const columns = visible.map((student, index) => ({
     title: String(student.name || '未填姓名').slice(0, 40),
-    text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}${isExam(task) ? '｜先簽考生名條' : ''}`.slice(0, 60),
+    text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}`.slice(0, 60),
     actions: candidateActions(student)
   }));
   const navActions = [];
