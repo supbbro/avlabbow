@@ -618,7 +618,9 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.match(shortFailed.text, /^【考試評分卡｜第 1\//);
   assert.doesNotMatch(shortFailed.text, /已更正簡答題/);
   assert.match(shortFailed.text, /簡答未過：補考週/);
+  assert.match(shortFailed.text, /不用填表/);
   assert.doesNotMatch(shortFailed.text, /請考生填寫第一次補考上機考報名表/);
+  assert.deepEqual(cardActions(shortFailed).map(action => action.label), ['修改紀錄', '修改完成']);
   assert.equal(cardActions(shortFailed).some(action => action.label.includes('修正上機')), false);
   const shortFailedEdit = externalTeaching.handleCommand('修改紀錄 T-CORRECT S-CORRECT', context);
   assert.equal(cardActions(shortFailedEdit).some(action => action.label === '簡答改為通過'), true);
@@ -674,6 +676,24 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.equal(cardActions(teachingEdit).some(action => action.label.includes('簡答')), false);
   externalTeaching.handleCommand('更正點名 T-TEACH-CORRECT S-TEACH-CORRECT 遲到', context);
   assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-TEACH-CORRECT')[5], '遲到');
+});
+
+test('correcting a non-final short answer failure immediately shows oral retest guidance', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務');
+  const students = resultBook.getSheetByName('任務學生');
+  const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
+  tasks.appendRow(['T-CORRECT-SHORT-NONFINAL','1151','考試',new Date('2026-09-25'),'15:00','16:00','H6','401','測試者','','G1','點名中',true,true,'','','','']);
+  students.appendRow(['T-CORRECT-SHORT-NONFINAL','S-CORRECT-FIRST','前位考生','CORRECT005',1,'到場','全部通過','']);
+  students.appendRow(['T-CORRECT-SHORT-NONFINAL','S-CORRECT-LAST','末位考生','CORRECT006',2,'未點名','未記錄','']);
+
+  const corrected = externalTeaching.handleCommand('更正評分 T-CORRECT-SHORT-NONFINAL S-CORRECT-FIRST short 未通過', context);
+  assert.match(corrected.text, /✅ 修改完成/);
+  assert.match(corrected.text, /【前位考生 接下來】/);
+  assert.match(corrected.text, /簡答未過：補考週到影音實驗室補考，不用填表/);
+  assert.match(corrected.text, /請考官現場告知/);
+  assert.doesNotMatch(corrected.text, /【離開前請確認】|forms\.gle/);
+  assert.deepEqual(cardActions(corrected).map(action => action.label), ['回考生卡片', '查看這位考生', '修改紀錄']);
 });
 
 test('attendance correction applies the chosen status directly and returns to the student card', () => {
