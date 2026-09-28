@@ -560,6 +560,8 @@ test('examiner can correct attendance and both exam parts without another retest
   const beforeShort = externalTeaching.handleCommand('修改紀錄 T-CORRECT S-CORRECT', context);
   assert.deepEqual(cardActions(beforeShort).slice(0, 2).map(action => action.label), ['點名改為缺席', '點名改為遲到']);
   assert.equal(cardActions(beforeShort)[0].data, '更正點名 T-CORRECT S-CORRECT 缺席');
+  assert.equal(cardActions(beforeShort).at(-1).label, '取消修改');
+  assert.equal(cardActions(beforeShort).at(-1).data, '查看考生 T-CORRECT S-CORRECT');
   assert.match(externalTeaching.handleCommand('修改步驟 T-CORRECT S-CORRECT short', context).text, /簡答題尚未評分/);
   assert.match(externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT short 通過', context).text, /簡答題尚未評分/);
   externalTeaching.handleCommand('簡答登記 T-CORRECT S-CORRECT 通過', context);
@@ -580,6 +582,8 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.match(edit.text, /不會依現在時間重新判定/);
   const shortStep = externalTeaching.handleCommand('修改步驟 T-CORRECT S-CORRECT short', context);
   assert.deepEqual(cardActions(shortStep).slice(0, 2).map(action => action.label), ['通過', '未通過']);
+  assert.equal(cardActions(shortStep).at(-1).label, '取消修改');
+  assert.equal(cardActions(shortStep).at(-1).data, '查看考生 T-CORRECT S-CORRECT');
   assert.equal(cardActions(shortStep).some(action => action.label.includes('上機')), false);
   const attendanceStep = externalTeaching.handleCommand('修改步驟 T-CORRECT S-CORRECT attendance', context);
   assert.equal(cardActions(attendanceStep).some(action => action.label === '點名改為缺席'), true);

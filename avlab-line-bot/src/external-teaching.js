@@ -1120,6 +1120,7 @@ function editRecordPrompt(task, student) {
       actions.push({ label: `上機改為${opposite}`, postback: `更正評分 ${task.id} ${student.id} practical ${opposite}` });
     }
   }
+  actions.push({ label: '取消修改', postback: `查看考生 ${task.id} ${student.id}` });
   return studentStateCard(task, student, {
     title: '修改學生紀錄',
     rows: [
@@ -1142,6 +1143,7 @@ function editStepPrompt(task, student, step) {
     { label: '通過', postback: `更正評分 ${task.id} ${student.id} ${step} 通過` },
     { label: '未通過', postback: `更正評分 ${task.id} ${student.id} ${step} 未通過` }
   ];
+  actions.push({ label: '取消修改', postback: `查看考生 ${task.id} ${student.id}` });
   const label = { attendance: '點名', short: '簡答題', practical: '上機考' }[step];
   const value = step === 'attendance' ? student.attendance : resultParts(student.result)[step === 'short' ? 0 : 1];
   return studentStateCard(task, student, {
