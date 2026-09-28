@@ -1157,14 +1157,19 @@ function editStepPrompt(task, student, step) {
   });
 }
 
-function correctedStudentCard(task, student, followUp, context) {
-  return showStudent(task.id, student.id, context, ['✅ 狀態已即時更新。', String(followUp || '').trim()].filter(Boolean).join('\n\n'));
+function correctedStudentCard(task, student, followUp, context, { wasCompleted = false } = {}) {
+  return showStudent(task.id, student.id, context, [
+    wasCompleted ? '✅ 修改完成' : '✅ 狀態已即時更新。',
+    String(followUp || '').trim(),
+    wasCompleted ? completionReminderText(task) : ''
+  ].filter(Boolean).join('\n\n'));
 }
 
 function correctAttendance(taskId, studentId, status, context) {
   const task = findTask(taskId), student = findStudent(taskId, studentId);
   if (!task || !student) return reply('找不到指定的任務或學生，請重新開啟任務。');
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
+  const wasCompleted = task.status === '已完成';
   if (isExam(task) && status === '未點名' && automaticArrivalStatus(task, student) === '取消資格') return reply('已超過個別考試時間 5 分鐘，不能改回未點名；若原點名有誤，請更正為到場或缺席。');
   if (student.attendance === '取消資格' && task.phase === '考試') {
     const record = sheet(SHEETS.attendance)?.getDataRange().getValues().find(row => row[0] === `${task.id}:${student.id}`);
@@ -1177,13 +1182,14 @@ function correctAttendance(taskId, studentId, status, context) {
   updateStudent(student, status, result);
   upsertAttendance(task, student, permission.name, context.userId);
   if (task.status === '已完成' && (status === '未點名' || (isExam(task) && status === '到場' && examProgress(task, student).step !== 'done'))) updateTaskStatus(task, '點名中');
-  return correctedStudentCard(task, student, '', context);
+  return correctedStudentCard(task, student, '', context, { wasCompleted });
 }
 
 function correctExamPart(taskId, studentId, part, value, context) {
   const task = findTask(taskId), student = findStudent(taskId, studentId);
   if (!task || !student) return reply('找不到指定的任務或學生，請重新開啟任務。');
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
+  const wasCompleted = task.status === '已完成';
   if (!isExam(task) || !['到場', '遲到'].includes(student.attendance)) return reply('請先將考生點名狀態更正為到場，才能修改考試結果。');
   const [shortAnswer, practical] = resultParts(student.result);
   if (part === 'short' && !['通過', '未通過'].includes(shortAnswer)) return reply('簡答題尚未評分，請先完成簡答題登記，之後才能修正。');
@@ -1195,10 +1201,10 @@ function correctExamPart(taskId, studentId, part, value, context) {
   const progress = examProgress(task, student);
   if (task.status === '已完成' && progress.step !== 'done') updateTaskStatus(task, '點名中');
   const failedParts = progress.step !== 'done' ? [] : !progress.shortPassed ? ['簡答題'] : !progress.practicalPassed ? ['上機'] : [];
-  const correctionNotice = task.status === '已完成' && failedParts.length
+  const correctionNotice = wasCompleted && failedParts.length
     ? `\n\n${examinerRetestInstructions(task, failedParts)}\n⚠️ 更正評分不會自動重發考生私訊，請考官當場告知。`
     : value === '通過' ? '\n若先前已告知考生補考，請主動通知結果已更正。' : '';
-  return correctedStudentCard(task, student, `${correctionNotice}\n請核對保證金單據。`, context);
+  return correctedStudentCard(task, student, `${correctionNotice}\n請核對保證金單據。`, context, { wasCompleted });
 }
 
 function startAttendance(taskId, context) {
@@ -1231,7 +1237,7 @@ function recordAttendance(taskId, studentId, status, context) {
   if (isExam(task) && ['到場', '遲到'].includes(status) && examProgress(task, student).step !== 'done') return resultPrompt(task, student);
   const students = studentsFor(task.id, { includeDisqualified: true });
   const allComplete = students.every(item => item.attendance !== '未點名' && (!isExam(task) || !['到場', '遲到'].includes(item.attendance) || examProgress(task, item).step === 'done'));
-  if (allComplete) return finishAttendance(task.id, context);
+  if (allComplete) return finishAttendance(task.id, context, { completedStudentId: student.id });
   const notice = status === '取消資格' ? `🚫 ${student.name} 已超過個別時段 5 分鐘，取消本次考試資格。` : `✅ 已登記 ${student.name}：${status}`;
   return showStudent(task.id, student.id, context, notice);
 }
@@ -1279,7 +1285,7 @@ function recordExamPart(taskId, studentId, part, value, context) {
     const nextStep = examStudentNextStep(task, student, { notify: true });
     const students = studentsFor(task.id, { includeDisqualified: true });
     const allComplete = students.every(item => item.attendance !== '未點名' && (!['到場', '遲到'].includes(item.attendance) || examProgress(task, item).step === 'done'));
-    if (allComplete) return finishAttendance(task.id, context, { studentNextStep: nextStep });
+    if (allComplete) return finishAttendance(task.id, context, { studentNextStep: nextStep, completedStudentId: student.id });
     return resultPrompt(task, student, `✅ ${student.name}本次評分完成\n\n${nextStep.text}`, [
       ...nextStep.actions,
       { label: '回考生卡片', postback: `考生名單 ${task.id} 1` },
@@ -1311,7 +1317,7 @@ function completionReminderText(task) {
   ].join('\n');
 }
 
-function completionTaskCard(task, students, studentNextStep = null) {
+function completionTaskCard(task, students, studentNextStep = null, completedStudentId = '') {
   const counts = status => students.filter(student => student.attendance === status).length;
   const summary = `到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}`;
   const refundSummary = isExam(task) ? (() => {
@@ -1319,9 +1325,10 @@ function completionTaskCard(task, students, studentNextStep = null) {
     return `可退保證金 ${refundable}｜尚未符合 ${students.length - refundable}`;
   })() : '';
   const note = [studentNextStep?.text, completionReminderText(task)].filter(Boolean).join('\n\n');
+  const completedStudent = students.find(student => student.id === completedStudentId) || (students.length === 1 ? students[0] : null);
   const actions = [
     ...(studentNextStep?.actions || []),
-    { label: '修改結果', postback: `查看點名結果 ${task.id}` },
+    { label: '修改結果', postback: completedStudent ? `修改紀錄 ${task.id} ${completedStudent.id}` : `查看點名結果 ${task.id}` },
     { label: '查看考生狀態', uri: certificationStatusUrl() }
   ];
   const actionObject = action => action.uri
@@ -1355,7 +1362,7 @@ function completionTaskCard(task, students, studentNextStep = null) {
   };
 }
 
-function finishAttendance(taskId, context, { studentNextStep = null } = {}) {
+function finishAttendance(taskId, context, { studentNextStep = null, completedStudentId = '' } = {}) {
   const task = findTask(taskId); if (!task) return reply(`找不到任務 ${taskId}`);
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
   if (task.status === '已完成') return reply('這個任務已完成；考生後續指引不會重複傳送。', externalNav([
@@ -1366,7 +1373,7 @@ function finishAttendance(taskId, context, { studentNextStep = null } = {}) {
   const pending = students.filter(student => student.attendance === '未點名' || (isExam(task) && ['到場', '遲到'].includes(student.attendance) && examProgress(task, student).step !== 'done'));
   if (pending.length) return reply(`尚有 ${pending.length} 位學生未完成登記。`, [{ label: '繼續點名', text: `開始點名 ${task.id}` }]);
   updateTaskStatus(task, '已完成');
-  return completionTaskCard(task, students, studentNextStep);
+  return completionTaskCard(task, students, studentNextStep, completedStudentId);
 }
 
 function handleCommand(text, context, { skipScheduleSync = false } = {}) {

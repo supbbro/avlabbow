@@ -454,7 +454,7 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.doesNotMatch(lastTeachingAttendance.text, /保證金單/);
   assert.equal(lastTeachingAttendance.lineMessage.type, 'flex');
   assert.deepEqual(cardActions(lastTeachingAttendance).map(action => action.label), ['修改結果', '查看考生狀態']);
-  assert.equal(cardActions(lastTeachingAttendance)[0].data, '查看點名結果 T1');
+  assert.equal(cardActions(lastTeachingAttendance)[0].data, '修改紀錄 T1 S1');
   assert.match(cardActions(lastTeachingAttendance)[1].uri, new RegExp(ids.externalResults));
   assert.equal(attendance.getRange(2, 10).getValue(), '到場');
   const recentTasks = lastTeachingAttendance.lineMessage.quickReply.items.find(item => item.action.label.includes('回近期任務'));
@@ -522,6 +522,8 @@ test('retest preserves the passed written result and only asks for the practical
   assert.match(examFinished.text, /保證金單簽名/);
   assert.match(examFinished.text, /【離開前請確認】/);
   assert.deepEqual(cardActions(examFinished).map(action => action.label), ['修改結果', '查看考生狀態']);
+  assert.equal(cardActions(examFinished)[0].data, '修改紀錄 T-EXAM-CUM S-EXAM-LAST');
+  assert.equal(cardActions(examFinished).some(action => action.data?.includes('S-EXAM-CUM')), false);
   assert.equal(tasks.getRange(examTaskRow, 12).getValue(), '已完成');
 
   tasks.appendRow(['T-RETEST-CUM','1151','第一次補考',futureRetest,'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
@@ -587,7 +589,10 @@ test('examiner can correct attendance and both exam parts without another retest
   assert.equal(cardActions(attendanceStep).some(action => action.label.includes('簡答')), false);
   assert.doesNotMatch(edit.text, /請假/);
 
-  externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 未通過', context);
+  const completedTaskCorrection = externalTeaching.handleCommand('更正評分 T-CORRECT S-CORRECT practical 未通過', context);
+  assert.match(completedTaskCorrection.text, /✅ 修改完成/);
+  assert.match(completedTaskCorrection.text, /【離開前請確認】/);
+  assert.match(completedTaskCorrection.text, /黃本簽退並註記時間/);
   let record = attendance.getDataRange().getValues().find(row => row[0] === 'T-CORRECT:S-CORRECT');
   assert.deepEqual(record.slice(10, 13), ['通過', '未通過', '僅簡答題通過']);
   assert.equal(record[18], '不可退保證金');
@@ -794,7 +799,7 @@ test('finishing the last external exam student shows the next action and checkou
   assert.match(finished.text, /黃本簽退並註記時間/);
   assert.match(finished.text, /【離開前請確認】/);
   assert.equal(finished.lineMessage.type, 'flex');
-  assert.equal(cardActions(finished).some(action => action.data === '查看點名結果 T-EXAM-FINISH'), true);
+  assert.equal(cardActions(finished).some(action => action.data === '修改紀錄 T-EXAM-FINISH S-EXAM-FINISH'), true);
   assert.equal(cardActions(finished).some(action => action.label === '查看考生狀態' && action.uri.includes(ids.externalResults)), true);
 });
 
