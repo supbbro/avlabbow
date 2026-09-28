@@ -358,13 +358,14 @@ function syncFromSchedule() {
     ].some(([current, desired, index]) => comparable(current, index) !== comparable(desired, index));
     const examinerChanged = Boolean(existing) && norm(existing.task.examiner) !== norm(incoming.examiner);
     const status = !scheduleChanged && ['點名中', '已完成'].includes(currentStatus) ? currentStatus : '已排定';
+    const dayBeforeSentAt = !scheduleChanged && !examinerChanged ? existing?.task.dayBeforeSentAt || '' : '';
     const oneHourSentAt = !scheduleChanged && !examinerChanged && reminderBelongsToSchedule(existing?.task.twoHoursSentAt, incoming.date, incoming.start)
       ? existing.task.twoHoursSentAt : '';
     const incomingExaminerUserId = userIdForExaminerName(incoming.examiner);
     const desired = [incoming.id, incoming.term, incoming.phase, incoming.date, incoming.start, incoming.end, incoming.equipment, incoming.location,
       incoming.examiner, incomingExaminerUserId || (!examinerChanged ? existing?.task.examinerUserId : '') || '', existing?.task.groupId || '', status,
       existing ? existing.task.dayBefore : true, existing ? existing.task.twoHours : true,
-      existing?.task.dayBeforeSentAt || '', oneHourSentAt, incoming.sourceSheet, incoming.sourceRange];
+      dayBeforeSentAt, oneHourSentAt, incoming.sourceSheet, incoming.sourceRange];
     if (!existing) { taskSheet.appendRow(desired); tasksAdded++; }
     else if (rowChanged(existing.values, desired)) { taskSheet.getRange(existing.row, 1, 1, desired.length).setValues([desired]); tasksUpdated++; }
   }
@@ -1425,6 +1426,10 @@ function examinerReminderText(task, roster = studentRosterText(task)) {
   return `⏰ 你的對外任務將於 1 小時內開始\n\n${taskText(task)}\n\n${roster}\n\n${checklist.join('\n')}\n\n若現在不處理，可按「回首頁」；之後可由「我的對內／對外任務」中再開啟「📝 點名卡」，已登記的結果會保留。${isExam(task) ? `\n\n${EXAM_PASSING_RULES}\n\n若考生未通過，請在評分後依該考生結果頁顯示的補考方式當場告知。` : ''}`;
 }
 
+function dayBeforeExaminerReminderText(task, roster = studentRosterText(task)) {
+  return `🔔 明天有對外${task.phase}任務\n\n${taskText(task)}\n\n${roster}\n\n請先確認時間、地點及考生名單；任務開始前 1 小時會再收到點名與現場流程提醒。`;
+}
+
 function studentReminderText(task, student) {
   const time = `${formatTime(student.scheduledStart || task.start)}-${formatTime(student.scheduledEnd || task.end)}`;
   const attendanceRule = isExam(task)
@@ -1482,6 +1487,15 @@ function dayBeforeDate(value) {
   const date = new Date(value);
   date.setUTCDate(date.getUTCDate() - 1);
   return taipeiDate(date);
+}
+
+function dayBeforeExaminerReminderDue(task, now = new Date()) {
+  const start = parseTaskStart(task);
+  if (!start || start <= now) return false;
+  const timezone = Session.getScriptTimeZone();
+  const previousDay = new Date(start.getTime() - 24 * 60 * 60 * 1000);
+  if (Utilities.formatDate(now, timezone, 'yyyy-MM-dd') !== Utilities.formatDate(previousDay, timezone, 'yyyy-MM-dd')) return false;
+  return Utilities.formatDate(now, timezone, 'HH:mm') >= '21:00';
 }
 
 function earliestInitialExams() {
@@ -1663,6 +1677,19 @@ function sendExternalReminders(now = new Date()) {
     ];
     const roster = studentRosterText(task);
     const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
+    if (enabledFlag(task.dayBefore) && !task.dayBeforeSentAt && dayBeforeExaminerReminderDue(task, now)) {
+      const dayBeforeKey = `EXTERNAL-DAY-BEFORE:${task.id}:${start.toISOString()}:${examinerUserId}`;
+      if (examinerUserId && !pendingReminderKeys.has(dayBeforeKey)) {
+        queuePush(examinerUserId, reply(dayBeforeExaminerReminderText(task, roster), [
+          { label: '查看任務', postback: `查看任務 ${task.id}` },
+          { label: '🏠 回首頁', postback: `提醒回首頁 ${task.id}` }
+        ]), {
+          key: dayBeforeKey,
+          onSuccess: () => sheet(SHEETS.tasks).getRange(task.row, 15).setValue(now)
+        });
+        sent++;
+      }
+    }
     if (!task.twoHoursSentAt && start > now && now >= reminderDue) {
       if (examinerUserId && !pendingReminderKeys.has(`EXTERNAL-EXAMINER:${task.id}:${start.toISOString()}:${examinerUserId}`)) {
         queuePush(examinerUserId, reply(examinerReminderText(task, roster), buttons), {
@@ -1717,4 +1744,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, syncDepositFromRegistrations, dayBeforeDate, processDepositRequirements, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };

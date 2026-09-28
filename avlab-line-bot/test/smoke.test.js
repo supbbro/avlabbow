@@ -719,6 +719,29 @@ test('one-hour reminder privately pushes the roster to the examiner', () => {
   }
 });
 
+test('examiner receives one reminder at 21:00 on the day before an external task', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務');
+  const students = resultBook.getSheetByName('任務學生');
+  tasks.appendRow(['T-DAY-BEFORE','1151','教學',new Date(2026, 9, 7),'18:00','19:00','3play','新棚','測試者','U1','G1','已排定',true,true,'','','','']);
+  students.appendRow(['T-DAY-BEFORE','S-DAY-BEFORE','學生丙','789',1,'未點名','未記錄','']);
+
+  const task = { date: new Date(2026, 9, 7), start: '18:00' };
+  assert.equal(externalTeaching._test.dayBeforeExaminerReminderDue(task, new Date('2026-10-06T20:59:59+08:00')), false);
+  assert.equal(externalTeaching._test.dayBeforeExaminerReminderDue(task, new Date('2026-10-06T21:00:00+08:00')), true);
+  assert.equal(externalTeaching._test.dayBeforeExaminerReminderDue(task, new Date('2026-10-07T09:00:00+08:00')), false);
+
+  runtime.httpOperations = [];
+  const sent = externalTeaching.sendExternalReminders(new Date('2026-10-06T21:00:00+08:00'));
+  assert.equal(sent, 1);
+  const push = JSON.parse(runtime.httpOperations[0].options.payload);
+  assert.equal(push.to, 'U1');
+  assert.match(push.messages[0].text, /明天有對外教學任務/);
+  assert.match(push.messages[0].text, /學生丙/);
+  assert.match(push.messages[0].text, /開始前 1 小時會再收到/);
+  assert.equal(push.messages[0].quickReply.items[0].action.data, '查看任務 T-DAY-BEFORE');
+});
+
 test('finishing an external exam reminds the examiner about deposit slips and checkout', () => {
   const resultBook = runtime.openById(ids.externalResults);
   const tasks = resultBook.getSheetByName('對外任務');
