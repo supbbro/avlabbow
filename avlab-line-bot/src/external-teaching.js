@@ -719,7 +719,8 @@ function attendanceHome(task) {
   const pending = students.filter(student => student.attendance === '未點名');
   const ungraded = isExam(task) ? students.filter(student => ['到場', '遲到'].includes(student.attendance) && examProgress(task, student).step !== 'done') : [];
   const canceled = students.filter(student => student.attendance === '取消資格').length;
-  return reply(`【點名首頁｜${task.equipment}】\n${taskText(task)}\n\n考生 ${students.length} 人｜未點名 ${pending.length}${isExam(task) ? `｜待評分 ${ungraded.length}｜取消資格 ${canceled}` : ''}\n\n${pending.length || ungraded.length ? '點名尚未完成，可隨時返回這裡繼續。' : '所有考生已登記，請確認後按「完成點名」。'}`, [
+  const completed = students.length - pending.length - ungraded.length;
+  return reply(`📝【點名控制台】\n━━━━━━━━━━━━\n${taskText(task)}\n━━━━━━━━━━━━\n📊 進度 ${completed}/${students.length}\n⚪ 未點名 ${pending.length}${isExam(task) ? `　🟠 待評分 ${ungraded.length}\n⛔ 取消資格 ${canceled}` : ''}\n\n${pending.length || ungraded.length ? '尚未完成，可隨時由「我的對外任務」回來繼續。' : '✅ 所有考生已登記，請確認後按「完成點名」。'}`, [
     { label: '▶️ 繼續點名', postback: `考生名單 ${task.id} 1` },
     { label: '查看點名結果', postback: `查看點名結果 ${task.id}` },
     { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
@@ -777,7 +778,7 @@ function attendancePrompt(task, student) {
     { label: '❌ 缺席', postback: `點名狀態 ${task.id} ${student.id} 缺席` }
   ];
   const rule = isExam(task) ? '個別時段開始 5 分鐘後尚未點名，將取消考試資格。' : '系統會依開始時間自動判定：15 分鐘後點名為遲到。';
-  return reply(`【${task.equipment}｜第 ${position}/${total} 位】\n學生：${student.name}${student.number ? `（${student.number}）` : ''}\n個別時間：${formatTime(student.scheduledStart || task.start)}\n目前出席：${student.attendance}\n\n${rule}`, externalNav([
+  return reply(`👤【學生 ${position}/${total}】\n━━━━━━━━━━━━\n🧰 ${task.equipment}\n👤 ${student.name}${student.number ? `\n🆔 ${student.number}` : ''}\n⏰ ${formatTime(student.scheduledStart || task.start)}\n🏷️ 目前出席：${student.attendance}\n━━━━━━━━━━━━\nℹ️ ${rule}`, externalNav([
     ...attendanceActions,
     { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
     { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
@@ -790,33 +791,84 @@ function candidateMenu(task, page = 1, notice = '') {
   const currentPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
   const visible = students.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const postbackAction = (label, data) => ({ type: 'postback', label, data });
-  const columns = visible.map((student, index) => ({
-    title: String(student.name || '未填姓名').slice(0, 40),
-    text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}${isExam(task) ? '｜先簽考生名條' : ''}`.slice(0, 60),
-    actions: student.attendance === '取消資格' ? [
-      postbackAction('查看狀態', `查看考生 ${task.id} ${student.id}`),
-      postbackAction('修改狀態', `修改紀錄 ${task.id} ${student.id}`)
-    ] : isExam(task) ? [
-      postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
-      postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
-    ] : [
-      postbackAction('學生已到（自動判定）', `到場判定 ${task.id} ${student.id}`),
-      postbackAction('缺席', `點名狀態 ${task.id} ${student.id} 缺席`)
-    ]
-  }));
+  const candidateActions = student => student.attendance === '取消資格' ? [
+    postbackAction('查看狀態', `查看考生 ${task.id} ${student.id}`),
+    postbackAction('修改狀態', `修改紀錄 ${task.id} ${student.id}`)
+  ] : isExam(task) ? [
+    postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
+    postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
+  ] : [
+    postbackAction('學生已到（自動判定）', `到場判定 ${task.id} ${student.id}`),
+    postbackAction('缺席', `點名狀態 ${task.id} ${student.id} 缺席`)
+  ];
+  const statusTheme = status => ({
+    未點名: { icon: '⚪', background: '#F1F3F4', foreground: '#5F6368' },
+    到場: { icon: '✅', background: '#E6F4EA', foreground: '#137333' },
+    遲到: { icon: '🟠', background: '#FEF7E0', foreground: '#B06000' },
+    缺席: { icon: '❌', background: '#FCE8E6', foreground: '#C5221F' },
+    取消資格: { icon: '⛔', background: '#FCE8E6', foreground: '#A50E0E' }
+  })[status] || { icon: '•', background: '#F1F3F4', foreground: '#5F6368' };
+  const bubbles = visible.map((student, index) => {
+    const position = (currentPage - 1) * pageSize + index + 1;
+    const theme = statusTheme(student.attendance);
+    const actions = candidateActions(student);
+    return {
+      type: 'bubble',
+      size: 'kilo',
+      header: {
+        type: 'box', layout: 'vertical', paddingAll: '14px',
+        backgroundColor: isExam(task) ? '#5B4B8A' : '#356954',
+        contents: [
+          { type: 'text', text: `${isExam(task) ? '📝 考試' : '📚 教學'}｜${task.equipment}`, color: '#FFFFFF', size: 'sm', weight: 'bold', wrap: true },
+          { type: 'text', text: `第 ${position}/${students.length} 位`, color: '#E8EAED', size: 'xs', margin: 'sm' }
+        ]
+      },
+      body: {
+        type: 'box', layout: 'vertical', paddingAll: '16px', spacing: 'md',
+        contents: [
+          { type: 'text', text: String(student.name || '未填姓名'), size: 'xl', weight: 'bold', color: '#202124', wrap: true },
+          ...(student.number ? [{ type: 'text', text: `學號 ${student.number}`, size: 'sm', color: '#5F6368' }] : []),
+          { type: 'separator', color: '#E0E0E0' },
+          {
+            type: 'box', layout: 'horizontal', spacing: 'sm', alignItems: 'center',
+            contents: [
+              { type: 'text', text: '⏰', flex: 0, size: 'sm' },
+              { type: 'text', text: formatTime(student.scheduledStart || task.start), size: 'sm', color: '#3C4043', weight: 'bold' }
+            ]
+          },
+          {
+            type: 'box', layout: 'vertical', backgroundColor: theme.background, cornerRadius: '8px', paddingAll: '10px',
+            contents: [{ type: 'text', text: `${theme.icon} ${student.attendance}`, color: theme.foreground, size: 'sm', weight: 'bold', align: 'center' }]
+          },
+          ...(isExam(task) ? [{ type: 'text', text: '先簽考生名條', size: 'xs', color: '#B06000', align: 'center' }] : [])
+        ]
+      },
+      footer: {
+        type: 'box', layout: 'vertical', paddingAll: '12px', spacing: 'sm',
+        contents: actions.map((action, actionIndex) => ({
+          type: 'button', height: 'sm', style: actionIndex === 0 ? 'primary' : 'secondary',
+          color: actionIndex === 0 ? (isExam(task) ? '#5B4B8A' : '#356954') : undefined,
+          action
+        }))
+      }
+    };
+  });
   const navActions = [];
   if (currentPage > 1) navActions.push({ label: '⬅️ 上一頁名單', postback: `考生名單 ${task.id} ${currentPage - 1}` });
   if (currentPage < totalPages) navActions.push({ label: '下一頁名單 ➡️', postback: `考生名單 ${task.id} ${currentPage + 1}` });
-  const rows = visible.map((student, index) => `${(currentPage - 1) * pageSize + index + 1}. ${student.name}｜${student.attendance}`).join('\n');
-  const fallbackText = `${notice ? `${notice}\n\n` : ''}【${task.equipment} 考生名單｜${currentPage}/${totalPages}】\n${rows}\n\n請左右滑動卡片並直接點選考生。`;
+  const rows = visible.map((student, index) => {
+    const theme = statusTheme(student.attendance);
+    return `${theme.icon} ${(currentPage - 1) * pageSize + index + 1}. ${student.name}｜${student.attendance}`;
+  }).join('\n');
+  const fallbackText = `${notice ? `${notice}\n\n` : ''}👥【${task.equipment} 考生名單｜${currentPage}/${totalPages}】\n━━━━━━━━━━━━\n${rows}\n\n左右滑動卡片，直接操作每位考生。`;
   const fallbackItems = visible.slice(0, 9).map(student => ({ label: `查看 ${String(student.name).slice(0, 12)}`, postback: `查看考生 ${task.id} ${student.id}` }));
   return {
     text: fallbackText,
     fallbackQuickReply: qr(externalNav(fallbackItems, `查看任務 ${task.id}`, '回任務')),
     lineMessage: {
-      type: 'template',
+      type: 'flex',
       altText: `${task.equipment} 考生卡片名單（${students.length} 人）`,
-      template: { type: 'carousel', columns },
+      contents: { type: 'carousel', contents: bubbles },
       quickReply: qr(externalNav([
         ...navActions,
         { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },

@@ -419,11 +419,12 @@ test('group attendance writes a normalized record and completes the task', () =>
   const attendanceStart = externalTeaching.handleCommand('開始點名 T1', context);
   assert.match(attendanceStart.text, /學生甲/);
   assert.match(attendanceStart.text, /考生名單/);
-  assert.equal(attendanceStart.lineMessage.type, 'template');
-  assert.equal(attendanceStart.lineMessage.template.type, 'carousel');
-  assert.equal(attendanceStart.lineMessage.template.columns[0].title, '學生甲');
-  assert.deepEqual(attendanceStart.lineMessage.template.columns[0].actions.map(action => action.label), ['學生已到（自動判定）', '缺席']);
-  assert.equal(attendanceStart.lineMessage.template.columns[0].actions[0].type, 'postback');
+  assert.equal(attendanceStart.lineMessage.type, 'flex');
+  assert.equal(attendanceStart.lineMessage.contents.type, 'carousel');
+  const teachingBubble = attendanceStart.lineMessage.contents.contents[0];
+  assert.equal(teachingBubble.body.contents[0].text, '學生甲');
+  assert.deepEqual(teachingBubble.footer.contents.map(button => button.action.label), ['學生已到（自動判定）', '缺席']);
+  assert.equal(teachingBubble.footer.contents[0].action.type, 'postback');
   const attendanceHomeButton = attendanceStart.lineMessage.quickReply.items.find(item => item.action.label === '🏠 回首頁');
   assert.equal(attendanceHomeButton.action.type, 'message');
   assert.equal(attendanceHomeButton.action.text, '主選單');
@@ -467,11 +468,11 @@ test('group attendance writes a normalized record and completes the task', () =>
   const resumeRow = tasks.getLastRow();
   students.appendRow(['T-RESUME','S-RESUME','待點名學生','RESUME001',1,'未點名','未記錄','']);
   const resumed = externalTeaching.resumeActiveAttendance({ sourceType: 'user', userId: 'U1', chatId: 'U1' });
-  assert.match(resumed.text, /【點名首頁｜回首頁測試】/);
+  assert.match(resumed.text, /【點名控制台】[\s\S]*回首頁測試/);
   assert.equal(resumed.quickReply.items[0].action.data, '考生名單 T-RESUME 1');
   tasks.getRange(resumeRow, 12).setValue('已排定');
   students.getRange(students.getLastRow(), 6).setValue('到場');
-  assert.match(externalTeaching.resumeActiveAttendance({ sourceType: 'user', userId: 'U1', chatId: 'U1' }).text, /【點名首頁｜回首頁測試】/);
+  assert.match(externalTeaching.resumeActiveAttendance({ sourceType: 'user', userId: 'U1', chatId: 'U1' }).text, /【點名控制台】[\s\S]*回首頁測試/);
   tasks.getRange(resumeRow, 12).setValue('已完成');
   assert.equal(externalTeaching.resumeActiveAttendance({ sourceType: 'user', userId: 'U1', chatId: 'U1' }), null);
 });
@@ -488,7 +489,7 @@ test('retest preserves the passed written result and only asks for the practical
   tasks.appendRow(['T-EXAM-CUM','1151','考試',futureExam,'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
   students.appendRow(['T-EXAM-CUM','S-EXAM-CUM','補考學生','999',1,'未點名','未記錄','']);
   const examMenu = externalTeaching.handleCommand('開始點名 T-EXAM-CUM', context);
-  assert.deepEqual(examMenu.lineMessage.template.columns[0].actions.map(action => action.label), ['考生已到', '查看／評分']);
+  assert.deepEqual(examMenu.lineMessage.contents.contents[0].footer.contents.map(button => button.action.label), ['考生已到', '查看／評分']);
   const attendancePrompt = externalTeaching.handleCommand('查看考生 T-EXAM-CUM S-EXAM-CUM', context);
   assert.equal(attendancePrompt.quickReply.items.some(item => item.action.label.includes('取消資格')), false);
   const firstPrompt = externalTeaching.handleCommand('點名狀態 T-EXAM-CUM S-EXAM-CUM 到場', context);
@@ -623,9 +624,9 @@ test('examiner can correct attendance and both exam parts without another retest
   const fullRoster = externalTeaching.handleCommand('考生名單 T-CORRECT', context);
   assert.match(fullRoster.text, /逾時更正生｜到場/);
   assert.match(fullRoster.text, /未繳測試生｜取消資格/);
-  const unpaidCard = fullRoster.lineMessage.template.columns.find(column => column.title === '未繳測試生');
-  assert.deepEqual(unpaidCard.actions.map(action => action.label), ['查看狀態', '修改狀態']);
-  assert.equal(new Set(fullRoster.lineMessage.template.columns.map(column => column.actions.length)).size, 1);
+  const unpaidCard = fullRoster.lineMessage.contents.contents.find(bubble => bubble.body.contents[0].text === '未繳測試生');
+  assert.deepEqual(unpaidCard.footer.contents.map(button => button.action.label), ['查看狀態', '修改狀態']);
+  assert.equal(new Set(fullRoster.lineMessage.contents.contents.map(bubble => bubble.footer.contents.length)).size, 1);
   assert.equal(externalTeaching.handleCommand('查看任務 T-CORRECT', context).text.includes('取消資格 1'), true);
 
   tasks.appendRow(['T-TEACH-CORRECT','1151','教學',new Date('2026-09-25'),'13:00','14:00','基礎配件','401','測試者','','G1','點名中',true,true,'','','','']);
