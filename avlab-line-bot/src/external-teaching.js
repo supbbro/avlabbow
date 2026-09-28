@@ -243,7 +243,7 @@ function depositRows() {
   return target.getDataRange().getValues().slice(3).map((row, index) => ({
     phase: '考試', row: index + 4, name: String(row[0] || '').trim(), department: String(row[1] || '').trim(), number: String(row[2] || '').trim(),
     items: row[3], itemCount: row[4], requiredAmount: row[5], paidRaw: row[6], paid: paidFlag(row[6]), paidAmount: row[7],
-    processed: row[8], captainNote: row[9], teachingNote: row[10]
+    processed: row[8], captainNote: row[9], teachingNote: row[10], bindingStatus: row[11]
   })).filter(row => row.name || row.number);
 }
 
@@ -260,6 +260,8 @@ function syncDepositFromRegistrations(registrations) {
   if (!registrations.length) return { rows: 0, updated: false, skipped: true, reason: 'empty-registration-source' };
   const target = SpreadsheetApp.openById(ids.deposit).getSheetByName('考試週保證金');
   if (!target) throw new Error('找不到「考試週保證金」分頁');
+  const bindingHeader = 'LINE 綁定狀態';
+  if (target.getRange(1, 12).getValue() !== bindingHeader) target.getRange(1, 12).setValue(bindingHeader);
   const existing = depositRows();
   const existingFor = registration => existing.find(row => norm(row.number) === norm(registration.number))
     || (existing.filter(row => norm(row.name) === norm(registration.name)).length === 1
@@ -267,15 +269,17 @@ function syncDepositFromRegistrations(registrations) {
   const desired = registrations.filter(registration => registration.equipment.length).map(registration => {
     const current = existingFor(registration);
     const teachingNote = depositTeachingNote(registration, current?.teachingNote);
+    const registeredName = displayRegistrationName(registration.name);
+    const bindingStatus = userIdForName(registeredName, registration.number) ? '✅ 已綁定' : '⚠️ 未綁定';
     return [registration.name, registration.department, registration.number, registration.equipment.join('、'),
       registration.equipment.length, registration.equipment.length * 50, current?.paidRaw ?? false,
-      current?.paidAmount ?? '', current?.processed ?? '', current?.captainNote ?? '', teachingNote];
+      current?.paidAmount ?? '', current?.processed ?? '', current?.captainNote ?? '', teachingNote, bindingStatus];
   });
   const rowsToWrite = Math.max(existing.length, desired.length);
-  const padded = [...desired, ...Array.from({ length: rowsToWrite - desired.length }, () => Array(11).fill(''))];
+  const padded = [...desired, ...Array.from({ length: rowsToWrite - desired.length }, () => Array(12).fill(''))];
   const current = target.getDataRange().getValues().slice(3, 3 + rowsToWrite);
   const changed = padded.some((row, index) => rowChanged(current[index] || [], row));
-  if (changed && rowsToWrite) target.getRange(4, 1, rowsToWrite, 11).setValues(padded);
+  if (changed && rowsToWrite) target.getRange(4, 1, rowsToWrite, 12).setValues(padded);
   return { rows: desired.length, updated: changed, skipped: false };
 }
 

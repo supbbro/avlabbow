@@ -1164,6 +1164,31 @@ test('deposit notes identify overwritten registrations without removing manual n
   assert.doesNotMatch(note, /舊記錄/);
 });
 
+test('deposit sync writes the effective LINE binding status beside each student', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  try {
+    const deposits = isolated.openById(ids.deposit).insertSheet('考試週保證金');
+    deposits.appendRow(['姓名','系級','學號','報名考試項目','總共項數','保證金總額','已繳交','繳交金額','處理日期／助理','班長註記','教學部註記']);
+    deposits.appendRow(['值班班長請注意']);
+    deposits.appendRow(['範例']);
+    const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
+    bindings.appendRow(['LINE User ID','姓名','綁定時間','學號','身分類型']);
+    bindings.appendRow(['U-BOUND','已綁學生','','111101991','external']);
+
+    const result = externalTeaching._test.syncDepositFromRegistrations([
+      { name: '已綁學生', department: '廣電三', number: '111101991', equipment: ['H6'], submissionCount: 1 },
+      { name: '未綁學生', department: '廣電三', number: '111101992', equipment: ['CX350'], submissionCount: 1 }
+    ]);
+    assert.deepEqual(result, { rows: 2, updated: true, skipped: false });
+    assert.equal(deposits.getRange(1, 12).getValue(), 'LINE 綁定狀態');
+    assert.equal(deposits.getRange(4, 12).getValue(), '✅ 已綁定');
+    assert.equal(deposits.getRange(5, 12).getValue(), '⚠️ 未綁定');
+  } finally {
+    installGlobals(runtime);
+  }
+});
+
 test('external data reset excludes dates before September 14, 2026', () => {
   const current = externalTeaching._test.isCurrentExternalData;
   assert.equal(current(new Date('2026-09-13T23:59:59+08:00')), false);
