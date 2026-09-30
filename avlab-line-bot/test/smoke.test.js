@@ -429,7 +429,7 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.equal(attendanceStart.lineMessage.template.type, 'carousel');
   const teachingCard = attendanceStart.lineMessage.template.columns[0];
   assert.equal(teachingCard.title, '學生甲');
-  assert.deepEqual(teachingCard.actions.map(action => action.label), ['學生已到（自動判定）', '缺席']);
+  assert.deepEqual(teachingCard.actions.map(action => action.label), ['學生已到', '缺席']);
   assert.equal(teachingCard.actions[0].type, 'postback');
   const attendanceHomeButton = attendanceStart.lineMessage.quickReply.items.find(item => item.action.label === '🏠 回首頁');
   assert.equal(attendanceHomeButton.action.type, 'message');
@@ -441,7 +441,7 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.equal(rosterQuestionBank.action.type, 'uri');
   assert.equal(rosterQuestionBank.action.uri, 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X');
   const studentPrompt = externalTeaching.handleCommand('查看考生 T1 S1', context);
-  assert.match(studentPrompt.text, /15 分鐘後點名為遲到/);
+  assert.match(studentPrompt.text, /教學週不依時間自動判定遲到/);
   assert.deepEqual(cardActions(studentPrompt).map(action => action.label), ['✅ 學生已到', '❌ 缺席']);
   assert.equal(quickActions(studentPrompt).find(action => action.label === '📚 合併版題庫').uri, rosterQuestionBank.action.uri);
   assert.equal(quickActions(studentPrompt).find(action => action.label === '🏠 回首頁').text, '主選單');
@@ -756,7 +756,7 @@ test('attendance correction applies the chosen status directly and returns to th
   const teachingCard = externalTeaching.handleCommand('查看考生 T-LATE-TEACH S-LATE-TEACH', context);
   assert.match(teachingCard.text, /目前出席：未點名/);
   const teaching = externalTeaching.handleCommand('到場判定 T-LATE-TEACH S-LATE-TEACH', context);
-  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-LATE-TEACH')[5], '遲到');
+  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-LATE-TEACH')[5], '到場');
   assert.match(teaching.text, /任務已完成/);
   assert.match(teaching.text, /【離開前請確認】/);
   assert.deepEqual(cardActions(teaching).map(action => action.label), ['修改結果', '查看考生狀態']);
@@ -769,9 +769,9 @@ test('attendance correction applies the chosen status directly and returns to th
   assert.match(exam.text, /任務已完成/);
   assert.match(exam.text, /取消資格 1/);
 
-  const teachingCorrection = externalTeaching.handleCommand('更正點名 T-LATE-TEACH S-LATE-TEACH 到場', context);
-  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-LATE-TEACH')[5], '到場');
-  assert.match(teachingCorrection.text, /基礎配件｜遲到生[\s\S]*目前出席：到場/);
+  const teachingCorrection = externalTeaching.handleCommand('更正點名 T-LATE-TEACH S-LATE-TEACH 遲到', context);
+  assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-LATE-TEACH')[5], '遲到');
+  assert.match(teachingCorrection.text, /基礎配件｜遲到生[\s\S]*目前出席：遲到/);
   assert.doesNotMatch(teachingCorrection.text, /已更正點名/);
   const examCorrection = externalTeaching.handleCommand('更正點名 T-LATE-EXAM S-LATE-EXAM 到場', context);
   assert.equal(students.getDataRange().getValues().find(row => row[1] === 'S-LATE-EXAM')[5], '到場');
@@ -781,18 +781,19 @@ test('attendance correction applies the chosen status directly and returns to th
   assert.equal(cardActions(examCorrection).some(action => /簡答|上機/.test(action.label)), true);
 });
 
-test('arrival grace rules are five minutes for exams and fifteen minutes for teaching', () => {
+test('exam arrival has a five-minute limit while teaching never auto-marks late', () => {
   const date = new Date('2026-09-02T00:00:00+08:00');
   const student = { scheduledStart: '12:00' };
   assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '考試', date, start: '12:00' }, student, new Date('2026-09-02T12:05:00+08:00')), '到場');
   assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '考試', date, start: '12:00' }, student, new Date('2026-09-02T12:05:01+08:00')), '取消資格');
-  assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '教學', date, start: '12:00' }, student, new Date('2026-09-02T12:15:01+08:00')), '遲到');
+  assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '教學', date, start: '12:00' }, student, new Date('2026-09-02T13:15:01+08:00')), '到場');
   const teachingReminder = externalTeaching._test.studentReminderText(
     { phase: '教學', date, start: '12:00', end: '13:00', equipment: 'X160', location: '401' },
     { name: '虛擬學生', scheduledStart: '12:10', scheduledEnd: '13:00' }
   );
   assert.match(teachingReminder, /對外教學將於 1 小時內開始/);
-  assert.match(teachingReminder, /超過 15 分鐘.*遲到/);
+  assert.match(teachingReminder, /請依個別時間準時到場/);
+  assert.doesNotMatch(teachingReminder, /遲到/);
   assert.doesNotMatch(teachingReminder, /取消本次考試資格/);
   assert.doesNotMatch(teachingReminder, /考試通過標準/);
   const examReminder = externalTeaching._test.studentReminderText(
@@ -1052,7 +1053,7 @@ test('a failed short answer immediately ends the attempt without practical butto
   assert.match(blocked.text, /沒有上機考試資格/);
 });
 
-test('a bound student receives the teaching reminder with the fifteen-minute rule', () => {
+test('a bound student receives a teaching reminder without an automatic late rule', () => {
   const resultBook = runtime.openById(ids.externalResults);
   const tasks = resultBook.getSheetByName('對外任務');
   const students = resultBook.getSheetByName('任務學生');
@@ -1064,7 +1065,8 @@ test('a bound student receives the teaching reminder with the fifteen-minute rul
   const studentPush = pushes.find(push => push.to === 'U-external-student-test');
   assert.ok(studentPush);
   assert.match(studentPush.messages[0].text, /對外教學將於 1 小時內開始/);
-  assert.match(studentPush.messages[0].text, /超過 15 分鐘.*遲到/);
+  assert.match(studentPush.messages[0].text, /請依個別時間準時到場/);
+  assert.doesNotMatch(studentPush.messages[0].text, /遲到/);
   const examinerPush = pushes.find(push => push.to === 'U1');
   assert.ok(examinerPush);
   assert.match(examinerPush.messages[0].text, /教學前先做/);

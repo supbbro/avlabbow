@@ -769,11 +769,13 @@ function studentTaskStart(task, student) {
 }
 
 function automaticArrivalStatus(task, student, now = new Date()) {
+  // Teaching attendance is never inferred from the clock. Pressing "學生已到"
+  // always records arrival; an examiner may still set 遲到 manually afterward.
+  if (!isExam(task)) return '到場';
   const start = studentTaskStart(task, student);
   if (!start) return '到場';
-  const graceMinutes = isExam(task) ? 5 : 15;
-  if (now.getTime() <= start.getTime() + graceMinutes * 60000) return '到場';
-  return isExam(task) ? '取消資格' : '遲到';
+  if (now.getTime() <= start.getTime() + 5 * 60000) return '到場';
+  return '取消資格';
 }
 
 function studentStateCard(task, student, options = {}) {
@@ -849,7 +851,9 @@ function attendancePrompt(task, student, notice = '') {
     { label: '✅ 學生已到', postback: `到場判定 ${task.id} ${student.id}` },
     { label: '❌ 缺席', postback: `點名狀態 ${task.id} ${student.id} 缺席` }
   ];
-  const rule = isExam(task) ? '個別時段開始 5 分鐘後尚未點名，將取消考試資格。' : '系統會依開始時間自動判定：15 分鐘後點名為遲到。';
+  const rule = isExam(task)
+    ? '個別時段開始 5 分鐘後尚未點名，將取消考試資格。'
+    : '教學週不依時間自動判定遲到；按下「學生已到」會記為到場。';
   return studentStateCard(task, student, {
     title: `${task.phase}點名`,
     rows: [
@@ -876,7 +880,7 @@ function candidateMenu(task, page = 1, notice = '') {
       postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
       postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
     ] : [
-      postbackAction('學生已到（自動判定）', `到場判定 ${task.id} ${student.id}`),
+      postbackAction('學生已到', `到場判定 ${task.id} ${student.id}`),
       postbackAction('缺席', `點名狀態 ${task.id} ${student.id} 缺席`)
     ];
     if (isExam(task) && ['到場', '遲到'].includes(student.attendance) && examProgress(task, student).step !== 'done') return [
@@ -1695,7 +1699,7 @@ function studentReminderText(task, student) {
   const time = `${formatTime(student.scheduledStart || task.start)}-${formatTime(student.scheduledEnd || task.end)}`;
   const attendanceRule = isExam(task)
     ? '⚠️ 請依個別時間準時到場；超過 5 分鐘將取消本次考試資格。'
-    : '⚠️ 請依個別時間準時到場；開始後超過 15 分鐘完成點名將記為遲到。';
+    : '⚠️ 請依個別時間準時到場。';
   return `⏰ 你的對外${task.phase}將於 1 小時內開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n${attendanceRule}${isExam(task) ? `\n\n${EXAM_PASSING_RULES}` : ''}`;
 }
 
