@@ -871,7 +871,11 @@ function attendancePrompt(task, student, notice = '') {
 
 function candidateMenu(task, page = 1, notice = '') {
   const students = studentsFor(task.id, { includeDisqualified: true });
-  const pageSize = 10, totalPages = Math.max(1, Math.ceil(students.length / pageSize));
+  // LINE limits one template carousel to 10 columns and one reply to 5
+  // messages. Treat a page as one reply (up to 50 students), then split the
+  // page into multiple carousels so students after the tenth are not hidden.
+  const cardsPerCarousel = 10, pageSize = cardsPerCarousel * 5;
+  const totalPages = Math.max(1, Math.ceil(students.length / pageSize));
   const currentPage = Math.min(Math.max(1, Number(page) || 1), totalPages);
   const visible = students.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const postbackAction = (label, data) => ({ type: 'postback', label, data });
@@ -901,21 +905,29 @@ function candidateMenu(task, page = 1, notice = '') {
   if (currentPage > 1) navActions.push({ label: '⬅️ 上一頁名單', postback: `考生名單 ${task.id} ${currentPage - 1}` });
   if (currentPage < totalPages) navActions.push({ label: '下一頁名單 ➡️', postback: `考生名單 ${task.id} ${currentPage + 1}` });
   const rows = visible.map((student, index) => `${(currentPage - 1) * pageSize + index + 1}. ${student.name}｜${student.attendance}`).join('\n');
-  const fallbackText = `${notice ? `${notice}\n\n` : ''}【${task.equipment} 考生名單｜${currentPage}/${totalPages}】\n${rows}\n\n請左右滑動卡片並直接點選考生。`;
+  const carouselCount = Math.max(1, Math.ceil(visible.length / cardsPerCarousel));
+  const fallbackText = `${notice ? `${notice}\n\n` : ''}【${task.equipment} 考生名單｜${currentPage}/${totalPages}】\n${rows}\n\n共 ${students.length} 人；卡片分成 ${carouselCount} 組顯示，請繼續左右滑動並直接點選考生。`;
   const fallbackItems = visible.slice(0, 9).map(student => ({ label: `查看 ${String(student.name).slice(0, 12)}`, postback: `查看考生 ${task.id} ${student.id}` }));
+  const quickReply = qr(externalNav([
+    ...navActions,
+    { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
+    { label: '查看點名結果', postback: `查看點名結果 ${task.id}` }
+  ], `查看任務 ${task.id}`, '回任務'));
+  const lineMessages = [];
+  for (let index = 0; index < columns.length; index += cardsPerCarousel) {
+    const batch = index / cardsPerCarousel + 1;
+    lineMessages.push({
+      type: 'template',
+      altText: `${task.equipment} 考生卡片（第 ${batch}/${carouselCount} 組，共 ${students.length} 人）`,
+      template: { type: 'carousel', columns: columns.slice(index, index + cardsPerCarousel) },
+      ...(index + cardsPerCarousel >= columns.length ? { quickReply } : {})
+    });
+  }
   return {
     text: fallbackText,
     fallbackQuickReply: qr(externalNav(fallbackItems, `查看任務 ${task.id}`, '回任務')),
-    lineMessage: {
-      type: 'template',
-      altText: `${task.equipment} 考生卡片名單（${students.length} 人）`,
-      template: { type: 'carousel', columns },
-      quickReply: qr(externalNav([
-        ...navActions,
-        { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
-        { label: '查看點名結果', postback: `查看點名結果 ${task.id}` }
-      ], `查看任務 ${task.id}`, '回任務'))
-    }
+    lineMessage: lineMessages[0],
+    lineMessages
   };
 }
 

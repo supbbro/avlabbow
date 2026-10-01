@@ -68,6 +68,12 @@ function toLineMessage(reply) {
   return message;
 }
 
+function toLineMessages(reply) {
+  if (Array.isArray(reply?.lineMessages) && reply.lineMessages.length) return reply.lineMessages.slice(0, 5);
+  const message = toLineMessage(reply);
+  return message ? [message] : [];
+}
+
 function toFallbackLineMessage(reply) {
   if (!reply?.lineMessage || !reply?.text) return null;
   const message = { type: 'text', text: String(reply.text).slice(0, 5000) };
@@ -170,10 +176,10 @@ async function handleLineEvent(event) {
     }
   }
   await runtime.flush();
-  const message = toLineMessage(reply);
-  if (message && event.replyToken) {
+  const messages = toLineMessages(reply);
+  if (messages.length && event.replyToken) {
     try {
-      await lineRequest('/message/reply', { replyToken: event.replyToken, messages: [message] });
+      await lineRequest('/message/reply', { replyToken: event.replyToken, messages });
     } catch (error) {
       const fallback = toFallbackLineMessage(reply);
       if (!fallback) throw error;
