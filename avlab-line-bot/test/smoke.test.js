@@ -1225,14 +1225,31 @@ test('a newer blank registration clears an older exam selection', () => {
 test('registration parser identifies Houban film students from the latest course selection', () => {
   const rows = [
     ['時間戳記', '姓名', '學號', '請勾選本學期所選之課程', '是否修習 一D56 侯志欽老師 影像製作', 'H6考試'],
-    ['2026/9/20 09:00:00', '侯班學生', '111101996', '一D56 侯志欽老師 影像製作', '是', true],
-    ['2026/9/20 09:01:00', '李智文班學生', '111101993', '一D56 李智文老師 影像製作', '是', true]
+    ['2026/9/20 09:00:00', '侯班學生', '111101996', '', '是', true],
+    ['2026/9/20 09:01:00', '李智文班學生', '111101993', '一D56 李智文老師 影像製作', false, true]
   ];
   const registrations = parseRegistrationRows(rows);
   assert.equal(registrations.find(item => item.name === '侯班學生').houbanFilm, true);
   assert.equal(registrations.find(item => item.name === '李智文班學生').houbanFilm, false);
   assert.equal(externalTeaching._test.dateKey(externalTeaching._test.depositDeadlineFor(registrations[0], new Date('2026-10-09T00:00:00+08:00'))), '2026-10-02');
   assert.equal(externalTeaching._test.dateKey(externalTeaching._test.depositDeadlineFor(registrations[1], new Date('2026-10-09T00:00:00+08:00'))), '2026-10-09');
+});
+
+test('Houban film deadline requires its checkbox or legacy course value to be selected', () => {
+  const rows = [
+    ['時間戳記', '姓名', '學號', '請勾選本學期所選之課程', '侯志欽影像製作', 'H6考試'],
+    ['2026/9/20 09:00:00', '有勾選學生', '111101991', '', true, true],
+    ['2026/9/20 09:01:00', '沒勾選學生', '111101992', '一D56 侯志欽老師 影像製作', false, true]
+  ];
+  const registrations = parseRegistrationRows(rows);
+  assert.equal(registrations.find(item => item.name === '有勾選學生').houbanFilm, true);
+  assert.equal(registrations.find(item => item.name === '沒勾選學生').houbanFilm, false);
+
+  const legacyRows = [
+    ['時間戳記', '姓名', '學號', '請勾選本學期所選之課程', 'H6考試'],
+    ['2026/9/20 09:02:00', '舊版表單學生', '111101990', '一D56 侯志欽老師 影像製作', true]
+  ];
+  assert.equal(parseRegistrationRows(legacyRows)[0].houbanFilm, true);
 });
 
 test('corrected deposit notice uses latest total, Houban deadline, and published schedule', () => {
@@ -1511,6 +1528,21 @@ test('teaching assignments propagate merged date headers across equipment column
   assert.equal(tasks[1].examiner, '黃忻妤');
   assert.equal(tasks[1].date.getDate(), 30);
   assert.deepEqual(tasks[1].students.map(student => student.name), ['學生乙']);
+});
+
+test('teaching assignments create a second task for an examiner in a merged continuation column', () => {
+  const rows = [
+    ['', '教學週II', '', ''], ['', '10/6（二）', '', ''], ['時間', '12:00-13:00', '', '18:00-19:00'],
+    ['項目', 'CX350棚內機', '', '基礎配件課程'], ['地點', '新棚', '', '401'], ['教學官', '蔡妍安', '蔡季妍', '毛成甄'],
+    ['學生', '吳翊穎', '範瑋庭', '學生丙'], ['', '呂世婷', '傅筱雅', '']
+  ];
+  const tasks = parseTeachingSheet(rows, '教學週分班表II', '1151');
+  assert.equal(tasks.length, 3);
+  assert.equal(tasks[1].equipment, 'CX350棚內機');
+  assert.equal(tasks[1].location, '新棚');
+  assert.equal(tasks[1].start, '12:00');
+  assert.equal(tasks[1].examiner, '蔡季妍');
+  assert.deepEqual(tasks[1].students.map(student => student.name), ['範瑋庭', '傅筱雅']);
 });
 
 test('exam assignments propagate merged date headers and choose the correct examiner column', () => {

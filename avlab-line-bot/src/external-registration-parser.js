@@ -17,6 +17,16 @@ function registrationItem(header) {
   return /(?:教學|考試)/u.test(header) || ['基礎配件課程', 'Teradek無線追焦組', 'Teradek無線追'].includes(header);
 }
 
+function houbanFilmSelected(headers, row) {
+  const dedicatedColumns = headers.flatMap((header, index) => {
+    const value = norm(header);
+    return value.includes('侯志欽') && value.includes('影像製作') ? [index] : [];
+  });
+  if (dedicatedColumns.length) return dedicatedColumns.some(index => selected(row[index]));
+  return headers.some((header, index) => norm(header).includes('本學期所選之課程')
+    && norm(row[index]).includes('侯志欽') && norm(row[index]).includes('影像製作'));
+}
+
 function equipmentKey(value) {
   const key = equipmentName(value).normalize('NFKC').toUpperCase().replace(/[\s\-_/／・·（）()]/g, '');
   if (['A7SII', 'A7SLL'].includes(key)) return 'A7SII';
@@ -87,8 +97,6 @@ function parseRegistrationRows(rows, { includeEmpty = false } = {}) {
   const itemColumns = headers.map((header, index) => ({ header, index })).filter(({ header }) => registrationItem(header));
   const equipmentColumns = itemColumns.filter(({ header }) => /考試/u.test(header)
     || ['Teradek無線追焦組', 'Teradek無線追'].includes(header));
-  const courseColumns = headers.map((header, index) => ({ header, index }))
-    .filter(({ header }) => /本學期所選之課程/u.test(header));
   const validNumbersByName = new Map();
   for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex++) for (const [nameColumn, numberColumn] of identityPairs) {
     const name = norm(rows[rowIndex]?.[nameColumn]), number = norm(rows[rowIndex]?.[numberColumn]);
@@ -121,9 +129,10 @@ function parseRegistrationRows(rows, { includeEmpty = false } = {}) {
       registrations.set(key, {
         name, department: text(row[departmentColumn]), number,
         equipment, registeredItems,
-        // Only the exact course/teacher combination has the early deposit
-        // deadline. Other film-production classes must keep the normal date.
-        houbanFilm: courseColumns.some(({ index }) => norm(row[index]).includes('一D56侯志欽')),
+        // The early deadline applies only when the Hou Chih-Chin Film
+        // Production option is actually selected. It may be represented by
+        // a dedicated checkbox column or by the legacy course-selection cell.
+        houbanFilm: houbanFilmSelected(headers, row),
         timestamp: row[0] || '', sourceRow: rowIndex + 1, _order: order
       });
     }

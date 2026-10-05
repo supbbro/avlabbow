@@ -87,15 +87,28 @@ function parseTeachingSheet(data, sheetName, term) {
   const tasks = [];
   for (let block = 0; block < timeRows.length; block++) {
     const timeRow = timeRows[block], itemRow = timeRow + 1, endRow = timeRows[block + 1] ?? data.length;
+    let carriedAssignment = null;
     for (let column = 1; column < width; column++) {
       const date = dateHeaders[column];
-      const time = parseTimeRange(data[timeRow]?.[column]);
-      const equipment = data[itemRow]?.[column];
+      const explicitTime = parseTimeRange(data[timeRow]?.[column]);
+      const explicitEquipment = data[itemRow]?.[column];
+      if (date && explicitTime && text(explicitEquipment)) {
+        carriedAssignment = {
+          date, time: explicitTime, equipment: explicitEquipment,
+          location: data[itemRow + 1]?.[column]
+        };
+      }
+      const sameMergedAssignment = carriedAssignment && date
+        && carriedAssignment.date.getTime() === date.getTime()
+        && !explicitTime && !text(explicitEquipment);
+      const assignment = explicitTime && text(explicitEquipment)
+        ? carriedAssignment
+        : sameMergedAssignment ? carriedAssignment : null;
       const examiner = data[itemRow + 2]?.[column];
-      if (!date || !time || !text(equipment) || !usableName(examiner)) continue;
+      if (!assignment || !usableName(examiner)) continue;
       const students = [];
       for (let row = itemRow + 3; row < endRow; row++) if (usableName(data[row]?.[column])) students.push(data[row][column]);
-      tasks.push(makeTask({ term, sheetName, itemRow, column, phase: '教學', date, time, equipment, location: data[itemRow + 1]?.[column], examiner, students }));
+      tasks.push(makeTask({ term, sheetName, itemRow, column, phase: '教學', ...assignment, examiner, students }));
     }
   }
   return tasks;
