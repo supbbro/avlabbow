@@ -861,7 +861,7 @@ function attendancePrompt(task, student, notice = '') {
       { label: '目前出席', value: student.attendance }
     ],
     actions: attendanceActions,
-    note: [notice, rule].filter(Boolean).join('\n\n'),
+    note: [notice, depositPolicyNotice(task, student), rule].filter(Boolean).join('\n\n'),
     navigation: [
       { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
       { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
@@ -977,10 +977,10 @@ function certificationForStudent(task, student, excludeRecordId = '') {
   return { shortAnswer, practical, refundable: shortAnswer && practical };
 }
 
-function certificationText(certification, showDeposit = true) {
+function certificationText(certification, showDeposit = true, refundPolicy = { refundable: true, reason: '' }) {
   const result = `累計結果：簡答題 ${certification.shortAnswer ? '✅ 通過' : '❌ 未通過'}｜上機 ${certification.practical ? '✅ 通過' : '❌ 未通過'}`;
   if (!showDeposit) return result;
-  return `${result}\n保證金：${certification.refundable ? '✅ 可退保證金' : '❌ 不可退保證金'}`;
+  return `${result}\n保證金：${certification.refundable && refundPolicy.refundable ? '✅ 可退保證金' : `❌ ${refundPolicy.reason || '不可退保證金'}`}`;
 }
 
 function examProgress(task, student) {
@@ -1032,13 +1032,19 @@ function upsertAttendance(task, student, operatorName, operatorId) {
   const previous = certificationForStudent(task, student, recordId);
   const cumulativeShort = previous.shortAnswer || shortAnswer === '通過';
   const cumulativePractical = previous.practical || practical === '通過';
-  const refundable = cumulativeShort && cumulativePractical;
+  const refundPolicy = depositRefundPolicy(task, student);
+  const refundable = cumulativeShort && cumulativePractical && refundPolicy.refundable;
   const shortEvaluated = cumulativeShort || ['通過', '未通過'].includes(shortAnswer);
   const practicalEvaluated = cumulativePractical || ['通過', '未通過'].includes(practical);
   const shortFailed = shortEvaluated && !cumulativeShort;
   const disqualified = student.attendance === '取消資格';
-  const depositStatus = disqualified ? '不可退保證金（取消資格）'
-    : shortEvaluated && (practicalEvaluated || shortFailed) ? (refundable ? '可退保證金' : '不可退保證金') : '待兩項評分完成';
+  const disqualifiedReason = operatorName === '保證金未繳' ? '保證金未繳'
+    : operatorName === '超過 5 分鐘未到' ? '超過 5 分鐘未到'
+      : '取消資格';
+  const depositStatus = disqualified ? `不可退保證金（${disqualifiedReason}）`
+    : shortEvaluated && (practicalEvaluated || shortFailed)
+      ? (refundable ? '可退保證金' : refundPolicy.reason || '不可退保證金')
+      : refundPolicy.reason || '待兩項評分完成';
   const cumulative = isExam(task)
     ? [cumulativeShort ? '通過' : '未通過', cumulativePractical ? '通過' : '未通過', depositStatus]
     : ['不適用', '不適用', '不適用'];
@@ -1050,6 +1056,7 @@ function upsertAttendance(task, student, operatorName, operatorId) {
 
 function resultPrompt(task, student, notice = '', extraActions = [], { includeModify = true } = {}) {
   const progress = examProgress(task, student);
+  const refundPolicy = depositRefundPolicy(task, student);
   const actions = [];
   if (!progress.shortRecorded) actions.push(
     { label: '簡答題 ✅', postback: `簡答登記 ${task.id} ${student.id} 通過` },
@@ -1069,11 +1076,12 @@ function resultPrompt(task, student, notice = '', extraActions = [], { includeMo
     { label: '上機', value: practicalText }
   ];
   if (progress.shortRecorded && progress.practicalRecorded) rows.push({
-    label: '保證金', value: progress.shortPassed && progress.practicalPassed ? '✅ 可退保證金' : '❌ 不可退保證金'
+    label: '保證金', value: progress.shortPassed && progress.practicalPassed && refundPolicy.refundable
+      ? '✅ 可退保證金' : `❌ ${refundPolicy.reason || '不可退保證金'}`
   });
   return studentStateCard(task, student, {
     title: '考試評分卡', rows, actions,
-    note: [notice, EXAM_PASSING_RULES, progress.step === 'done' ? '本次評分已完成。' : '請直接在卡片上選擇本階段結果。'].filter(Boolean).join('\n\n'),
+    note: [notice, depositPolicyNotice(task, student), EXAM_PASSING_RULES, progress.step === 'done' ? '本次評分已完成。' : '請直接在卡片上選擇本階段結果。'].filter(Boolean).join('\n\n'),
     navigation: [
       { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
       { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
@@ -1117,7 +1125,7 @@ function showStudent(taskId, studentId, context, notice = '') {
       ...(allComplete ? [{ label: '完成點名', postback: `完成點名 ${task.id}` }] : []),
       { label: '繼續依序點名', postback: `開始點名 ${task.id}` }
     ],
-    note: notice,
+    note: [notice, depositPolicyNotice(task, student)].filter(Boolean).join('\n\n'),
     navigation: [
       { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
       { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
@@ -1294,7 +1302,11 @@ function recordAttendance(taskId, studentId, status, context) {
   const result = (!isExam(task) || ['請假', '缺席', '取消資格'].includes(status)) ? '不適用'
     : student.result === '不適用' ? '未記錄' : student.result;
   updateStudent(student, status, result);
-  upsertAttendance(task, student, permission.name, context.userId);
+  upsertAttendance(task, student, status === '取消資格' ? '超過 5 分鐘未到' : permission.name, status === '取消資格' ? 'SYSTEM' : context.userId);
+  if (status === '取消資格') {
+    setScheduleStudentStrikethrough(task, student, true);
+    notifyNoShowCancellation(task, student, new Date());
+  }
   if (isExam(task) && ['到場', '遲到'].includes(status) && examProgress(task, student).step !== 'done') return resultPrompt(task, student);
   const students = studentsFor(task.id, { includeDisqualified: true });
   const allComplete = students.every(item => item.attendance !== '未點名' && (!isExam(task) || !['到場', '遲到'].includes(item.attendance) || examProgress(task, item).step === 'done'));
@@ -1308,7 +1320,10 @@ function examStudentNextStep(task, student, { notify = false } = {}) {
   if (progress.step !== 'done') return { text: '', actions: [] };
   const notification = notify ? notifyStudentForExamOutcome(task, student) : null;
   if (progress.shortPassed && progress.practicalPassed) {
-    const lines = [`【${student.name} 接下來】`, '✅ 通過，請考生在保證金單簽名。'];
+    const refundPolicy = depositRefundPolicy(task, student);
+    const lines = [`【${student.name} 接下來】`, refundPolicy.refundable
+      ? '✅ 通過，請考生在保證金單簽名。'
+      : `✅ 考試通過；${refundPolicy.reason || '本次保證金不可退'}，不需簽退費欄。`];
     if (notification && !notification.sent && !notification.skippedExaminer) lines.push('⚠️ 考生尚未綁定 LINE，請現場告知。');
     return { text: lines.join('\n'), actions: [] };
   }
@@ -1365,7 +1380,7 @@ function recordResult(taskId, studentId, result, context) {
   if (!['到場', '遲到'].includes(student.attendance)) return reply('請先登記這位學生的出席狀態。');
   updateStudent(student, student.attendance, result);
   const certification = upsertAttendance(task, student, permission.name, context.userId);
-  return candidateMenu(task, 1, `✅ 已登記 ${student.name}：${result}\n${certificationText(certification)}`);
+  return candidateMenu(task, 1, `✅ 已登記 ${student.name}：${result}\n${certificationText(certification, true, depositRefundPolicy(task, student))}`);
 }
 
 function completionReminderText(task) {
@@ -1384,7 +1399,7 @@ function completionTaskCard(task, students, studentNextStep = null, completedStu
   const counts = status => students.filter(student => student.attendance === status).length;
   const summary = `到場 ${counts('到場')}｜遲到 ${counts('遲到')}｜缺席 ${counts('缺席')}${counts('請假') ? `｜歷史請假 ${counts('請假')}` : ''}${isExam(task) ? `｜取消資格 ${counts('取消資格')}` : ''}`;
   const refundSummary = isExam(task) ? (() => {
-    const refundable = students.filter(student => certificationForStudent(task, student).refundable).length;
+    const refundable = students.filter(student => certificationForStudent(task, student).refundable && depositRefundPolicy(task, student).refundable).length;
     return `可退保證金 ${refundable}｜尚未符合 ${students.length - refundable}`;
   })() : '';
   const note = [studentNextStep?.text, completionReminderText(task)].filter(Boolean).join('\n\n');
@@ -1569,6 +1584,25 @@ function retestForm(task) {
   return { url: validFormUrl(process.env.EXTERNAL_FIRST_RETEST_FORM_URL || process.env.EXTERNAL_RETEST_FORM_URL || 'https://forms.gle/3be87wRzRBKvdkFb6'), label: '第一次補考', finalAttempt: false };
 }
 
+function cancellationRetestGuidance(task) {
+  const form = retestForm(task);
+  if (form.finalAttempt) return { text: '本次為第二次補考，已無下一次補考表單，請直接聯絡影音實驗室。', form };
+  return {
+    text: `若仍要參加本項考試，請重新報名${form.label}。該次補考保證金不退費。${form.url ? `\n報名連結：${form.url}` : '\n補考連結尚未設定，請聯絡影音實驗室。'}`,
+    form
+  };
+}
+
+function qualificationCancellationMessage(task, student, reason, examiner = false) {
+  const guidance = cancellationRetestGuidance(task);
+  const reasonText = reason === '保證金未繳'
+    ? `到了 ${formatDate(task.date)}「${task.equipment}」考試的前一天，對帳表仍顯示未繳交該項器材保證金`
+    : `超過個別考試時間 5 分鐘仍未完成到場點名`;
+  const heading = examiner ? '【考生資格取消】' : '【本次考試資格取消】';
+  const audience = examiner ? `${student.name} 因${reasonText}，已取消本次 ${task.equipment} 考試資格。` : `${student.name}你好，因${reasonText}，已取消本次 ${task.equipment} 考試資格。`;
+  return { text: `${heading}\n${audience}\n其他器材的考試資格不受影響。\n\n${guidance.text}`, form: guidance.form };
+}
+
 function examinerRetestInstructions(task, failedParts) {
   const form = retestForm(task);
   const lines = ['【未通過時，請當場告知考生】'];
@@ -1599,7 +1633,11 @@ function retestMessage(task, student, failedParts, label, url, corrected = false
 }
 
 function passedExamMessage(task, student, corrected = false) {
-  return `【考試結果${corrected ? '更正' : ''}】\n${student.name}你好，你的 ${task.equipment} 考試已${corrected ? '更正為' : ''}通過。\n\n✅ 簡答題：通過\n✅ 上機考：通過\n💰 已符合退還保證金資格，請依現場指示完成簽名。`;
+  const policy = depositRefundPolicy(task, student);
+  const depositText = policy.refundable
+    ? '💰 已符合退還保證金資格，請依現場指示完成簽名。'
+    : `💰 ${policy.reason || '本次保證金不可退還'}。`;
+  return `【考試結果${corrected ? '更正' : ''}】\n${student.name}你好，你的 ${task.equipment} 考試已${corrected ? '更正為' : ''}通過。\n\n✅ 簡答題：通過\n✅ 上機考：通過\n${depositText}`;
 }
 
 function notifyStudentForExamOutcome(task, student, { corrected = false } = {}) {
@@ -1685,9 +1723,23 @@ function recordOralRetest(recordId, value, context) {
 }
 
 function studentRosterText(task) {
-  const students = studentsFor(task.id);
+  const students = studentsFor(task.id, { includeDisqualified: true });
   if (!students.length) return '考生：尚未安排';
-  return `考生（${students.length} 人）：${students.map(student => student.name).join('、')}`;
+  if (!isExam(task)) return `考生（${students.length} 人）：${students.map(student => student.name).join('、')}`;
+  let registrations = [], records = [], logged = new Set(), operators = new Map();
+  try {
+    registrations = registrationRows(); records = depositRows(); logged = existingDepositLogKeys();
+    const target = sheet(SHEETS.attendance);
+    if (target) operators = new Map(target.getDataRange().getValues().slice(1).map(row => [String(row[0] || ''), String(row[13] || '')]));
+  } catch (error) { /* Keep the reminder available even if a source sheet is temporarily unavailable. */ }
+  const names = students.map(student => {
+    const operator = operators.get(`${task.id}:${student.id}`) || '';
+    if (student.attendance === '取消資格' && operator === '保證金未繳') return `${student.name}（取消：前一天未繳）`;
+    if (student.attendance === '取消資格' && ['超過 5 分鐘未到', '系統自動判定'].includes(operator)) return `${student.name}（取消：逾時未到）`;
+    const policy = depositRefundPolicy(task, student, { registrations, records, logged, operator });
+    return policy.late ? `${student.name}（可考／保證金不退）` : student.name;
+  });
+  return `考生（${students.length} 人）：${names.join('、')}`;
 }
 
 function examinerReminderText(task, roster = studentRosterText(task)) {
@@ -1712,7 +1764,8 @@ function studentReminderText(task, student) {
   const attendanceRule = isExam(task)
     ? '⚠️ 請依個別時間準時到場；超過 5 分鐘將取消本次考試資格。'
     : '⚠️ 請依個別時間準時到場。';
-  return `⏰ 你的對外${task.phase}將於 1 小時內開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n${attendanceRule}${isExam(task) ? `\n\n${EXAM_PASSING_RULES}` : ''}`;
+  const depositNotice = depositPolicyNotice(task, student);
+  return `⏰ 你的對外${task.phase}將於 1 小時內開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n${attendanceRule}${depositNotice ? `\n\n${depositNotice}` : ''}${isExam(task) ? `\n\n${EXAM_PASSING_RULES}` : ''}`;
 }
 
 const DEPOSIT_LOG_HEADERS = ['提醒鍵','類型','學生姓名','學號','任務ID','提醒時間','狀態'];
@@ -1728,6 +1781,88 @@ function depositRecordFor(student, phase = '考試', rows = depositRows()) {
   if (number) return phaseRows.find(row => norm(row.number) === number) || null;
   const matches = phaseRows.filter(row => norm(row.name) === norm(student.name));
   return matches.length === 1 ? matches[0] : null;
+}
+
+function configuredDepositDeadline() {
+  const configured = process.env.EXTERNAL_DEPOSIT_DEADLINE;
+  const value = !configured || configured === '2026-09-03' ? '2026-10-09' : configured;
+  return dateAtTaipeiMidnight(value);
+}
+
+function registrationForStudent(student, registrations = registrationRows()) {
+  const number = norm(student?.number);
+  if (number) return registrations.find(item => norm(item.number) === number) || null;
+  const matches = registrations.filter(item => norm(displayRegistrationName(item.name)) === norm(student?.name));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function depositPersonKey(student) {
+  return norm(student?.number) || `NAME-${norm(displayRegistrationName(student?.name))}`;
+}
+
+function depositForfeitKey(student, deadline) {
+  return `DEPOSIT-FORFEIT:${depositPersonKey(student)}:${taipeiDate(deadline)}`;
+}
+
+function existingDepositLogKeys() {
+  const target = sheet(SHEETS.depositReminders);
+  if (!target) return new Set();
+  return new Set(target.getDataRange().getValues().slice(1).map(row => String(row[0] || '')).filter(Boolean));
+}
+
+function depositPaymentWasLate(record, deadline, logged = existingDepositLogKeys(), student = record) {
+  if (!record?.paid || !deadline) return false;
+  if (logged.has(depositForfeitKey(student, deadline))) return true;
+  const processedDate = dateKey(record.processed);
+  return Boolean(processedDate && processedDate > taipeiDate(deadline));
+}
+
+function attendanceOperatorFor(task, student) {
+  const target = sheet(SHEETS.attendance);
+  if (!target) return '';
+  const recordId = `${task.id}:${student.id}`;
+  const row = target.getDataRange().getValues().slice(1).find(item => String(item[0] || '') === recordId);
+  return String(row?.[13] || '');
+}
+
+function depositRefundPolicy(task, student, options = {}) {
+  if (!isExam(task)) return { refundable: false, reason: '不適用', paid: false, late: false };
+  let registrations, records;
+  try {
+    registrations = options.registrations || registrationRows();
+    records = options.records || depositRows();
+  } catch (error) {
+    return { refundable: true, reason: '', paid: false, late: false, unknown: true };
+  }
+  const registration = registrationForStudent(student, registrations);
+  const record = depositRecordFor(student, '考試', records);
+  const deadline = depositDeadlineFor(registration, configuredDepositDeadline());
+  const logged = options.logged || existingDepositLogKeys();
+  const late = Boolean(record?.paid && deadline && depositPaymentWasLate(record, deadline, logged, student));
+  const operator = student.attendance === '取消資格' ? (options.operator ?? attendanceOperatorFor(task, student)) : '';
+  if (operator === '超過 5 分鐘未到' || operator === '系統自動判定') {
+    return { refundable: false, reason: '不可退保證金（超過 5 分鐘未到）', paid: Boolean(record?.paid), late, deadline, registration };
+  }
+  if (operator === '保證金未繳') {
+    return { refundable: false, reason: '不可退保證金（考試前一天仍未繳）', paid: false, late, deadline, registration };
+  }
+  if (late) return { refundable: false, reason: '不可退保證金（逾截止日繳交）', paid: true, late, deadline, registration };
+  if (record && !record.paid) return { refundable: false, reason: '保證金尚未繳交', paid: false, late, deadline, registration };
+  return { refundable: true, reason: '', paid: Boolean(record?.paid), late: false, deadline, registration };
+}
+
+function depositPolicyNotice(task, student, options = {}) {
+  if (!isExam(task)) return '';
+  const policy = depositRefundPolicy(task, student, options);
+  const operator = student.attendance === '取消資格' ? (options.operator ?? attendanceOperatorFor(task, student)) : '';
+  if (operator === '超過 5 分鐘未到' || operator === '系統自動判定') {
+    const form = retestForm(task);
+    return `🚫 已超過個別考試時間 5 分鐘未到，取消本次資格。${form.label ? `若要再考，須報名${form.label}；該次補考保證金不退費。` : ''}`;
+  }
+  if (operator === '保證金未繳') return '🚫 到考試前一天仍未繳交本項保證金，已取消本次考試資格。';
+  if (policy.late) return `⚠️ 已在 ${formatDate(policy.deadline)} 截止後繳費：本次仍可考試，但即使通過，保證金也不退費。`;
+  if (!policy.paid && !policy.unknown) return '⏳ 對帳表尚未顯示已繳保證金；若到考試前一天仍未繳交，將取消本項考試資格。';
+  return '';
 }
 
 function depositLogSheet() {
@@ -1885,7 +2020,12 @@ function restorePaidDepositCancellations(records, logSheet, logged, now) {
   for (const task of allTasks().filter(task => task.phase === '考試')) {
     for (const student of studentsFor(task.id, { includeDisqualified: true })) {
       if (student.attendance !== '取消資格' || operatorByRecord.get(`${task.id}:${student.id}`) !== '保證金未繳') continue;
-      if (!depositRecordFor(student, '考試', records)?.paid) continue;
+      const record = depositRecordFor(student, '考試', records);
+      if (!record?.paid) continue;
+      const examDate = dateKey(task.date);
+      const processedDate = dateKey(record.processed);
+      const paidBeforeExamDay = processedDate ? processedDate < examDate : taipeiDate(now) < examDate;
+      if (!paidBeforeExamDay) continue;
       const key = `DEPOSIT-RESTORE:${task.id}:${student.id}`;
       if (logged.has(key)) continue;
       updateStudent(student, '未點名', '未記錄');
@@ -1898,10 +2038,30 @@ function restorePaidDepositCancellations(records, logSheet, logged, now) {
   return restored;
 }
 
+function notifyUnpaidCancellation(task, student, now, logSheet, logged) {
+  const studentMessage = qualificationCancellationMessage(task, student, '保證金未繳');
+  const studentUserId = userIdForName(student.name, student.number);
+  const studentKey = `DEPOSIT-CANCEL-STUDENT:${task.id}:${student.id}`;
+  if (studentUserId && !logged.has(studentKey) && !pendingReminderKeys.has(studentKey)) {
+    const actions = studentMessage.form.url ? [{ label: `${studentMessage.form.label}報名`, uri: studentMessage.form.url }] : [];
+    queuePush(studentUserId, reply(studentMessage.text, actions), {
+      key: studentKey,
+      onSuccess: () => logDepositAction(logSheet, studentKey, '未繳取消通知考生', student, task, now, '已送／補考不退費')
+    });
+  }
+  const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
+  const examinerKey = `DEPOSIT-CANCEL-EXAMINER:${task.id}:${student.id}:${examinerUserId}`;
+  if (examinerUserId && !logged.has(examinerKey) && !pendingReminderKeys.has(examinerKey)) {
+    const examinerMessage = qualificationCancellationMessage(task, student, '保證金未繳', true);
+    queuePush(examinerUserId, reply(examinerMessage.text), {
+      key: examinerKey,
+      onSuccess: () => logDepositAction(logSheet, examinerKey, '未繳取消通知考官', student, task, now, '已送')
+    });
+  }
+}
+
 function processDepositRequirements(now = new Date()) {
-  const configuredDeadline = process.env.EXTERNAL_DEPOSIT_DEADLINE;
-  const deadlineValue = !configuredDeadline || configuredDeadline === '2026-09-03' ? '2026-10-09' : configuredDeadline;
-  const deadline = dateAtTaipeiMidnight(deadlineValue);
+  const deadline = configuredDepositDeadline();
   if (!deadline) return { reminders: 0, canceled: 0 };
   const houbanDeadline = depositDeadlineFor({ houbanFilm: true }, deadline);
   if (!houbanDeadline) throw new Error('Invalid EXTERNAL_HOUBAN_DEPOSIT_DEADLINE; expected YYYY-MM-DD');
@@ -1921,7 +2081,40 @@ function processDepositRequirements(now = new Date()) {
   const records = depositRows();
   const logSheet = depositLogSheet();
   const logged = depositLogKeys(logSheet);
+  const activeInitialTasks = allTasks().filter(task => task.phase === '考試' && ['已排定', '點名中'].includes(task.status));
+  const taskStudents = new Map(activeInitialTasks.map(task => [task.id, studentsFor(task.id, { includeDisqualified: true })]));
   let reminders = 0, canceled = 0;
+
+  for (const registration of registrations) {
+    const personDeadline = depositDeadlineFor(registration, deadline);
+    const record = depositRecordFor(registration, '考試', records);
+    const forfeitKey = depositForfeitKey(registration, personDeadline);
+    if (now >= personDeadline && !record?.paid && !logged.has(forfeitKey)) {
+      logDepositAction(logSheet, forfeitKey, '逾期未繳／喪失退費資格', registration, null, now, '之後繳交亦不退費');
+      logged.add(forfeitKey);
+    }
+    if (!record?.paid || !depositPaymentWasLate(record, personDeadline, logged, registration)) continue;
+    const noticeKey = `DEPOSIT-LATE-PAID-NOTICE:${depositPersonKey(registration)}:${taipeiDate(personDeadline)}`;
+    const studentUserId = userIdForName(registration.name, registration.number);
+    if (studentUserId && !logged.has(noticeKey) && !pendingReminderKeys.has(noticeKey) && queuePush(studentUserId, reply(`【逾期繳交保證金通知】\n${displayRegistrationName(registration.name)}你好，對帳表已確認收到你的保證金。\n\n你是在 ${formatDate(personDeadline)} 截止後完成繳費；只要是在各項考試前一天以前繳交，該項考試資格仍保留，但即使考試通過，這筆保證金也不退費。`), {
+      key: noticeKey,
+      onSuccess: () => logDepositAction(logSheet, noticeKey, '逾期繳費通知', registration, null, now, '已送／不可退費')
+    })) reminders++;
+    const paymentDate = dateKey(record.processed) || taipeiDate(now);
+    for (const task of activeInitialTasks) {
+      if (!registrationCoversTask(registration, task) || paymentDate >= dateKey(task.date)) continue;
+      const student = (taskStudents.get(task.id) || []).find(item => norm(item.number) === norm(registration.number)
+        || (!item.number && namesSimilar(item.name, registration.name)));
+      if (!student) continue;
+      const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
+      const examinerKey = `DEPOSIT-LATE-PAID-EXAMINER:${task.id}:${student.id}:${examinerUserId}`;
+      if (!examinerUserId || logged.has(examinerKey) || pendingReminderKeys.has(examinerKey)) continue;
+      if (queuePush(examinerUserId, reply(`【考生保證金狀態更新】\n${student.name} 已在截止日後補繳 ${task.equipment} 考試保證金，且於本項考試前一天以前完成，因此仍可參加考試。\n\n⚠️ 即使考試通過，該筆保證金也不退費；點名與評分卡會持續顯示此狀態。`), {
+        key: examinerKey,
+        onSuccess: () => logDepositAction(logSheet, examinerKey, '逾期繳費通知考官', student, task, now, '已送／可考但不退費')
+      })) reminders++;
+    }
+  }
   const restored = restorePaidDepositCancellations(records, logSheet, logged, now);
 
   const firstExams = earliestInitialExams();
@@ -1987,8 +2180,12 @@ function processDepositRequirements(now = new Date()) {
     }
   }
 
-  for (const task of allTasks().filter(task => task.phase === '考試' && ['已排定', '點名中'].includes(task.status))) {
-    for (const student of studentsFor(task.id)) {
+  for (const task of activeInitialTasks) {
+    for (const student of taskStudents.get(task.id) || []) {
+      if (student.attendance === '取消資格' && attendanceOperatorFor(task, student) === '保證金未繳') {
+        notifyUnpaidCancellation(task, student, now, logSheet, logged);
+        continue;
+      }
       const registration = registrationFor(student);
       const start = studentTaskStart(task, student);
       const cancellationDate = start ? dateAtTaipeiMidnight(dayBeforeDate(start)) : null;
@@ -2000,11 +2197,7 @@ function processDepositRequirements(now = new Date()) {
       updateStudent(student, '取消資格', '不適用');
       upsertAttendance(task, student, '保證金未繳', 'SYSTEM');
       setScheduleStudentStrikethrough(task, student, true);
-      const studentUserId = userIdForName(student.name, student.number);
-      const message = `【單項考試資格取消】\n${student.name}你好，因到了 ${formatDate(task.date)}「${task.equipment}」考試的前一天，對帳表仍顯示未繳交該項器材的考試保證金，因此只取消本次 ${task.equipment} 考試資格。\n\n其他器材考試資格不受影響。如仍需參加本項考試，請直接聯絡影音實驗室。`;
-      if (studentUserId) queuePush(studentUserId, reply(message));
-      const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
-      if (examinerUserId) queuePush(examinerUserId, reply(`🚫 ${student.name} 到了考試前一天仍未繳交該項器材保證金，已取消本次 ${task.equipment} 考試資格；其他器材不受影響。若學生仍需考試，請其聯絡影音實驗室。`));
+      notifyUnpaidCancellation(task, student, now, logSheet, logged);
       logDepositAction(logSheet, key, '取消資格', student, task, now, '保證金未繳');
       logged.add(key); canceled++;
     }
@@ -2012,17 +2205,46 @@ function processDepositRequirements(now = new Date()) {
   return { reminders, canceled, restored };
 }
 
+function notifyNoShowCancellation(task, student, now = new Date(), logSheet = depositLogSheet(), logged = depositLogKeys(logSheet)) {
+  const studentMessage = qualificationCancellationMessage(task, student, '超過 5 分鐘未到');
+  const studentUserId = userIdForName(student.name, student.number);
+  const studentKey = `EXAM-NO-SHOW-STUDENT:${task.id}:${student.id}`;
+  if (studentUserId && !logged.has(studentKey) && !pendingReminderKeys.has(studentKey)) {
+    const actions = studentMessage.form.url ? [{ label: `${studentMessage.form.label}報名`, uri: studentMessage.form.url }] : [];
+    queuePush(studentUserId, reply(studentMessage.text, actions), {
+      key: studentKey,
+      onSuccess: () => logDepositAction(logSheet, studentKey, '逾時未到通知考生', student, task, now, '已送／補考不退費')
+    });
+  }
+  const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
+  const examinerKey = `EXAM-NO-SHOW-EXAMINER:${task.id}:${student.id}:${examinerUserId}`;
+  if (examinerUserId && !logged.has(examinerKey) && !pendingReminderKeys.has(examinerKey)) {
+    const examinerMessage = qualificationCancellationMessage(task, student, '超過 5 分鐘未到', true);
+    queuePush(examinerUserId, reply(examinerMessage.text), {
+      key: examinerKey,
+      onSuccess: () => logDepositAction(logSheet, examinerKey, '逾時未到通知考官', student, task, now, '已送')
+    });
+  }
+}
+
 function expireExamQualifications(now = new Date()) {
   const timezone = Session.getScriptTimeZone();
   const today = Utilities.formatDate(now, timezone, 'yyyy-MM-dd');
+  const logSheet = depositLogSheet();
+  const logged = depositLogKeys(logSheet);
   let expired = 0;
   allTasks().filter(task => isExam(task) && ['已排定', '點名中'].includes(task.status)).forEach(task => {
-    studentsFor(task.id).filter(student => student.attendance === '未點名').forEach(student => {
+    studentsFor(task.id, { includeDisqualified: true }).forEach(student => {
       const start = studentTaskStart(task, student);
       if (!start || Utilities.formatDate(start, timezone, 'yyyy-MM-dd') !== today || now.getTime() <= start.getTime() + 5 * 60000) return;
-      updateStudent(student, '取消資格', '不適用');
-      upsertAttendance(task, student, '系統自動判定', 'SYSTEM');
-      expired++;
+      if (student.attendance === '未點名') {
+        updateStudent(student, '取消資格', '不適用');
+        upsertAttendance(task, student, '超過 5 分鐘未到', 'SYSTEM');
+        setScheduleStudentStrikethrough(task, student, true);
+        expired++;
+      }
+      if (student.attendance !== '取消資格' || !['超過 5 分鐘未到', '系統自動判定'].includes(attendanceOperatorFor(task, student))) return;
+      notifyNoShowCancellation(task, student, now, logSheet, logged);
     });
   });
   return expired;
@@ -2113,4 +2335,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, retestForm, retestMessage, examinerRetestInstructions, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };

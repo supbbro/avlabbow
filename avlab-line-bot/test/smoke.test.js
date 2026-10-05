@@ -804,6 +804,40 @@ test('exam arrival has a five-minute limit while teaching never auto-marks late'
   assert.match(examReminder, /上機考：最多錯 3 題/);
 });
 
+test('an exam no-show after five minutes is canceled and both sides receive first-retest guidance', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  try {
+    const results = isolated.openById(ids.externalResults);
+    const tasks = results.insertSheet('對外任務');
+    tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','考官','考官LINE User ID','群組ID','狀態']);
+    tasks.appendRow(['NO-SHOW-TASK','1151','考試',new Date('2026-10-06'),'12:00','12:15','H6','401','逾時考官','U-NO-SHOW-EXAMINER','','已排定',true,true]);
+    const students = results.insertSheet('任務學生');
+    students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間','個別開始時間','個別結束時間','提醒時間','來源儲存格']);
+    students.appendRow(['NO-SHOW-TASK','NO-SHOW-STUDENT','逾時考生','NO001',1,'未點名','未記錄','','12:00','12:15','','']);
+    results.insertSheet('LINE點名紀錄');
+    const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
+    bindings.appendRow(['LINE User ID','姓名','綁定時間','學號','身分類型']);
+    bindings.appendRow(['U-NO-SHOW-STUDENT','逾時考生','','NO001','external']);
+    bindings.appendRow(['U-NO-SHOW-EXAMINER','逾時考官','','','assistant']);
+
+    assert.equal(externalTeaching._test.expireExamQualifications(new Date('2026-10-06T12:05:01+08:00')), 1);
+    assert.equal(students.getRange(2, 6).getValue(), '取消資格');
+    assert.equal(results.getSheetByName('LINE點名紀錄').getRange(2, 14).getValue(), '超過 5 分鐘未到');
+    const pushes = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload));
+    assert.deepEqual(new Set(pushes.map(push => push.to)), new Set(['U-NO-SHOW-STUDENT', 'U-NO-SHOW-EXAMINER']));
+    const studentPush = pushes.find(push => push.to === 'U-NO-SHOW-STUDENT');
+    assert.match(studentPush.messages[0].text, /第一次補考/);
+    assert.match(studentPush.messages[0].text, /補考保證金不退費/);
+    assert.match(studentPush.messages[0].text, /3be87wRzRBKvdkFb6/);
+    isolated.httpOperations.forEach(operation => operation.options.onSuccess());
+    assert.equal(externalTeaching._test.expireExamQualifications(new Date('2026-10-06T12:06:00+08:00')), 0);
+    assert.equal(isolated.httpOperations.length, 2);
+  } finally {
+    installGlobals(runtime);
+  }
+});
+
 test('one-hour reminder privately pushes the roster to the examiner', () => {
   const resultBook = runtime.openById(ids.externalResults);
   const tasks = resultBook.getSheetByName('對外任務');
@@ -854,8 +888,10 @@ test('examiner receives one reminder at 21:00 on the day before an external task
 
   runtime.httpOperations = [];
   const sent = externalTeaching.sendExternalReminders(new Date('2026-10-06T21:00:00+08:00'));
-  assert.equal(sent, 1);
-  const push = JSON.parse(runtime.httpOperations[0].options.payload);
+  assert.ok(sent >= 1);
+  const push = runtime.httpOperations.map(operation => JSON.parse(operation.options.payload))
+    .find(payload => /明天有對外教學任務/.test(payload.messages[0].text) && /學生丙/.test(payload.messages[0].text));
+  assert.ok(push);
   assert.equal(push.to, 'U1');
   assert.match(push.messages[0].text, /明天有對外教學任務/);
   assert.match(push.messages[0].text, /學生丙/);
@@ -1685,17 +1721,27 @@ test('unpaid students are canceled only on the day before that equipment exam an
   assert.deepEqual(result, { reminders: 0, canceled: 1, restored: 0 });
   assert.equal(students.getRange(2, 6).getValue(), '取消資格');
   assert.equal(resultBook.getSheetByName('LINE點名紀錄').getRange(2, 14).getValue(), '保證金未繳');
-  assert.equal(resultBook.getSheetByName('保證金提醒紀錄').getRange(2, 2).getValue(), '取消資格');
+  const depositLogs = resultBook.getSheetByName('保證金提醒紀錄').getDataRange().getValues();
+  assert.equal(depositLogs.some(row => row[1] === '取消資格'), true);
   const pushes = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload));
   assert.deepEqual(new Set(pushes.map(push => push.to)), new Set(['U-STUDENT', 'U-EXAM']));
-  assert.match(pushes.filter(push => push.to === 'U-STUDENT').at(-1).messages[0].text, /只取消本次 H6/);
+  assert.match(pushes.filter(push => push.to === 'U-STUDENT').at(-1).messages[0].text, /第一次補考/);
+  assert.match(pushes.filter(push => push.to === 'U-STUDENT').at(-1).messages[0].text, /補考保證金不退費/);
   assert.equal(isolated.operations.some(operation => operation.kind === 'fontLine' && operation.value === 'line-through'), true);
   assert.equal(externalTeaching._test.studentsFor('DEPOSIT-TASK').length, 0);
-  deposits.getRange(4, 7).setValue(true);
+  deposits.getRange(4, 7, 1, 3).setValues([[true, 50, '2026/10/11 助理確認']]);
   const restored = externalTeaching._test.processDepositRequirements(new Date('2026-10-11T00:01:00+08:00'));
-  assert.deepEqual(restored, { reminders: 0, canceled: 0, restored: 1 });
+  assert.deepEqual(restored, { reminders: 2, canceled: 0, restored: 1 });
   assert.equal(students.getRange(2, 6).getValue(), '未點名');
   assert.equal(resultBook.getSheetByName('LINE點名紀錄').getRange(2, 14).getValue(), '保證金已確認');
+  assert.match(resultBook.getSheetByName('LINE點名紀錄').getRange(2, 19).getValue(), /逾截止日繳交/);
+  const lateStudent = externalTeaching._test.studentsFor('DEPOSIT-TASK', { includeDisqualified: true })[0];
+  const latePolicy = externalTeaching._test.depositRefundPolicy({ id: 'DEPOSIT-TASK', phase: '考試' }, lateStudent);
+  assert.equal(latePolicy.refundable, false);
+  assert.match(externalTeaching._test.depositPolicyNotice({ id: 'DEPOSIT-TASK', phase: '考試' }, lateStudent), /仍可考試.*不退費/);
+  const latePushes = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload));
+  assert.match(latePushes.filter(push => push.to === 'U-STUDENT').at(-1).messages[0].text, /即使考試通過.*不退費/);
+  assert.match(latePushes.filter(push => push.to === 'U-EXAM').at(-1).messages[0].text, /可參加考試/);
   installGlobals(runtime);
 });
 
