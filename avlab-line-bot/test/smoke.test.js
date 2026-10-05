@@ -1714,6 +1714,16 @@ test('deposit payment reminders begin on September 28 and skip paid students', (
   }
 });
 
+test('same-day deposit is too late for todays exam but still protects later exams', () => {
+  const record = { paid: true, processed: '2026/10/06 助理確認' };
+  const todayTask = { date: new Date('2026-10-06T12:00:00+08:00') };
+  const laterTask = { date: new Date('2026-10-12T12:00:00+08:00') };
+  const observedAt = new Date('2026-10-06T09:00:00+08:00');
+  assert.equal(externalTeaching._test.depositPaidBeforeTask(record, todayTask, observedAt), false);
+  assert.equal(externalTeaching._test.depositPaidBeforeTask(record, laterTask, observedAt), true);
+  assert.equal(externalTeaching._test.depositPaidBeforeTask({ paid: false }, laterTask, observedAt), false);
+});
+
 test('unpaid students are canceled only on the day before that equipment exam and restored after payment', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);
