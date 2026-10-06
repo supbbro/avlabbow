@@ -1714,16 +1714,6 @@ test('deposit payment reminders begin on September 28 and skip paid students', (
   }
 });
 
-test('same-day deposit is too late for todays exam but still protects later exams', () => {
-  const record = { paid: true, processed: '2026/10/06 助理確認' };
-  const todayTask = { date: new Date('2026-10-06T12:00:00+08:00') };
-  const laterTask = { date: new Date('2026-10-12T12:00:00+08:00') };
-  const observedAt = new Date('2026-10-06T09:00:00+08:00');
-  assert.equal(externalTeaching._test.depositPaidBeforeTask(record, todayTask, observedAt), false);
-  assert.equal(externalTeaching._test.depositPaidBeforeTask(record, laterTask, observedAt), true);
-  assert.equal(externalTeaching._test.depositPaidBeforeTask({ paid: false }, laterTask, observedAt), false);
-});
-
 test('unpaid students are canceled only on the day before that equipment exam and restored after payment', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);
@@ -1771,7 +1761,7 @@ test('unpaid students are canceled only on the day before that equipment exam an
   assert.match(pushes.filter(push => push.to === 'U-STUDENT').at(-1).messages[0].text, /補考保證金不退費/);
   assert.equal(isolated.operations.some(operation => operation.kind === 'fontLine' && operation.value === 'line-through'), true);
   assert.equal(externalTeaching._test.studentsFor('DEPOSIT-TASK').length, 0);
-  deposits.getRange(4, 7, 1, 3).setValues([[true, 50, '2026/10/11 助理確認']]);
+  deposits.getRange(4, 7, 1, 3).setValues([[true, 50, '']]);
   const restored = externalTeaching._test.processDepositRequirements(new Date('2026-10-11T00:01:00+08:00'));
   assert.deepEqual(restored, { reminders: 2, canceled: 0, restored: 1 });
   assert.equal(students.getRange(2, 6).getValue(), '未點名');

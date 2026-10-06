@@ -2011,14 +2011,6 @@ function setScheduleStudentStrikethrough(task, student, struck) {
   return true;
 }
 
-function depositPaidBeforeTask(record, task, now = new Date()) {
-  if (!record?.paid) return false;
-  const examDate = dateKey(task?.date);
-  if (!examDate) return false;
-  const processedDate = dateKey(record.processed);
-  return processedDate ? processedDate < examDate : taipeiDate(now) < examDate;
-}
-
 function restorePaidDepositCancellations(records, logSheet, logged, now) {
   const attendanceSheet = sheet(SHEETS.attendance);
   if (!attendanceSheet) return 0;
@@ -2029,7 +2021,7 @@ function restorePaidDepositCancellations(records, logSheet, logged, now) {
     for (const student of studentsFor(task.id, { includeDisqualified: true })) {
       if (student.attendance !== '取消資格' || operatorByRecord.get(`${task.id}:${student.id}`) !== '保證金未繳') continue;
       const record = depositRecordFor(student, '考試', records);
-      if (!depositPaidBeforeTask(record, task, now)) continue;
+      if (!record?.paid) continue;
       const key = `DEPOSIT-RESTORE:${task.id}:${student.id}`;
       if (logged.has(key)) continue;
       updateStudent(student, '未點名', '未記錄');
@@ -2196,9 +2188,9 @@ function processDepositRequirements(now = new Date()) {
       if (!registration || !registrationCoversTask(registration, task) || !cancellationDate
         || now < cancellationDate || student.attendance !== '未點名') continue;
       const record = depositRecordFor(student, '考試', records);
-      // Paying on the exam date is too late for this task. It may still keep
-      // later tasks eligible, so qualification is evaluated per task date.
-      if (depositPaidBeforeTask(record, task, now)) continue;
+      // The checkbox is authoritative: TRUE means paid even when the optional
+      // processing-date cell is blank.
+      if (record?.paid) continue;
       const key = `DEPOSIT-CANCEL:${task.id}:${student.id}`;
       if (logged.has(key)) continue;
       updateStudent(student, '取消資格', '不適用');
@@ -2342,4 +2334,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, depositPaidBeforeTask, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
