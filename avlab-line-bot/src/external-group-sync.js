@@ -1,6 +1,5 @@
 'use strict';
 
-const ROSTER_SHEET = process.env.EXTERNAL_ROSTER_SHEET_NAME || '1151修課名單';
 const MATRIX_SHEET = process.env.EXTERNAL_MATRIX_SHEET_NAME || '1142課程認證狀態';
 const LOG_SHEET = 'LINE點名紀錄';
 const CURRENT_COURSE_COLUMNS = [0, 4, 9, 14, 19];
@@ -129,29 +128,32 @@ function outcomeMap(logRows) {
     const equipment = logEquipmentKey(row[5], phase);
     if (!name || !equipment) continue;
     const attendance = text(row[9]);
+    const shortAnswer = text(row[10]);
+    const practical = text(row[11]);
+    const total = text(row[12]);
     const operator = text(row[13]);
     const deposit = text(row[18]);
     const cumulativeShort = text(row[16]);
     const cumulativePractical = text(row[17]);
     const key = `${name}|${equipment}`;
-    const previous = outcomes.get(key);
     let status = '';
     if (phase === '教學') {
       if (['到場', '遲到'].includes(attendance)) status = PASS;
-      else if (['請假', '缺席', '取消資格'].includes(attendance)) status = RETEST;
+      else if (['請假', '未到', '缺席', '取消資格'].includes(attendance)) status = RETEST;
     } else if (operator === DEPOSIT_RESTORED) {
       status = DEPOSIT_RESTORED;
     } else if (attendance === '取消資格' && operator === DEPOSIT_DISQUALIFIED) {
       status = DEPOSIT_DISQUALIFIED;
     } else if ((cumulativeShort === PASS && cumulativePractical === PASS) || deposit === '可退保證金') {
       status = PASS;
-    } else if (['請假', '缺席', '取消資格'].includes(attendance) || deposit.startsWith('不可退保證金')) {
+    } else if (['請假', '未到', '缺席', '取消資格'].includes(attendance)
+      || [shortAnswer, practical, total, cumulativeShort, cumulativePractical].some(value => value === '未通過')
+      || deposit.startsWith('不可退保證金')) {
       status = RETEST;
     }
     if (!status) continue;
-    // A later deposit cancellation must visibly override an older pass; a later
-    // valid pass can in turn clear the strike-through.
-    if ([PASS, DEPOSIT_DISQUALIFIED, DEPOSIT_RESTORED].includes(status) || previous !== PASS) outcomes.set(key, status);
+    // LINE 點名紀錄以後寫入的決定性結果為準，讓考官修正後能立即覆蓋舊顏色。
+    outcomes.set(key, status);
   }
   return outcomes;
 }
@@ -250,58 +252,57 @@ function planMatrix(rosterRows, matrixRows, logRows) {
   return { groups, memberships, outcomes, updates, missing, fieldUpdates, identityEndColumn };
 }
 
+function planCertificationColors(matrixRows, logRows) {
+  const outcomes = outcomeMap(logRows);
+  const headerKeys = (matrixRows[0] || []).map(headerEquipmentKey);
+  const updates = [];
+  for (let rowIndex = 2; rowIndex < matrixRows.length; rowIndex++) {
+    const name = text(matrixRows[rowIndex]?.[0]);
+    if (!name) continue;
+    for (let column = 5; column < headerKeys.length; column++) {
+      const equipment = headerKeys[column];
+      if (!equipment) continue;
+      const status = outcomes.get(`${compact(name)}|${equipment}`);
+      if (!status) continue;
+      updates.push({ rowIndex, column, name, equipment, status: status === DEPOSIT_DISQUALIFIED ? RETEST : status });
+    }
+  }
+  return { outcomes, updates };
+}
+
 function quoted(name) { return `'${String(name).replaceAll("'", "''")}'`; }
 
-async function syncExternalCertificationMatrix(api, spreadsheetId) {
-  const ranges = [`${quoted(ROSTER_SHEET)}!A:AM`, `${quoted(MATRIX_SHEET)}!A:AM`, `${quoted(LOG_SHEET)}!A:S`];
+async function syncExternalCertificationColors(api, spreadsheetId) {
+  const ranges = [`${quoted(MATRIX_SHEET)}!A:AM`, `${quoted(LOG_SHEET)}!A:S`];
   const values = await api.spreadsheets.values.batchGet({ spreadsheetId, ranges, valueRenderOption: 'FORMATTED_VALUE' });
-  const [rosterRows = [], matrixRows = [], logRows = []] = (values.data.valueRanges || []).map(range => range.values || []);
-  if (!rosterRows.length || !matrixRows.length || !logRows.length) return { updated: 0, added: 0, reason: '缺少必要分頁資料' };
-  const plan = planMatrix(rosterRows, matrixRows, logRows);
+  const [matrixRows = [], logRows = []] = (values.data.valueRanges || []).map(range => range.values || []);
+  if (!matrixRows.length || !logRows.length) return { updated: 0, reason: '缺少必要分頁資料' };
+  const plan = planCertificationColors(matrixRows, logRows);
   const metadata = await api.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId,title))' });
   const matrixSheetId = (metadata.data.sheets || []).find(sheet => sheet.properties?.title === MATRIX_SHEET)?.properties?.sheetId;
   if (matrixSheetId == null) throw new Error(`找不到分頁：${MATRIX_SHEET}`);
 
   const requests = [];
   const appliedAfterSuccess = [];
-  for (const addition of plan.missing) {
-    const formatExemplar = addition.exemplar >= 0 ? addition.exemplar : Math.min(2, matrixRows.length - 1);
-    if (formatExemplar >= 0) requests.push({ copyPaste: {
-      source: { sheetId: matrixSheetId, startRowIndex: formatExemplar, endRowIndex: formatExemplar + 1, startColumnIndex: 0, endColumnIndex: plan.identityEndColumn },
-      destination: { sheetId: matrixSheetId, startRowIndex: addition.rowIndex, endRowIndex: addition.rowIndex + 1, startColumnIndex: 0, endColumnIndex: plan.identityEndColumn },
-      pasteType: 'PASTE_FORMAT', pasteOrientation: 'NORMAL'
-    } });
-    requests.push({ updateCells: {
-      range: { sheetId: matrixSheetId, startRowIndex: addition.rowIndex, endRowIndex: addition.rowIndex + 1, startColumnIndex: 0, endColumnIndex: plan.identityEndColumn },
-      rows: [{ values: addition.values.map(value => ({ userEnteredValue: { stringValue: text(value) } })) }],
-      fields: 'userEnteredValue'
-    } });
-  }
-
-  for (const update of plan.fieldUpdates) requests.push({ updateCells: {
-    range: { sheetId: matrixSheetId, startRowIndex: update.rowIndex, endRowIndex: update.rowIndex + 1, startColumnIndex: update.column, endColumnIndex: update.column + 1 },
-    rows: [{ values: [{ userEnteredValue: { stringValue: text(update.value) } }] }],
-    fields: 'userEnteredValue'
-  } });
-
-  let updated = 0;
   for (const update of plan.updates) {
-    const cacheKey = `${spreadsheetId}|${update.rowIndex}|${update.column}`;
+    const cacheKey = `color-only|${spreadsheetId}|${update.rowIndex}|${update.column}`;
     if (lastApplied.get(cacheKey) === update.status) continue;
     requests.push({ repeatCell: {
       range: { sheetId: matrixSheetId, startRowIndex: update.rowIndex, endRowIndex: update.rowIndex + 1, startColumnIndex: update.column, endColumnIndex: update.column + 1 },
       cell: { userEnteredFormat: {
         backgroundColorStyle: { rgbColor: COLORS[update.status] },
-        textFormat: { strikethrough: update.status === DEPOSIT_DISQUALIFIED }
+        textFormat: { strikethrough: false }
       } },
       fields: 'userEnteredFormat.backgroundColorStyle,userEnteredFormat.textFormat.strikethrough'
     } });
     appliedAfterSuccess.push([cacheKey, update.status]);
-    updated++;
   }
   if (requests.length) await api.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } });
   for (const [cacheKey, status] of appliedAfterSuccess) lastApplied.set(cacheKey, status);
-  return { updated, added: plan.missing.length, refreshed: plan.fieldUpdates.length, groups: plan.groups.length, memberships: plan.memberships.length };
+  return { updated: requests.length, matched: plan.updates.length };
 }
 
-module.exports = { syncExternalCertificationMatrix, _test: { canonicalEquipment, logEquipmentKey, headerEquipmentKey, parseRosterGroups, outcomeMap, planMatrix } };
+module.exports = {
+  syncExternalCertificationColors,
+  _test: { canonicalEquipment, logEquipmentKey, headerEquipmentKey, parseRosterGroups, outcomeMap, planMatrix, planCertificationColors }
+};

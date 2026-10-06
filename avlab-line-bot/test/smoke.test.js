@@ -1450,6 +1450,34 @@ test('group matrix sync derives green and retest colors from cumulative LINE rec
   assert.equal(externalGroupSync._test.canonicalEquipment('200W Par'), externalGroupSync._test.canonicalEquipment('Par 200W考試'));
 });
 
+test('certification colors use existing matrix rows only and follow the latest LINE result', () => {
+  const matrix = [
+    ['姓名', '系級', '學號', '課程', '帳號', '組別', 'H6考試', 'X160考試', '基礎配件課程'],
+    ['說明'],
+    ['學生甲', '', '1001', '聲音藝術與錄音工程', '', '第一組'],
+    ['學生乙', '', '1002', '聲音藝術與錄音工程', '', '第一組']
+  ];
+  const header = ['紀錄ID','任務ID','日期','開始時間','階段','器材','學生ID','學生姓名','學號','出席狀態','簡答題結果','上機結果','總結果','操作考官','考官LINE User ID','記錄時間','累計簡答題結果','累計上機結果','保證金狀態'];
+  const log = (id, phase, equipment, name, attendance, short, practical, total = '') => {
+    const row = Array(19).fill('');
+    Object.assign(row, { 0: id, 4: phase, 5: equipment, 7: name, 9: attendance, 10: short, 11: practical, 12: total, 16: short, 17: practical });
+    return row;
+  };
+  const logs = [header,
+    log('1', '考試', 'H6', '學生甲', '到場', '通過', '通過', '全部通過'),
+    log('2', '考試', 'H6', '學生甲', '到場', '未通過', '未記錄', '未通過'),
+    log('3', '考試', 'X160', '學生乙', '取消資格', '未通過', '未記錄', '未通過'),
+    log('4', '教學', '基礎配件課程', '學生乙', '缺席', '不適用', '不適用', '不適用'),
+    log('5', '考試', 'H6', '不在認證表的人', '到場', '通過', '通過', '全部通過')
+  ];
+  const plan = externalGroupSync._test.planCertificationColors(matrix, logs);
+  assert.deepEqual(plan.updates.map(update => [update.name, update.equipment, update.status]), [
+    ['學生甲', 'H6', '要補考'],
+    ['學生乙', 'X160', '要補考'],
+    ['學生乙', '基礎配件課程', '要補考']
+  ]);
+});
+
 test('group matrix sync reads the current five-column roster blocks and writes each stage group', () => {
   const roster = Array.from({ length: 5 }, () => Array(21).fill(''));
   roster[0][14] = '影製(侯) 期中';
