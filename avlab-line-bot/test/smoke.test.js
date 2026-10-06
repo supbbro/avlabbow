@@ -1450,6 +1450,40 @@ test('group matrix sync derives green and retest colors from cumulative LINE rec
   assert.equal(externalGroupSync._test.canonicalEquipment('200W Par'), externalGroupSync._test.canonicalEquipment('Par 200W考試'));
 });
 
+test('group matrix sync reads the current five-column roster blocks and writes each stage group', () => {
+  const roster = Array.from({ length: 5 }, () => Array(21).fill(''));
+  roster[0][14] = '影製(侯) 期中';
+  roster[0][19] = '影製(侯) 期末';
+  roster[1][14] = '第一組';
+  roster[1][19] = '第二組';
+  roster[2][14] = '學生甲';
+  roster[2][15] = ':113405001';
+  roster[2][19] = '學生甲';
+  roster[2][20] = '113405001';
+  const matrix = [
+    ['姓名', '系級', '學號', '課程', '帳號', '組別', 'H6考試'],
+    ['說明'],
+    ['學生甲', '', '113405001', '影製(侯) 期中', '', ''],
+    ['學生甲', '', '113405001', '影製(侯) 期末', '', '']
+  ];
+  const plan = externalGroupSync._test.planMatrix(roster, matrix, [['紀錄ID']]);
+  assert.equal(plan.groups.length, 2);
+  assert.equal(plan.missing.length, 0);
+  assert.deepEqual(plan.fieldUpdates, [
+    { rowIndex: 2, column: 5, value: '第一組' },
+    { rowIndex: 3, column: 5, value: '第二組' }
+  ]);
+});
+
+test('group matrix equipment aliases cover the current external schedule headers', () => {
+  const same = (left, right) => assert.equal(externalGroupSync._test.canonicalEquipment(left), externalGroupSync._test.canonicalEquipment(right));
+  same('CX350棚內機', '棚內機考試');
+  same('3play', '3Play慢播機考試');
+  same('Teradek無線追焦', '無線追焦組考試');
+  same('A7S3', 'a7sIII考試');
+  same('ARRI S60 Pro', 'ARRI S60考試');
+});
+
 test('group matrix sync refreshes an existing student name without resetting result cells', () => {
   const roster = [['音響學'], ['第一組'], ['新姓名', '1001']];
   const matrix = [

@@ -1,9 +1,8 @@
 'use strict';
 
 const ROSTER_SHEET = process.env.EXTERNAL_ROSTER_SHEET_NAME || '1151修課名單';
-const MATRIX_SHEET = process.env.EXTERNAL_MATRIX_SHEET_NAME || '1142課程考試對照';
+const MATRIX_SHEET = process.env.EXTERNAL_MATRIX_SHEET_NAME || '1142課程認證狀態';
 const LOG_SHEET = 'LINE點名紀錄';
-const COURSE_COLUMNS = [0, 5, 10, 15, 20, 25];
 const PASS = '通過';
 const RETEST = '要補考';
 const DEPOSIT_DISQUALIFIED = '保證金未繳';
@@ -18,12 +17,24 @@ const lastApplied = new Map();
 
 const text = value => String(value ?? '').trim();
 const compact = value => text(value).normalize('NFKC').replace(/[\s\-_/／・·・（）()]/g, '').toUpperCase();
+const compactStudentId = value => compact(value).replace(/[^A-Z0-9]/g, '');
 const groupLabel = value => /^(?:第)?(?:[0-9]+|[一二三四五六七八九十]+)組(?:[、,，](?:第)?(?:[0-9]+|[一二三四五六七八九十]+)組)*$/.test(text(value));
 
 function canonicalEquipment(value) {
   const key = compact(value).replace(/(?:考試|教學)$/u, '');
   if (key.includes('基礎配件課程')) return '基礎配件課程';
   if (key.includes('聲音工作區')) return '聲音工作區';
+  if (key.includes('棚內機')) return '棚內機';
+  if (key.includes('導播台')) return '導播台';
+  if (key.includes('字幕機')) return '字幕機';
+  if (key.includes('燈盤')) return '燈盤';
+  if (key.includes('成音台')) return '成音台';
+  if (key.includes('3PLAY')) return '3PLAY';
+  if (key.includes('錄放影機') || key.includes('錄放機')) return '錄放影機';
+  if (key.includes('無線追焦')) return '無線追焦組';
+  if (['A7SIII', 'Α7SIII', 'A7S3', 'Α7S3'].includes(key)) return 'A7S3';
+  if (['A7SII', 'Α7SII'].includes(key)) return 'A7SII';
+  if (key.startsWith('ARRIS60')) return 'ARRIS60';
   if (['ATOMOS', 'ATOMOS螢幕'].includes(key)) return 'ATOMOS';
   if (['VORTEX4S8S', 'V4V8'].includes(key)) return 'V4V8';
   if (['200WPAR', 'PAR200W', '200PAR', 'PAR200'].includes(key)) return 'PAR200W';
@@ -49,7 +60,10 @@ function headerEquipmentKey(header) {
 
 function parseRosterGroups(rows) {
   const groups = [];
-  for (const column of COURSE_COLUMNS) {
+  const width = Math.max(0, ...rows.map(row => row.length));
+  const courseColumns = Array.from({ length: Math.max(0, width - 1) }, (_, column) => column)
+    .filter(column => text(rows[0]?.[column]) && rows.slice(1).some(row => groupLabel(row[column])));
+  for (const column of courseColumns) {
     const course = text(rows[0]?.[column]);
     if (!course) continue;
     let section = course;
@@ -106,7 +120,16 @@ function outcomeMap(logRows) {
 }
 
 function courseMatches(selectedCourse, course) {
-  return compact(selectedCourse).includes(compact(course));
+  const normalize = value => compact(value).replace(/(?:期中|期末)$/u, '');
+  const selected = normalize(selectedCourse);
+  const roster = normalize(course);
+  return Boolean(selected && roster && (selected.includes(roster) || roster.includes(selected)));
+}
+
+function findCourseRow(rows, member, claimedRows) {
+  const available = (row, index) => index >= 2 && !claimedRows.has(index) && compactStudentId(row[2]) === compactStudentId(member.studentId);
+  const exact = rows.findIndex((row, index) => available(row, index) && compact(row[3]) === compact(member.course));
+  return exact >= 0 ? exact : rows.findIndex((row, index) => available(row, index) && courseMatches(row[3], member.course));
 }
 
 function planMatrix(rosterRows, matrixRows, logRows) {
@@ -115,58 +138,72 @@ function planMatrix(rosterRows, matrixRows, logRows) {
   const memberships = [];
   const seenMemberships = new Set();
   for (const group of groups) for (const member of group.members) {
-    const key = `${compact(member.studentId)}|${compact(group.course)}`;
+    const key = `${compactStudentId(member.studentId)}|${compact(group.course)}`;
     if (seenMemberships.has(key)) continue;
     seenMemberships.add(key);
     memberships.push({ ...member, course: group.course, group: group.group });
   }
 
   const augmentedRows = matrixRows.map(row => row.slice());
+  const groupColumn = (augmentedRows[0] || []).findIndex(header => compact(header) === compact('組別'));
+  const identityEndColumn = Math.max(5, groupColumn + 1);
   const missing = [];
   const fieldUpdates = [];
   const rowForMembership = new Map();
   const claimedRows = new Set();
   const coursesByStudent = new Map();
   for (const member of memberships) {
-    const studentKey = compact(member.studentId);
+    const studentKey = compactStudentId(member.studentId);
     if (!coursesByStudent.has(studentKey)) coursesByStudent.set(studentKey, []);
     coursesByStudent.get(studentKey).push(member.course);
   }
   for (const member of memberships) {
-    const studentKey = compact(member.studentId);
-    let rowIndex = augmentedRows.findIndex((row, index) => index >= 2 && !claimedRows.has(index) && compact(row[2]) === studentKey && courseMatches(row[3], member.course));
+    const studentKey = compactStudentId(member.studentId);
+    let rowIndex = findCourseRow(augmentedRows, member, claimedRows);
     if (rowIndex < 0) {
-      const exemplar = augmentedRows.findIndex((row, index) => index >= 2 && courseMatches(row[3], member.course));
+      let exemplar = augmentedRows.findIndex((row, index) => index >= 2 && compact(row[3]) === compact(member.course));
+      if (exemplar < 0) exemplar = augmentedRows.findIndex((row, index) => index >= 2 && courseMatches(row[3], member.course));
       const selectedCourse = exemplar >= 0 ? text(augmentedRows[exemplar][3]) : member.course;
       const currentCourses = coursesByStudent.get(studentKey) || [];
       const reusableRow = currentCourses.length === 1
-        ? augmentedRows.findIndex((row, index) => index >= 2 && !claimedRows.has(index) && compact(row[2]) === studentKey && !currentCourses.some(course => courseMatches(row[3], course)))
+        ? augmentedRows.findIndex((row, index) => index >= 2 && !claimedRows.has(index) && compactStudentId(row[2]) === studentKey && !currentCourses.some(course => courseMatches(row[3], course)))
         : -1;
       if (reusableRow >= 0) {
         rowIndex = reusableRow;
-        for (const [column, value] of [[0, member.name], [2, member.studentId], [3, selectedCourse]]) {
+        const identityValues = [[0, member.name], [2, member.studentId], [3, selectedCourse]];
+        if (groupColumn >= 0) identityValues.push([groupColumn, member.group]);
+        for (const [column, value] of identityValues) {
           if (text(augmentedRows[rowIndex][column]) === text(value)) continue;
           augmentedRows[rowIndex][column] = value;
           fieldUpdates.push({ rowIndex, column, value });
         }
       } else {
         rowIndex = augmentedRows.length;
-        const newRow = [member.name, '', member.studentId, selectedCourse, ''];
+        const newRow = Array(identityEndColumn).fill('');
+        newRow[0] = member.name;
+        newRow[2] = member.studentId;
+        newRow[3] = selectedCourse;
+        if (groupColumn >= 0) newRow[groupColumn] = member.group;
         augmentedRows.push(newRow);
         missing.push({ member, rowIndex, exemplar, values: newRow });
       }
-    } else if (text(augmentedRows[rowIndex][0]) !== member.name) {
-      augmentedRows[rowIndex][0] = member.name;
-      fieldUpdates.push({ rowIndex, column: 0, value: member.name });
+    } else {
+      const identityValues = [[0, member.name]];
+      if (groupColumn >= 0) identityValues.push([groupColumn, member.group]);
+      for (const [column, value] of identityValues) {
+        if (text(augmentedRows[rowIndex][column]) === text(value)) continue;
+        augmentedRows[rowIndex][column] = value;
+        fieldUpdates.push({ rowIndex, column, value });
+      }
     }
     claimedRows.add(rowIndex);
-    rowForMembership.set(`${compact(member.studentId)}|${compact(member.course)}`, rowIndex);
+    rowForMembership.set(`${compactStudentId(member.studentId)}|${compact(member.course)}`, rowIndex);
   }
 
   const headerKeys = (augmentedRows[0] || []).map(headerEquipmentKey);
   const updates = [];
   for (const member of memberships) {
-    const rowIndex = rowForMembership.get(`${compact(member.studentId)}|${compact(member.course)}`);
+    const rowIndex = rowForMembership.get(`${compactStudentId(member.studentId)}|${compact(member.course)}`);
     for (let column = 5; column < headerKeys.length; column++) {
       const equipment = headerKeys[column];
       if (!equipment) continue;
@@ -174,13 +211,13 @@ function planMatrix(rosterRows, matrixRows, logRows) {
       if (status) updates.push({ rowIndex, column, status, name: member.name, course: member.course, group: member.group, equipment });
     }
   }
-  return { groups, memberships, outcomes, updates, missing, fieldUpdates };
+  return { groups, memberships, outcomes, updates, missing, fieldUpdates, identityEndColumn };
 }
 
 function quoted(name) { return `'${String(name).replaceAll("'", "''")}'`; }
 
 async function syncExternalCertificationMatrix(api, spreadsheetId) {
-  const ranges = [`${quoted(ROSTER_SHEET)}!A:AM`, `${quoted(MATRIX_SHEET)}!A:AJ`, `${quoted(LOG_SHEET)}!A:S`];
+  const ranges = [`${quoted(ROSTER_SHEET)}!A:AM`, `${quoted(MATRIX_SHEET)}!A:AM`, `${quoted(LOG_SHEET)}!A:S`];
   const values = await api.spreadsheets.values.batchGet({ spreadsheetId, ranges, valueRenderOption: 'FORMATTED_VALUE' });
   const [rosterRows = [], matrixRows = [], logRows = []] = (values.data.valueRanges || []).map(range => range.values || []);
   if (!rosterRows.length || !matrixRows.length || !logRows.length) return { updated: 0, added: 0, reason: '缺少必要分頁資料' };
@@ -194,12 +231,12 @@ async function syncExternalCertificationMatrix(api, spreadsheetId) {
   for (const addition of plan.missing) {
     const formatExemplar = addition.exemplar >= 0 ? addition.exemplar : Math.min(2, matrixRows.length - 1);
     if (formatExemplar >= 0) requests.push({ copyPaste: {
-      source: { sheetId: matrixSheetId, startRowIndex: formatExemplar, endRowIndex: formatExemplar + 1, startColumnIndex: 0, endColumnIndex: 5 },
-      destination: { sheetId: matrixSheetId, startRowIndex: addition.rowIndex, endRowIndex: addition.rowIndex + 1, startColumnIndex: 0, endColumnIndex: 5 },
+      source: { sheetId: matrixSheetId, startRowIndex: formatExemplar, endRowIndex: formatExemplar + 1, startColumnIndex: 0, endColumnIndex: plan.identityEndColumn },
+      destination: { sheetId: matrixSheetId, startRowIndex: addition.rowIndex, endRowIndex: addition.rowIndex + 1, startColumnIndex: 0, endColumnIndex: plan.identityEndColumn },
       pasteType: 'PASTE_FORMAT', pasteOrientation: 'NORMAL'
     } });
     requests.push({ updateCells: {
-      range: { sheetId: matrixSheetId, startRowIndex: addition.rowIndex, endRowIndex: addition.rowIndex + 1, startColumnIndex: 0, endColumnIndex: 5 },
+      range: { sheetId: matrixSheetId, startRowIndex: addition.rowIndex, endRowIndex: addition.rowIndex + 1, startColumnIndex: 0, endColumnIndex: plan.identityEndColumn },
       rows: [{ values: addition.values.map(value => ({ userEnteredValue: { stringValue: text(value) } })) }],
       fields: 'userEnteredValue'
     } });
