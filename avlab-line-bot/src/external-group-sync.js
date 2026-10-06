@@ -3,6 +3,7 @@
 const ROSTER_SHEET = process.env.EXTERNAL_ROSTER_SHEET_NAME || '1151修課名單';
 const MATRIX_SHEET = process.env.EXTERNAL_MATRIX_SHEET_NAME || '1142課程認證狀態';
 const LOG_SHEET = 'LINE點名紀錄';
+const CURRENT_COURSE_COLUMNS = [0, 4, 9, 14, 19];
 const PASS = '通過';
 const RETEST = '要補考';
 const DEPOSIT_DISQUALIFIED = '保證金未繳';
@@ -19,6 +20,11 @@ const text = value => String(value ?? '').trim();
 const compact = value => text(value).normalize('NFKC').replace(/[\s\-_/／・·・（）()]/g, '').toUpperCase();
 const compactStudentId = value => compact(value).replace(/[^A-Z0-9]/g, '');
 const groupLabel = value => /^(?:第)?(?:[0-9]+|[一二三四五六七八九十]+)組(?:[、,，](?:第)?(?:[0-9]+|[一二三四五六七八九十]+)組)*$/.test(text(value));
+const booleanValue = value => /^(?:TRUE|FALSE)$/i.test(text(value));
+const personKey = person => compactStudentId(person.studentId)
+  ? `ID:${compactStudentId(person.studentId)}`
+  : `NAME:${compact(person.name)}`;
+const membershipKey = member => `${personKey(member)}|${compact(member.course)}|${compact(member.group)}`;
 
 function canonicalEquipment(value) {
   const key = compact(value).replace(/(?:考試|教學)$/u, '');
@@ -61,23 +67,54 @@ function headerEquipmentKey(header) {
 function parseRosterGroups(rows) {
   const groups = [];
   const width = Math.max(0, ...rows.map(row => row.length));
-  const courseColumns = Array.from({ length: Math.max(0, width - 1) }, (_, column) => column)
+  const detectedLegacyColumns = Array.from({ length: Math.max(0, width - 1) }, (_, column) => column)
     .filter(column => text(rows[0]?.[column]) && rows.slice(1).some(row => groupLabel(row[column])));
+  const courseColumns = [...new Set([...CURRENT_COURSE_COLUMNS, ...detectedLegacyColumns])]
+    .filter(column => text(rows[0]?.[column]));
   for (const column of courseColumns) {
-    const course = text(rows[0]?.[column]);
-    if (!course) continue;
-    let section = course;
+    const baseCourse = text(rows[0]?.[column]);
+    let section = baseCourse;
+    let category = '';
     let current = null;
+    let explicitGroups = false;
+    let pendingHeadings = [];
     for (let row = 1; row < rows.length; row++) {
       const value = text(rows[row]?.[column]);
+      if (!value) continue;
       if (groupLabel(value)) {
+        if (pendingHeadings.length) {
+          section = pendingHeadings.join('｜');
+          category = '';
+          pendingHeadings = [];
+        }
         current = { course: section, group: value, members: [] };
         groups.push(current);
+        explicitGroups = true;
         continue;
       }
       const studentId = text(rows[row]?.[column + 1]);
-      if (current && value && studentId) current.members.push({ name: value, studentId });
-      else if (value && !studentId) { section = value; current = null; }
+      const memberSignal = Boolean(studentId || booleanValue(rows[row]?.[column + 2]) || (column === 19 && text(rows[row]?.[column + 5])));
+      const nextValue = rows.slice(row + 1).map(item => text(item?.[column])).find(Boolean) || '';
+      const startsSection = current && explicitGroups && !memberSignal && groupLabel(nextValue);
+      if (memberSignal || (current && explicitGroups && !startsSection)) {
+        if (pendingHeadings.length) {
+          if (pendingHeadings.length > 1) category = pendingHeadings.slice(0, -1).join('｜');
+          const group = [category, pendingHeadings.at(-1)].filter(Boolean).join('｜');
+          current = { course: section, group, members: [] };
+          groups.push(current);
+          pendingHeadings = [];
+          explicitGroups = false;
+        }
+        if (!current) {
+          current = { course: section, group: category || '未分組', members: [] };
+          groups.push(current);
+        }
+        current.members.push({ name: value, studentId });
+        continue;
+      }
+      pendingHeadings.push(value);
+      current = null;
+      explicitGroups = false;
     }
   }
   return groups.filter(group => group.members.length);
@@ -120,16 +157,36 @@ function outcomeMap(logRows) {
 }
 
 function courseMatches(selectedCourse, course) {
-  const normalize = value => compact(value).replace(/(?:期中|期末)$/u, '');
+  const raw = value => compact(text(value).split('｜')[0]).replace(/(?:期中|期末)$/u, '');
+  const normalize = value => {
+    const key = raw(value);
+    if (key.includes('聲音藝術與錄音工程') || key.includes('音響學')) return '音響學';
+    if (key.includes('獨立專題') && (key.includes('鍾適芳') || key.includes('獨立專題B'))) return '鍾適芳獨立專題';
+    if (key.includes('影製侯') || (key.includes('侯志欽') && key.includes('影像製作'))) return '影製侯';
+    if (key.includes('影製李') || (key.includes('李志文') && key.includes('影像製作'))) return '影製李';
+    return key;
+  };
   const selected = normalize(selectedCourse);
   const roster = normalize(course);
-  return Boolean(selected && roster && (selected.includes(roster) || roster.includes(selected)));
+  const selectedRaw = raw(selectedCourse);
+  const rosterRaw = raw(course);
+  return Boolean(selected && roster && (selected.includes(roster) || roster.includes(selected)
+    || selectedRaw.includes(rosterRaw) || rosterRaw.includes(selectedRaw)));
 }
 
-function findCourseRow(rows, member, claimedRows) {
-  const available = (row, index) => index >= 2 && !claimedRows.has(index) && compactStudentId(row[2]) === compactStudentId(member.studentId);
-  const exact = rows.findIndex((row, index) => available(row, index) && compact(row[3]) === compact(member.course));
-  return exact >= 0 ? exact : rows.findIndex((row, index) => available(row, index) && courseMatches(row[3], member.course));
+function findCourseRow(rows, member, claimedRows, groupColumn) {
+  const available = (row, index) => {
+    if (index < 2 || claimedRows.has(index)) return false;
+    return member.studentId
+      ? compactStudentId(row[2]) === compactStudentId(member.studentId)
+      : compact(row[0]) === compact(member.name);
+  };
+  const exactCourse = (row, index) => available(row, index) && compact(row[3]) === compact(member.course);
+  const exactGroup = row => groupColumn >= 0 && compact(row[groupColumn]) === compact(member.group);
+  let found = rows.findIndex((row, index) => exactCourse(row, index) && exactGroup(row));
+  if (found < 0) found = rows.findIndex((row, index) => exactCourse(row, index));
+  if (found < 0) found = rows.findIndex((row, index) => available(row, index) && courseMatches(row[3], member.course) && exactGroup(row));
+  return found >= 0 ? found : rows.findIndex((row, index) => available(row, index) && courseMatches(row[3], member.course));
 }
 
 function planMatrix(rosterRows, matrixRows, logRows) {
@@ -138,10 +195,11 @@ function planMatrix(rosterRows, matrixRows, logRows) {
   const memberships = [];
   const seenMemberships = new Set();
   for (const group of groups) for (const member of group.members) {
-    const key = `${compactStudentId(member.studentId)}|${compact(group.course)}`;
+    const candidate = { ...member, course: group.course, group: group.group };
+    const key = membershipKey(candidate);
     if (seenMemberships.has(key)) continue;
     seenMemberships.add(key);
-    memberships.push({ ...member, course: group.course, group: group.group });
+    memberships.push(candidate);
   }
 
   const augmentedRows = matrixRows.map(row => row.slice());
@@ -151,44 +209,22 @@ function planMatrix(rosterRows, matrixRows, logRows) {
   const fieldUpdates = [];
   const rowForMembership = new Map();
   const claimedRows = new Set();
-  const coursesByStudent = new Map();
   for (const member of memberships) {
-    const studentKey = compactStudentId(member.studentId);
-    if (!coursesByStudent.has(studentKey)) coursesByStudent.set(studentKey, []);
-    coursesByStudent.get(studentKey).push(member.course);
-  }
-  for (const member of memberships) {
-    const studentKey = compactStudentId(member.studentId);
-    let rowIndex = findCourseRow(augmentedRows, member, claimedRows);
+    let exemplar = augmentedRows.findIndex((row, index) => index >= 2 && compact(row[3]) === compact(member.course));
+    if (exemplar < 0) exemplar = augmentedRows.findIndex((row, index) => index >= 2 && courseMatches(row[3], member.course));
+    const selectedCourse = exemplar >= 0 ? text(augmentedRows[exemplar][3]) : member.course;
+    let rowIndex = findCourseRow(augmentedRows, member, claimedRows, groupColumn);
     if (rowIndex < 0) {
-      let exemplar = augmentedRows.findIndex((row, index) => index >= 2 && compact(row[3]) === compact(member.course));
-      if (exemplar < 0) exemplar = augmentedRows.findIndex((row, index) => index >= 2 && courseMatches(row[3], member.course));
-      const selectedCourse = exemplar >= 0 ? text(augmentedRows[exemplar][3]) : member.course;
-      const currentCourses = coursesByStudent.get(studentKey) || [];
-      const reusableRow = currentCourses.length === 1
-        ? augmentedRows.findIndex((row, index) => index >= 2 && !claimedRows.has(index) && compactStudentId(row[2]) === studentKey && !currentCourses.some(course => courseMatches(row[3], course)))
-        : -1;
-      if (reusableRow >= 0) {
-        rowIndex = reusableRow;
-        const identityValues = [[0, member.name], [2, member.studentId], [3, selectedCourse]];
-        if (groupColumn >= 0) identityValues.push([groupColumn, member.group]);
-        for (const [column, value] of identityValues) {
-          if (text(augmentedRows[rowIndex][column]) === text(value)) continue;
-          augmentedRows[rowIndex][column] = value;
-          fieldUpdates.push({ rowIndex, column, value });
-        }
-      } else {
-        rowIndex = augmentedRows.length;
-        const newRow = Array(identityEndColumn).fill('');
-        newRow[0] = member.name;
-        newRow[2] = member.studentId;
-        newRow[3] = selectedCourse;
-        if (groupColumn >= 0) newRow[groupColumn] = member.group;
-        augmentedRows.push(newRow);
-        missing.push({ member, rowIndex, exemplar, values: newRow });
-      }
+      rowIndex = augmentedRows.length;
+      const newRow = Array(identityEndColumn).fill('');
+      newRow[0] = member.name;
+      newRow[2] = member.studentId;
+      newRow[3] = selectedCourse;
+      if (groupColumn >= 0) newRow[groupColumn] = member.group;
+      augmentedRows.push(newRow);
+      missing.push({ member, rowIndex, exemplar, values: newRow });
     } else {
-      const identityValues = [[0, member.name]];
+      const identityValues = [[0, member.name], [3, selectedCourse]];
       if (groupColumn >= 0) identityValues.push([groupColumn, member.group]);
       for (const [column, value] of identityValues) {
         if (text(augmentedRows[rowIndex][column]) === text(value)) continue;
@@ -197,13 +233,13 @@ function planMatrix(rosterRows, matrixRows, logRows) {
       }
     }
     claimedRows.add(rowIndex);
-    rowForMembership.set(`${compactStudentId(member.studentId)}|${compact(member.course)}`, rowIndex);
+    rowForMembership.set(membershipKey(member), rowIndex);
   }
 
   const headerKeys = (augmentedRows[0] || []).map(headerEquipmentKey);
   const updates = [];
   for (const member of memberships) {
-    const rowIndex = rowForMembership.get(`${compactStudentId(member.studentId)}|${compact(member.course)}`);
+    const rowIndex = rowForMembership.get(membershipKey(member));
     for (let column = 5; column < headerKeys.length; column++) {
       const equipment = headerKeys[column];
       if (!equipment) continue;

@@ -1475,6 +1475,46 @@ test('group matrix sync reads the current five-column roster blocks and writes e
   ]);
 });
 
+test('group matrix sync keeps every course and named project group separate', () => {
+  const roster = Array.from({ length: 9 }, () => Array(10).fill(''));
+  roster[0][0] = '聲音藝術與錄音工程';
+  roster[1][0] = '聲音第一組';
+  roster[2][0] = '同學甲';
+  roster[2][2] = 'FALSE';
+  roster[3][0] = '聲音第二組';
+  roster[4][0] = '同學乙';
+  roster[4][2] = 'TRUE';
+  roster[0][4] = '獨立專題(鍾適芳)';
+  roster[1][4] = '紀錄片';
+  roster[2][4] = '作品 A';
+  roster[3][4] = '同學丙';
+  roster[3][5] = '1003';
+  roster[4][4] = '作品 B';
+  roster[5][4] = '同學丁';
+  roster[5][5] = '1004';
+  const groups = externalGroupSync._test.parseRosterGroups(roster);
+  assert.deepEqual(groups.map(group => [group.course, group.group, group.members.map(member => member.name)]), [
+    ['聲音藝術與錄音工程', '聲音第一組', ['同學甲']],
+    ['聲音藝術與錄音工程', '聲音第二組', ['同學乙']],
+    ['獨立專題(鍾適芳)', '紀錄片｜作品 A', ['同學丙']],
+    ['獨立專題(鍾適芳)', '紀錄片｜作品 B', ['同學丁']]
+  ]);
+});
+
+test('one student in two groups keeps two independent certification rows', () => {
+  const roster = [['聲音藝術與錄音工程'], ['甲組'], ['同學甲', '', 'FALSE'], ['乙組'], ['同學甲', '', 'TRUE']];
+  const matrix = [
+    ['姓名', '系級', '學號', '課程', '帳號', '組別', 'H6考試'],
+    ['說明'],
+    ['同學甲', '', '', '音響學', '', '甲組'],
+    ['同學甲', '', '', '音響學', '', '乙組']
+  ];
+  const plan = externalGroupSync._test.planMatrix(roster, matrix, [['紀錄ID']]);
+  assert.equal(plan.memberships.length, 2);
+  assert.equal(plan.missing.length, 0);
+  assert.equal(plan.fieldUpdates.length, 0);
+});
+
 test('group matrix equipment aliases cover the current external schedule headers', () => {
   const same = (left, right) => assert.equal(externalGroupSync._test.canonicalEquipment(left), externalGroupSync._test.canonicalEquipment(right));
   same('CX350棚內機', '棚內機考試');
@@ -1496,7 +1536,7 @@ test('group matrix sync refreshes an existing student name without resetting res
   assert.equal(plan.missing.length, 0);
 });
 
-test('group matrix sync reuses a single-course student row when the course changes', () => {
+test('group matrix sync keeps another course row and adds a separate membership', () => {
   const roster = [['影像製作'], ['第二組'], ['學生甲', '1001']];
   const matrix = [
     ['姓名', '系級', '學號', '課程'],
@@ -1505,8 +1545,9 @@ test('group matrix sync reuses a single-course student row when the course chang
     ['學生甲', '', '1001', '一D56 侯志欽老師 音響學']
   ];
   const plan = externalGroupSync._test.planMatrix(roster, matrix, [['紀錄ID']]);
-  assert.equal(plan.missing.length, 0);
-  assert.deepEqual(plan.fieldUpdates, [{ rowIndex: 3, column: 3, value: '５．二EFG 李志文老師 影像製作' }]);
+  assert.equal(plan.missing.length, 1);
+  assert.deepEqual(plan.fieldUpdates, []);
+  assert.equal(plan.missing[0].values[3], '５．二EFG 李志文老師 影像製作');
 });
 
 test('roster parsing uses a subsection title that appears before its group labels', () => {
