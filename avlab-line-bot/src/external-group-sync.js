@@ -212,7 +212,7 @@ function planMatrix(rosterRows, matrixRows, logRows) {
   for (const member of memberships) {
     let exemplar = augmentedRows.findIndex((row, index) => index >= 2 && compact(row[3]) === compact(member.course));
     if (exemplar < 0) exemplar = augmentedRows.findIndex((row, index) => index >= 2 && courseMatches(row[3], member.course));
-    const selectedCourse = exemplar >= 0 ? text(augmentedRows[exemplar][3]) : member.course;
+    const selectedCourse = member.course;
     let rowIndex = findCourseRow(augmentedRows, member, claimedRows, groupColumn);
     if (rowIndex < 0) {
       rowIndex = augmentedRows.length;

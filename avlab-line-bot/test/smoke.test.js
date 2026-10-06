@@ -1506,13 +1506,24 @@ test('one student in two groups keeps two independent certification rows', () =>
   const matrix = [
     ['姓名', '系級', '學號', '課程', '帳號', '組別', 'H6考試'],
     ['說明'],
-    ['同學甲', '', '', '音響學', '', '甲組'],
-    ['同學甲', '', '', '音響學', '', '乙組']
+    ['同學甲', '', '', '聲音藝術與錄音工程', '', '甲組'],
+    ['同學甲', '', '', '聲音藝術與錄音工程', '', '乙組']
   ];
   const plan = externalGroupSync._test.planMatrix(roster, matrix, [['紀錄ID']]);
   assert.equal(plan.memberships.length, 2);
   assert.equal(plan.missing.length, 0);
   assert.equal(plan.fieldUpdates.length, 0);
+});
+
+test('group matrix uses the roster course name instead of a legacy alias', () => {
+  const roster = [['聲音藝術與錄音工程'], ['甲組'], ['同學甲', '', 'TRUE']];
+  const matrix = [
+    ['姓名', '系級', '學號', '課程', '帳號', '組別'],
+    ['說明'],
+    ['同學甲', '', '', '１．一D56 侯志欽老師 音響學', '', '甲組']
+  ];
+  const plan = externalGroupSync._test.planMatrix(roster, matrix, [['紀錄ID']]);
+  assert.deepEqual(plan.fieldUpdates, [{ rowIndex: 2, column: 3, value: '聲音藝術與錄音工程' }]);
 });
 
 test('group matrix equipment aliases cover the current external schedule headers', () => {
@@ -1532,7 +1543,10 @@ test('group matrix sync refreshes an existing student name without resetting res
     ['舊姓名', '廣電系', '1001', '一D56 侯志欽老師 音響學', '', '既有結果']
   ];
   const plan = externalGroupSync._test.planMatrix(roster, matrix, [['紀錄ID']]);
-  assert.deepEqual(plan.fieldUpdates, [{ rowIndex: 2, column: 0, value: '新姓名' }]);
+  assert.deepEqual(plan.fieldUpdates, [
+    { rowIndex: 2, column: 0, value: '新姓名' },
+    { rowIndex: 2, column: 3, value: '音響學' }
+  ]);
   assert.equal(plan.missing.length, 0);
 });
 
@@ -1547,7 +1561,7 @@ test('group matrix sync keeps another course row and adds a separate membership'
   const plan = externalGroupSync._test.planMatrix(roster, matrix, [['紀錄ID']]);
   assert.equal(plan.missing.length, 1);
   assert.deepEqual(plan.fieldUpdates, []);
-  assert.equal(plan.missing[0].values[3], '５．二EFG 李志文老師 影像製作');
+  assert.equal(plan.missing[0].values[3], '影像製作');
 });
 
 test('roster parsing uses a subsection title that appears before its group labels', () => {
