@@ -1,6 +1,6 @@
 'use strict';
 
-const MATRIX_SHEET = process.env.EXTERNAL_MATRIX_SHEET_NAME || '1151課程認證狀態';
+const MATRIX_SHEET = '1151課程認證狀態';
 const LOG_SHEET = 'LINE點名紀錄';
 const CURRENT_COURSE_COLUMNS = [0, 4, 9, 14, 19];
 const PASS = '通過';
@@ -273,7 +273,7 @@ function planCertificationColors(matrixRows, logRows) {
 function quoted(name) { return `'${String(name).replaceAll("'", "''")}'`; }
 
 async function syncExternalCertificationColors(api, spreadsheetId) {
-  const ranges = [`${quoted(MATRIX_SHEET)}!A:AM`, `${quoted(LOG_SHEET)}!A:S`];
+  const ranges = [`${quoted(MATRIX_SHEET)}!A:AL`, `${quoted(LOG_SHEET)}!A:S`];
   const values = await api.spreadsheets.values.batchGet({ spreadsheetId, ranges, valueRenderOption: 'FORMATTED_VALUE' });
   const [matrixRows = [], logRows = []] = (values.data.valueRanges || []).map(range => range.values || []);
   if (!matrixRows.length || !logRows.length) return { updated: 0, reason: '缺少必要分頁資料' };
