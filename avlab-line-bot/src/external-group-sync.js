@@ -1,6 +1,6 @@
 'use strict';
 
-const MATRIX_SHEET = process.env.EXTERNAL_MATRIX_SHEET_NAME || '1142課程認證狀態';
+const MATRIX_SHEET = process.env.EXTERNAL_MATRIX_SHEET_NAME || '1151課程認證狀態';
 const LOG_SHEET = 'LINE點名紀錄';
 const CURRENT_COURSE_COLUMNS = [0, 4, 9, 14, 19];
 const PASS = '通過';
