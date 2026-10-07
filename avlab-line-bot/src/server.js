@@ -17,12 +17,13 @@ const internalTeaching = require('./internal-teaching');
 const externalTeaching = require('./external-teaching');
 const teachingSchedule = require('./teaching-schedule');
 const externalGroupSync = require('./external-group-sync');
+const externalStudentChanges = require('./external-student-changes');
 const { sendRegistrationConfirmations } = require('./registration-confirmations');
 const navigation = require('./navigation');
 const { WorkQueue } = require('./work-queue');
 const app = express();
 const port = Number(process.env.PORT || 3000);
-const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master, ids.externalRegistration, ids.deposit];
+const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master, ids.externalRegistration, ids.externalStudentChange, ids.deposit];
 const INTERNAL_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.master];
 const INTERNAL_CERT_WORKBOOKS = [ids.internalAttendance, ids.internalCertification];
 const TEACHING_SCHEDULE_WORKBOOKS = [ids.teachingSchedule, ids.externalResults, ids.master];
@@ -269,6 +270,7 @@ async function schedulerTick() {
     }, [ids.teachingSchedule, ids.externalResults]]);
   }
   jobs.push([`external-examiner-changes:${stamp}`, externalTeaching.processPendingExaminerChanges, [ids.external, ...EXTERNAL_WORKBOOKS]]);
+  jobs.push([`external-student-changes:${stamp}`, () => externalStudentChanges.processPendingStudentChanges({ syncSchedule: externalTeaching.syncFromSchedule }), EXTERNAL_WORKBOOKS]);
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
   jobs.push([`registration-confirmations:${stamp}`, () => sendRegistrationConfirmations(runtime), [ids.master, ids.externalRegistration, ids.externalResults]]);
   // 認證表只依 LINE 點名紀錄上色；不再讀取或改動 1151 修課名單的人員與分組。
