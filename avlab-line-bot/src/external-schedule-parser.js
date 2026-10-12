@@ -149,8 +149,22 @@ function parseExamSheet(data, sheetName, term) {
   const tasks = [];
   for (let block = 0; block < itemRows.length; block++) {
     const itemRow = itemRows[block], studentStart = itemRow + 3, endRow = itemRows[block + 1] ?? data.length;
+    let carriedEquipment = '', carriedEquipmentDate = null;
     for (let column = 2; column < width; column++) {
-      const equipment = data[itemRow]?.[column], examiner = data[itemRow + 2]?.[column], date = dateHeaders[column];
+      const examiner = data[itemRow + 2]?.[column], date = dateHeaders[column];
+      if (!date || !carriedEquipmentDate || carriedEquipmentDate.getTime() !== date.getTime()) carriedEquipment = '';
+      const explicitEquipment = text(data[itemRow]?.[column]);
+      if (explicitEquipment) {
+        carriedEquipment = explicitEquipment;
+        carriedEquipmentDate = new Date(date);
+      }
+      // Some exam equipment headings are merged across adjacent rooms or
+      // examiner columns. Google Sheets only returns the heading in the
+      // merged cell's first column, so a populated continuation column must
+      // inherit that heading within the same date block.
+      const hasContinuationAssignment = !explicitEquipment
+        && text(data[itemRow + 1]?.[column]) && usableName(examiner);
+      const equipment = explicitEquipment || (hasContinuationAssignment ? carriedEquipment : '');
       if (!date || !text(equipment) || !usableName(examiner)) continue;
       const time = examBlockTime(data, studentStart, endRow, equipment);
       if (!time) continue;

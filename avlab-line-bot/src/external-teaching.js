@@ -1595,8 +1595,11 @@ function cancellationRetestGuidance(task) {
 
 function qualificationCancellationMessage(task, student, reason, examiner = false) {
   const guidance = cancellationRetestGuidance(task);
+  const graceLabel = depositGraceLabel(student);
   const reasonText = reason === '保證金未繳'
-    ? `到了 ${formatDate(task.date)}「${task.equipment}」考試的前一天，對帳表仍顯示未繳交該項器材保證金`
+    ? graceLabel
+      ? `到了本次寬限期限 ${graceLabel}，對帳表仍未在期限內顯示已繳交保證金`
+      : `到了 ${formatDate(task.date)}「${task.equipment}」考試的前一天，對帳表仍顯示未繳交該項器材保證金`
     : `超過個別考試時間 5 分鐘仍未完成到場點名`;
   const heading = examiner ? '【考生資格取消】' : '【本次考試資格取消】';
   const audience = examiner ? `${student.name} 因${reasonText}，已取消本次 ${task.equipment} 考試資格。` : `${student.name}你好，因${reasonText}，已取消本次 ${task.equipment} 考試資格。`;
@@ -1789,6 +1792,37 @@ function configuredDepositDeadline() {
   return dateAtTaipeiMidnight(value);
 }
 
+const DEFAULT_DEPOSIT_GRACE_STUDENT_NUMBERS = ['112000221', '112405217', '113405064'];
+
+function depositGraceStudentNumbers() {
+  return new Set(String(process.env.EXTERNAL_DEPOSIT_GRACE_STUDENT_NUMBERS || DEFAULT_DEPOSIT_GRACE_STUDENT_NUMBERS.join(','))
+    .split(/[,，、\s]+/).map(norm).filter(Boolean));
+}
+
+function depositGraceDeadlineFor(student) {
+  const number = norm(student?.number);
+  if (!number || !depositGraceStudentNumbers().has(number)) return null;
+  const raw = String(process.env.EXTERNAL_DEPOSIT_GRACE_DEADLINE || '2026-10-12T18:00:00+08:00').trim();
+  const deadline = new Date(raw);
+  return Number.isNaN(deadline.getTime()) ? null : deadline;
+}
+
+function depositGraceLabel(student) {
+  const deadline = depositGraceDeadlineFor(student);
+  return deadline ? Utilities.formatDate(deadline, Session.getScriptTimeZone(), 'MM/dd HH:mm') : '';
+}
+
+function depositGracePaidKey(student, deadline = depositGraceDeadlineFor(student)) {
+  return deadline ? `DEPOSIT-GRACE-PAID:${depositPersonKey(student)}:${deadline.toISOString()}` : '';
+}
+
+function depositPaidWithinGrace(record, student, now, logged = new Set()) {
+  if (!record?.paid) return false;
+  const deadline = depositGraceDeadlineFor(student);
+  if (!deadline) return true;
+  return now <= deadline || logged.has(depositGracePaidKey(student, deadline));
+}
+
 function registrationForStudent(student, registrations = registrationRows()) {
   const number = norm(student?.number);
   if (number) return registrations.find(item => norm(item.number) === number) || null;
@@ -1859,9 +1893,19 @@ function depositPolicyNotice(task, student, options = {}) {
     const form = retestForm(task);
     return `🚫 已超過個別考試時間 5 分鐘未到，取消本次資格。${form.label ? `若要再考，須報名${form.label}；該次補考保證金不退費。` : ''}`;
   }
-  if (operator === '保證金未繳') return '🚫 到考試前一天仍未繳交本項保證金，已取消本次考試資格。';
+  if (operator === '保證金未繳') {
+    const graceLabel = depositGraceLabel(student);
+    return graceLabel
+      ? `🚫 到 ${graceLabel} 仍未繳交保證金，已取消本次考試資格。`
+      : '🚫 到考試前一天仍未繳交本項保證金，已取消本次考試資格。';
+  }
   if (policy.late) return `⚠️ 已在 ${formatDate(policy.deadline)} 截止後繳費：本次仍可考試，但即使通過，保證金也不退費。`;
-  if (!policy.paid && !policy.unknown) return '⏳ 對帳表尚未顯示已繳保證金；若到考試前一天仍未繳交，將取消本項考試資格。';
+  if (!policy.paid && !policy.unknown) {
+    const graceLabel = depositGraceLabel(student);
+    return graceLabel
+      ? `⏳ 對帳表尚未顯示已繳保證金；本次寬限至 ${graceLabel}，期限前繳交仍可考試，逾時未繳才會取消資格。`
+      : '⏳ 對帳表尚未顯示已繳保證金；若到考試前一天仍未繳交，將取消本項考試資格。';
+  }
   return '';
 }
 
@@ -1930,7 +1974,10 @@ function earliestInitialExams() {
 }
 
 function depositReminderText(kind, task, student, deadline) {
-  const consequence = '若到了某項器材考試的前一天仍未繳交，才會取消該項器材的考試資格；不會連帶取消其他器材。';
+  const graceLabel = depositGraceLabel(student);
+  const consequence = graceLabel
+    ? `本次繳費資格寬限至 ${graceLabel}；期限前完成繳費仍可考試，逾時未繳才會取消考試資格。因已超過原繳費期限，即使通過，保證金也不退費。`
+    : '若到了某項器材考試的前一天仍未繳交，才會取消該項器材的考試資格；不會連帶取消其他器材。';
   if (kind === 'start') return `【保證金繳費提醒】\n${student.name}你好，保證金繳費提醒自 9/28 開始。目前對帳表顯示你尚未繳交。\n\n報名項目：${student.equipment.join('、')}\n應繳保證金：${student.equipment.length * 50} 元\n繳費期限：${formatDate(deadline)}\n\n若已繳費但對帳表尚未更新，請稍後再確認。${consequence}`;
   if (kind === 'deadline') return `【考試保證金期限提醒】\n${student.name}你好，目前對帳表仍顯示尚未繳交考試保證金。\n\n繳費期限：${formatDate(deadline)}\n最早考試：${formatDate(task.date)} ${formatTime(student.scheduledStart || task.start)}｜${task.equipment}\n\n請儘快完成繳費。${consequence}`;
   if (kind === 'overdue') return `【保證金逾期提醒】\n${student.name}你好，對帳表目前仍顯示尚未繳交，且已超過 ${formatDate(deadline)} 的繳費期限。\n\n報名項目：${student.equipment.join('、')}\n應繳保證金：${student.equipment.length * 50} 元\n\n目前不會一次取消全部考試資格。${consequence}\n如仍需參加考試，請儘快完成繳費並確認對帳表已更新。`;
@@ -2021,13 +2068,16 @@ function restorePaidDepositCancellations(records, logSheet, logged, now) {
     for (const student of studentsFor(task.id, { includeDisqualified: true })) {
       if (student.attendance !== '取消資格' || operatorByRecord.get(`${task.id}:${student.id}`) !== '保證金未繳') continue;
       const record = depositRecordFor(student, '考試', records);
-      if (!record?.paid) continue;
+      const graceDeadline = depositGraceDeadlineFor(student);
+      const graceIsActive = Boolean(graceDeadline && now <= graceDeadline);
+      if (!graceIsActive && !depositPaidWithinGrace(record, student, now, logged)) continue;
       const key = `DEPOSIT-RESTORE:${task.id}:${student.id}`;
       if (logged.has(key)) continue;
       updateStudent(student, '未點名', '未記錄');
-      upsertAttendance(task, student, '保證金已確認', 'SYSTEM');
+      student.attendance = '未點名';
+      upsertAttendance(task, student, record?.paid ? '保證金已確認' : '保證金繳費寬限', 'SYSTEM');
       setScheduleStudentStrikethrough(task, student, false);
-      logDepositAction(logSheet, key, '恢復資格', student, task, now, '已繳交');
+      logDepositAction(logSheet, key, '恢復資格', student, task, now, record?.paid ? '已繳交' : `寬限至 ${depositGraceLabel(student)}`);
       logged.add(key); restored++;
     }
   }
@@ -2081,6 +2131,20 @@ function processDepositRequirements(now = new Date()) {
   const taskStudents = new Map(activeInitialTasks.map(task => [task.id, studentsFor(task.id, { includeDisqualified: true })]));
   let reminders = 0, canceled = 0;
 
+  // Remember that the checkbox was already TRUE before the one-time grace
+  // deadline. This prevents a payment first made after the cutoff from
+  // restoring an expired qualification.
+  for (const registration of registrations) {
+    const graceDeadline = depositGraceDeadlineFor(registration);
+    if (!graceDeadline || now > graceDeadline) continue;
+    const record = depositRecordFor(registration, '考試', records);
+    if (!record?.paid) continue;
+    const key = depositGracePaidKey(registration, graceDeadline);
+    if (logged.has(key)) continue;
+    logDepositAction(logSheet, key, '寬限期限內繳費', registration, null, now, '保留考試資格／逾原期限不退費');
+    logged.add(key);
+  }
+
   for (const registration of registrations) {
     const personDeadline = depositDeadlineFor(registration, deadline);
     const record = depositRecordFor(registration, '考試', records);
@@ -2090,9 +2154,15 @@ function processDepositRequirements(now = new Date()) {
       logged.add(forfeitKey);
     }
     if (!record?.paid || !depositPaymentWasLate(record, personDeadline, logged, registration)) continue;
+    const graceDeadline = depositGraceDeadlineFor(registration);
+    const paidWithinGrace = depositPaidWithinGrace(record, registration, now, logged);
+    if (graceDeadline && !paidWithinGrace) continue;
     const noticeKey = `DEPOSIT-LATE-PAID-NOTICE:${depositPersonKey(registration)}:${taipeiDate(personDeadline)}`;
     const studentUserId = userIdForName(registration.name, registration.number);
-    if (studentUserId && !logged.has(noticeKey) && !pendingReminderKeys.has(noticeKey) && queuePush(studentUserId, reply(`【逾期繳交保證金通知】\n${displayRegistrationName(registration.name)}你好，對帳表已確認收到你的保證金。\n\n你是在 ${formatDate(personDeadline)} 截止後完成繳費；只要是在各項考試前一天以前繳交，該項考試資格仍保留，但即使考試通過，這筆保證金也不退費。`), {
+    const eligibilityText = graceDeadline
+      ? `你是在 ${formatDate(personDeadline)} 原期限後、${depositGraceLabel(registration)} 寬限期限內完成繳費；考試資格仍保留，但即使考試通過，這筆保證金也不退費。`
+      : `你是在 ${formatDate(personDeadline)} 截止後完成繳費；只要是在各項考試前一天以前繳交，該項考試資格仍保留，但即使考試通過，這筆保證金也不退費。`;
+    if (studentUserId && !logged.has(noticeKey) && !pendingReminderKeys.has(noticeKey) && queuePush(studentUserId, reply(`【逾期繳交保證金通知】\n${displayRegistrationName(registration.name)}你好，對帳表已確認收到你的保證金。\n\n${eligibilityText}`), {
       key: noticeKey,
       onSuccess: () => logDepositAction(logSheet, noticeKey, '逾期繳費通知', registration, null, now, '已送／不可退費')
     })) reminders++;
@@ -2105,7 +2175,10 @@ function processDepositRequirements(now = new Date()) {
       const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
       const examinerKey = `DEPOSIT-LATE-PAID-EXAMINER:${task.id}:${student.id}:${examinerUserId}`;
       if (!examinerUserId || logged.has(examinerKey) || pendingReminderKeys.has(examinerKey)) continue;
-      if (queuePush(examinerUserId, reply(`【考生保證金狀態更新】\n${student.name} 已在截止日後補繳 ${task.equipment} 考試保證金，且於本項考試前一天以前完成，因此仍可參加考試。\n\n⚠️ 即使考試通過，該筆保證金也不退費；點名與評分卡會持續顯示此狀態。`), {
+      const examinerEligibility = graceDeadline
+        ? `且於 ${depositGraceLabel(registration)} 寬限期限內完成`
+        : '且於本項考試前一天以前完成';
+      if (queuePush(examinerUserId, reply(`【考生保證金狀態更新】\n${student.name} 已在截止日後補繳 ${task.equipment} 考試保證金，${examinerEligibility}，因此仍可參加考試。\n\n⚠️ 即使考試通過，該筆保證金也不退費；點名與評分卡會持續顯示此狀態。`), {
         key: examinerKey,
         onSuccess: () => logDepositAction(logSheet, examinerKey, '逾期繳費通知考官', student, task, now, '已送／可考但不退費')
       })) reminders++;
@@ -2184,13 +2257,14 @@ function processDepositRequirements(now = new Date()) {
       }
       const registration = registrationFor(student);
       const start = studentTaskStart(task, student);
-      const cancellationDate = start ? dateAtTaipeiMidnight(dayBeforeDate(start)) : null;
+      const cancellationDate = depositGraceDeadlineFor(student)
+        || (start ? dateAtTaipeiMidnight(dayBeforeDate(start)) : null);
       if (!registration || !registrationCoversTask(registration, task) || !cancellationDate
         || now < cancellationDate || student.attendance !== '未點名') continue;
       const record = depositRecordFor(student, '考試', records);
       // The checkbox is authoritative: TRUE means paid even when the optional
       // processing-date cell is blank.
-      if (record?.paid) continue;
+      if (depositPaidWithinGrace(record, student, now, logged)) continue;
       const key = `DEPOSIT-CANCEL:${task.id}:${student.id}`;
       if (logged.has(key)) continue;
       updateStudent(student, '取消資格', '不適用');
@@ -2334,4 +2408,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositGraceDeadlineFor, depositGracePaidKey, depositPaidWithinGrace, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };

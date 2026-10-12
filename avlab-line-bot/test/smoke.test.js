@@ -1235,6 +1235,61 @@ test('registration parser identifies Houban film students from the latest course
   assert.equal(externalTeaching._test.dateKey(externalTeaching._test.depositDeadlineFor(registrations[1], new Date('2026-10-09T00:00:00+08:00'))), '2026-10-09');
 });
 
+test('the three remaining unpaid students keep eligibility through 10/12 18:00 only', () => {
+  const graceStudent = { name: '李庭頤', number: '112405217', equipment: ['錄放影機'] };
+  const deadline = externalTeaching._test.depositGraceDeadlineFor(graceStudent);
+  assert.equal(deadline.toISOString(), '2026-10-12T10:00:00.000Z');
+  assert.equal(externalTeaching._test.depositGraceDeadlineFor({ number: '1001' }), null);
+  assert.equal(externalTeaching._test.depositPaidWithinGrace({ paid: true }, graceStudent, new Date('2026-10-12T17:59:00+08:00')), true);
+  assert.equal(externalTeaching._test.depositPaidWithinGrace({ paid: true }, graceStudent, new Date('2026-10-12T18:01:00+08:00')), false);
+  const paidKey = externalTeaching._test.depositGracePaidKey(graceStudent, deadline);
+  assert.equal(externalTeaching._test.depositPaidWithinGrace({ paid: true }, graceStudent, new Date('2026-10-12T18:01:00+08:00'), new Set([paidKey])), true);
+  const notice = externalTeaching._test.depositReminderText('overdue', null, graceStudent, new Date('2026-10-09T00:00:00+08:00'));
+  assert.match(notice, /10\/12 18:00/);
+  assert.match(notice, /期限前完成繳費仍可考試/);
+  assert.match(notice, /即使通過，保證金也不退費/);
+});
+
+test('grace students are canceled at 10/12 18:00 only when the paid checkbox is still false', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  try {
+    const resultBook = isolated.openById(ids.externalResults);
+    const tasks = resultBook.insertSheet('對外任務');
+    tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','考官','考官LINE User ID','群組ID','狀態']);
+    tasks.appendRow(['GRACE-TASK','1151','考試',new Date('2026-10-19'),'18:00','19:00','H6','401','考官甲','','','已排定',true,true,'','','考試週分班表I','C3:C4']);
+    const students = resultBook.insertSheet('任務學生');
+    students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間','個別開始時間','個別結束時間','提醒時間','來源儲存格']);
+    students.appendRow(['GRACE-TASK','GRACE-UNPAID','黃家賢','113405064',1,'未點名','未記錄','','18:00','18:15','','C3']);
+    students.appendRow(['GRACE-TASK','GRACE-PAID','李庭頤','112405217',2,'未點名','未記錄','','18:15','18:30','','C4']);
+    resultBook.insertSheet('LINE點名紀錄');
+    resultBook.insertSheet('LINE群組設定');
+    const deposits = isolated.openById(ids.deposit).insertSheet('考試週保證金');
+    deposits.appendRow(['姓名','系級','學號','報名考試項目','總共項數','保證金總額','已繳交','繳交金額','處理日期／助理']);
+    deposits.appendRow(['說明']); deposits.appendRow(['範例']);
+    deposits.appendRow(['黃家賢','','113405064','H6',1,50,false,'','']);
+    deposits.appendRow(['李庭頤','','112405217','H6',1,50,true,50,'']);
+    const registration = isolated.openById(ids.externalRegistration).insertSheet('表單回覆 1');
+    const header = Array(21).fill(''); Object.assign(header, { 0: '時間戳記', 4: '姓名', 6: '學號', 20: 'H6考試' });
+    const unpaid = Array(21).fill(''); Object.assign(unpaid, { 0: '2026/9/20 09:00:00', 4: '黃家賢', 6: '113405064', 20: true });
+    const paid = Array(21).fill(''); Object.assign(paid, { 0: '2026/9/20 09:01:00', 4: '李庭頤', 6: '112405217', 20: true });
+    registration.appendRow(header); registration.appendRow(unpaid); registration.appendRow(paid);
+    const schedule = isolated.openById(ids.externalClassSchedule).insertSheet('考試週分班表I');
+    schedule.getRange(3, 3, 2, 1).setValues([['黃家賢'], ['李庭頤']]);
+    const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
+    bindings.appendRow(['LINE User ID','姓名','綁定時間','學號']);
+
+    const before = externalTeaching._test.processDepositRequirements(new Date('2026-10-12T17:59:00+08:00'));
+    assert.equal(before.canceled, 0);
+    const atCutoff = externalTeaching._test.processDepositRequirements(new Date('2026-10-12T18:00:00+08:00'));
+    assert.equal(atCutoff.canceled, 1);
+    assert.equal(students.getRange(2, 6).getValue(), '取消資格');
+    assert.equal(students.getRange(3, 6).getValue(), '未點名');
+  } finally {
+    installGlobals(runtime);
+  }
+});
+
 test('Houban film deadline requires its checkbox or legacy course value to be selected', () => {
   const rows = [
     ['時間戳記', '姓名', '學號', '請勾選本學期所選之課程', '侯志欽影像製作', 'H6考試'],
@@ -1675,6 +1730,23 @@ test('exam assignments propagate merged date headers and choose the correct exam
   assert.deepEqual(tasks[1].students.map(student => student.name), ['學生乙', '學生丙']);
   assert.deepEqual(tasks[1].students.map(student => student.scheduledStart), ['12:05', '12:20']);
   assert.equal(tasks[0].date.getFullYear(), 2027);
+});
+
+test('exam assignments inherit a merged equipment heading in a populated continuation column', () => {
+  const rows = [
+    ['', '', '考試週'], ['一般器材', '燈光器材', '10/12（一）', ''], ['項目', '', 'H6', ''],
+    ['地點', '', '影音實驗室', '417'], ['考官', '', '賈茹茵', '賈茹茵'],
+    ['18:05-18:20', '18:05-18:15', '學生甲', ''], ['19:05-19:20', '18:50-19:00', '', '林䒕彤'],
+    ['20:25-20:40', '19:50-20:00', '', '黃家賢']
+  ];
+  const tasks = parseExamSheet(rows, '考試週分班表I', '1151');
+  assert.equal(tasks.length, 2);
+  assert.equal(tasks[1].equipment, 'H6');
+  assert.equal(tasks[1].location, '417');
+  assert.equal(tasks[1].examiner, '賈茹茵');
+  assert.deepEqual(tasks[1].students.map(student => [student.name, student.scheduledStart]), [
+    ['林䒕彤', '19:05'], ['黃家賢', '20:25']
+  ]);
 });
 
 test('early film-production exam sheet is included in external tasks', () => {
