@@ -1732,7 +1732,7 @@ test('exam assignments propagate merged date headers and choose the correct exam
   assert.equal(tasks[0].date.getFullYear(), 2027);
 });
 
-test('exam assignments inherit a merged equipment heading in a populated continuation column', () => {
+test('exam assignments merge a continued equipment heading for the same examiner', () => {
   const rows = [
     ['', '', '考試週'], ['一般器材', '燈光器材', '10/12（一）', ''], ['項目', '', 'H6', ''],
     ['地點', '', '影音實驗室', '417'], ['考官', '', '賈茹茵', '賈茹茵'],
@@ -1740,12 +1740,13 @@ test('exam assignments inherit a merged equipment heading in a populated continu
     ['20:25-20:40', '19:50-20:00', '', '黃家賢']
   ];
   const tasks = parseExamSheet(rows, '考試週分班表I', '1151');
-  assert.equal(tasks.length, 2);
-  assert.equal(tasks[1].equipment, 'H6');
-  assert.equal(tasks[1].location, '417');
-  assert.equal(tasks[1].examiner, '賈茹茵');
-  assert.deepEqual(tasks[1].students.map(student => [student.name, student.scheduledStart]), [
-    ['林䒕彤', '19:05'], ['黃家賢', '20:25']
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].equipment, 'H6');
+  assert.equal(tasks[0].location, '影音實驗室／417');
+  assert.equal(tasks[0].examiner, '賈茹茵');
+  assert.equal(tasks[0].sourceRange, 'C3:D8');
+  assert.deepEqual(tasks[0].students.map(student => [student.name, student.scheduledStart]), [
+    ['學生甲', '18:05'], ['林䒕彤', '19:05'], ['黃家賢', '20:25']
   ]);
 });
 

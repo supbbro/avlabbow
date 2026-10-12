@@ -149,10 +149,13 @@ function parseExamSheet(data, sheetName, term) {
   const tasks = [];
   for (let block = 0; block < itemRows.length; block++) {
     const itemRow = itemRows[block], studentStart = itemRow + 3, endRow = itemRows[block + 1] ?? data.length;
-    let carriedEquipment = '', carriedEquipmentDate = null;
+    let carriedEquipment = '', carriedEquipmentDate = null, carriedTask = null;
     for (let column = 2; column < width; column++) {
       const examiner = data[itemRow + 2]?.[column], date = dateHeaders[column];
-      if (!date || !carriedEquipmentDate || carriedEquipmentDate.getTime() !== date.getTime()) carriedEquipment = '';
+      if (!date || !carriedEquipmentDate || carriedEquipmentDate.getTime() !== date.getTime()) {
+        carriedEquipment = '';
+        carriedTask = null;
+      }
       const explicitEquipment = text(data[itemRow]?.[column]);
       if (explicitEquipment) {
         carriedEquipment = explicitEquipment;
@@ -175,7 +178,32 @@ function parseExamSheet(data, sheetName, term) {
         const studentTime = parseTimeRange(data[row]?.[timeColumn]) || time;
         students.push({ name: data[row][column], start: studentTime.start, end: studentTime.end, sourceCell: `${columnName(column)}${row + 1}` });
       }
-      tasks.push(makeTask({ term, sheetName, itemRow, column, phase: phaseForSheet(sheetName), date, time, equipment, location: data[itemRow + 1]?.[column], examiner, students }));
+      const task = makeTask({ term, sheetName, itemRow, column, phase: phaseForSheet(sheetName), date, time, equipment, location: data[itemRow + 1]?.[column], examiner, students });
+      const mergeWithCarried = !explicitEquipment && carriedTask
+        && carriedTask.date.getTime() === date.getTime()
+        && text(carriedTask.equipment) === text(equipment)
+        && normalizeName(carriedTask.examiner) === normalizeName(examiner);
+      if (mergeWithCarried) {
+        if (task.location && task.location !== carriedTask.location) {
+          carriedTask.location = [...new Set([carriedTask.location, task.location].filter(Boolean))].join('／');
+        }
+        const seen = new Set(carriedTask.students.map(student => `${normalizeName(student.name)}|${text(student.number)}`));
+        for (const student of task.students) {
+          const identity = `${normalizeName(student.name)}|${text(student.number)}`;
+          if (seen.has(identity)) continue;
+          seen.add(identity);
+          student.id = `STU-${shortHash(`${carriedTask.id}|${identity}`)}`;
+          carriedTask.students.push(student);
+        }
+        carriedTask.students.sort((a, b) => text(a.scheduledStart).localeCompare(text(b.scheduledStart)));
+        carriedTask.students.forEach((student, index) => { student.order = index + 1; });
+        const firstCell = carriedTask.sourceRange.match(/^([A-Z]+\d+)/)?.[1] || `${columnName(column)}${itemRow + 1}`;
+        const lastRow = Math.max(itemRow + 1, ...carriedTask.students.map(student => Number(student.sourceCell.match(/\d+/)?.[0] || 0)));
+        carriedTask.sourceRange = `${firstCell}:${columnName(column)}${lastRow}`;
+      } else {
+        tasks.push(task);
+        carriedTask = task;
+      }
     }
   }
   return tasks;
