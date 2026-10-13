@@ -1695,7 +1695,8 @@ function oralRetestMenu(context, page = 1) {
     text: `${candidate.equipment}｜${candidate.number || '無學號'}\n簡答題待補考`.slice(0, 60),
     actions: [
       { type: 'postback', label: '簡答題通過', data: `簡答補考登記 ${oralRetestRecordId(candidate)} 通過` },
-      { type: 'postback', label: '簡答題未通過', data: `簡答補考登記 ${oralRetestRecordId(candidate)} 未通過` }
+      { type: 'postback', label: '簡答題未通過', data: `簡答補考登記 ${oralRetestRecordId(candidate)} 未通過` },
+      { type: 'uri', label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL }
     ]
   }));
   const nav = [];

@@ -1147,7 +1147,9 @@ test('assistant can grade failed external oral retest by student and equipment',
   const card = menu.lineMessage.template.columns.find(item => item.title === '口試學生');
   assert.ok(card);
   assert.match(card.text, /H6/);
-  assert.deepEqual(card.actions.map(item => item.label), ['簡答題通過', '簡答題未通過']);
+  assert.deepEqual(card.actions.map(item => item.label), ['簡答題通過', '簡答題未通過', '📚 合併版題庫']);
+  assert.equal(card.actions[2].type, 'uri');
+  assert.equal(card.actions[2].uri, 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X');
   const fail = externalTeaching.handleCommand(card.actions[1].data, assistant);
   assert.match(fail.text, /簡答題：未通過/);
   const passed = externalTeaching.handleCommand(card.actions[0].data, assistant);
