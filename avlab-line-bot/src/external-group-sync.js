@@ -5,11 +5,15 @@ const LOG_SHEET = 'LINE點名紀錄';
 const CURRENT_COURSE_COLUMNS = [0, 4, 9, 14, 19];
 const PASS = '通過';
 const RETEST = '要補考';
+const RECENT_PASS = '新通過';
+const RECENT_RETEST = '新待補考';
 const DEPOSIT_DISQUALIFIED = '保證金未繳';
 const DEPOSIT_RESTORED = '保證金已確認';
 const COLORS = {
   [PASS]: { red: 0.7137255, green: 0.84313726, blue: 0.65882355 },
   [RETEST]: { red: 0.9764706, green: 0.79607844, blue: 0.6117647 },
+  [RECENT_PASS]: { red: 0.5764706, green: 0.76862746, blue: 0.49019608 },
+  [RECENT_RETEST]: { red: 0.9647059, green: 0.69803923, blue: 0.41960785 },
   [DEPOSIT_DISQUALIFIED]: { red: 0.9764706, green: 0.79607844, blue: 0.6117647 },
   [DEPOSIT_RESTORED]: { red: 1, green: 1, blue: 1 }
 };
@@ -24,6 +28,25 @@ const personKey = person => compactStudentId(person.studentId)
   ? `ID:${compactStudentId(person.studentId)}`
   : `NAME:${compact(person.name)}`;
 const membershipKey = member => `${personKey(member)}|${compact(member.course)}|${compact(member.group)}`;
+
+function taipeiTimestamp(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getTime();
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.round((value - 25569) * 86400000);
+  const raw = text(value).replace(/^更新日期\s*[:：]\s*/u, '');
+  if (!raw || /都更新完了|尚未更新/u.test(raw)) return 0;
+  const yearFirst = raw.match(/(\d{4})\s*[\/-]\s*(\d{1,2})\s*[\/-]\s*(\d{1,2})(?:\s+|T)?(\d{1,2})?\s*:?\s*(\d{2})?\s*:?\s*(\d{2})?/u);
+  const monthFirst = raw.match(/(\d{1,2})\s*[\/-]\s*(\d{1,2})\s*[\/-]\s*(\d{4})(?:\s+|T)?(\d{1,2})?\s*:?\s*(\d{2})?\s*:?\s*(\d{2})?/u);
+  const match = yearFirst || monthFirst;
+  if (!match) return 0;
+  const year = Number(yearFirst ? match[1] : match[3]);
+  const month = Number(yearFirst ? match[2] : match[1]);
+  const day = Number(yearFirst ? match[3] : match[2]);
+  let hour = Number(match[4] || 0);
+  const minute = Number(match[5] || 0), second = Number(match[6] || 0);
+  if (/(?:下午|PM)/iu.test(raw) && hour < 12) hour += 12;
+  if (/(?:上午|AM)/iu.test(raw) && hour === 12) hour = 0;
+  return Date.UTC(year, month - 1, day, hour - 8, minute, second);
+}
 
 function canonicalEquipment(value) {
   const key = compact(value).replace(/(?:考試|教學)$/u, '');
@@ -119,7 +142,7 @@ function parseRosterGroups(rows) {
   return groups.filter(group => group.members.length);
 }
 
-function outcomeMap(logRows) {
+function outcomeRecordMap(logRows) {
   const outcomes = new Map();
   for (const row of logRows.slice(1)) {
     if (!text(row[0]) || text(row[0]).startsWith('_TEMPLATE')) continue;
@@ -153,9 +176,13 @@ function outcomeMap(logRows) {
     }
     if (!status) continue;
     // LINE 點名紀錄以後寫入的決定性結果為準，讓考官修正後能立即覆蓋舊顏色。
-    outcomes.set(key, status);
+    outcomes.set(key, { status, recordedAt: taipeiTimestamp(row[15]) });
   }
   return outcomes;
+}
+
+function outcomeMap(logRows) {
+  return new Map([...outcomeRecordMap(logRows)].map(([key, record]) => [key, record.status]));
 }
 
 function courseMatches(selectedCourse, course) {
@@ -253,7 +280,9 @@ function planMatrix(rosterRows, matrixRows, logRows) {
 }
 
 function planCertificationColors(matrixRows, logRows) {
-  const outcomes = outcomeMap(logRows);
+  const outcomeRecords = outcomeRecordMap(logRows);
+  const outcomes = new Map([...outcomeRecords].map(([key, record]) => [key, record.status]));
+  const acknowledgedAt = taipeiTimestamp(matrixRows[1]?.[3]);
   const headerKeys = (matrixRows[0] || []).map(headerEquipmentKey);
   const updates = [];
   for (let rowIndex = 2; rowIndex < matrixRows.length; rowIndex++) {
@@ -262,12 +291,19 @@ function planCertificationColors(matrixRows, logRows) {
     for (let column = 5; column < headerKeys.length; column++) {
       const equipment = headerKeys[column];
       if (!equipment) continue;
-      const status = outcomes.get(`${compact(name)}|${equipment}`);
-      if (!status) continue;
-      updates.push({ rowIndex, column, name, equipment, status: status === DEPOSIT_DISQUALIFIED ? RETEST : status });
+      const record = outcomeRecords.get(`${compact(name)}|${equipment}`);
+      if (!record) continue;
+      const status = record.status === DEPOSIT_DISQUALIFIED ? RETEST : record.status;
+      const recent = Boolean(
+        (status === PASS || status === RETEST)
+        && acknowledgedAt
+        && record.recordedAt > acknowledgedAt
+      );
+      const colorStatus = recent ? (status === PASS ? RECENT_PASS : RECENT_RETEST) : status;
+      updates.push({ rowIndex, column, name, equipment, status, recent, colorStatus, recordedAt: record.recordedAt });
     }
   }
-  return { outcomes, updates };
+  return { acknowledgedAt, outcomes, updates };
 }
 
 function quoted(name) { return `'${String(name).replaceAll("'", "''")}'`; }
@@ -286,23 +322,23 @@ async function syncExternalCertificationColors(api, spreadsheetId) {
   const appliedAfterSuccess = [];
   for (const update of plan.updates) {
     const cacheKey = `color-only|${spreadsheetId}|${update.rowIndex}|${update.column}`;
-    if (lastApplied.get(cacheKey) === update.status) continue;
+    if (lastApplied.get(cacheKey) === update.colorStatus) continue;
     requests.push({ repeatCell: {
       range: { sheetId: matrixSheetId, startRowIndex: update.rowIndex, endRowIndex: update.rowIndex + 1, startColumnIndex: update.column, endColumnIndex: update.column + 1 },
       cell: { userEnteredFormat: {
-        backgroundColorStyle: { rgbColor: COLORS[update.status] },
+        backgroundColorStyle: { rgbColor: COLORS[update.colorStatus] },
         textFormat: { strikethrough: false }
       } },
       fields: 'userEnteredFormat.backgroundColorStyle,userEnteredFormat.textFormat.strikethrough'
     } });
-    appliedAfterSuccess.push([cacheKey, update.status]);
+    appliedAfterSuccess.push([cacheKey, update.colorStatus]);
   }
   if (requests.length) await api.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } });
   for (const [cacheKey, status] of appliedAfterSuccess) lastApplied.set(cacheKey, status);
-  return { updated: requests.length, matched: plan.updates.length };
+  return { updated: requests.length, matched: plan.updates.length, recent: plan.updates.filter(update => update.recent).length };
 }
 
 module.exports = {
   syncExternalCertificationColors,
-  _test: { canonicalEquipment, logEquipmentKey, headerEquipmentKey, parseRosterGroups, outcomeMap, planMatrix, planCertificationColors }
+  _test: { canonicalEquipment, logEquipmentKey, headerEquipmentKey, parseRosterGroups, taipeiTimestamp, outcomeMap, planMatrix, planCertificationColors }
 };

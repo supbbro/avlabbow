@@ -1510,29 +1510,33 @@ test('group matrix sync derives green and retest colors from cumulative LINE rec
 test('certification colors use existing matrix rows only and follow the latest LINE result', () => {
   const matrix = [
     ['姓名', '系級', '學號', '課程', '帳號', '組別', 'H6考試', 'X160考試', '基礎配件課程'],
-    ['說明'],
+    ['說明', '', '', '更新日期：2026/10/15 12:00:00'],
     ['學生甲', '', '1001', '聲音藝術與錄音工程', '', '第一組'],
     ['學生乙', '', '1002', '聲音藝術與錄音工程', '', '第一組']
   ];
   const header = ['紀錄ID','任務ID','日期','開始時間','階段','器材','學生ID','學生姓名','學號','出席狀態','簡答題結果','上機結果','總結果','操作考官','考官LINE User ID','記錄時間','累計簡答題結果','累計上機結果','保證金狀態'];
-  const log = (id, phase, equipment, name, attendance, short, practical, total = '') => {
+  const log = (id, phase, equipment, name, attendance, short, practical, total = '', recordedAt = '') => {
     const row = Array(19).fill('');
-    Object.assign(row, { 0: id, 4: phase, 5: equipment, 7: name, 9: attendance, 10: short, 11: practical, 12: total, 16: short, 17: practical });
+    Object.assign(row, { 0: id, 4: phase, 5: equipment, 7: name, 9: attendance, 10: short, 11: practical, 12: total, 15: recordedAt, 16: short, 17: practical });
     return row;
   };
   const logs = [header,
-    log('1', '考試', 'H6', '學生甲', '到場', '通過', '通過', '全部通過'),
-    log('2', '考試', 'H6', '學生甲', '到場', '未通過', '未記錄', '未通過'),
-    log('3', '考試', 'X160', '學生乙', '取消資格', '未通過', '未記錄', '未通過'),
-    log('4', '教學', '基礎配件課程', '學生乙', '缺席', '不適用', '不適用', '不適用'),
-    log('5', '考試', 'H6', '不在認證表的人', '到場', '通過', '通過', '全部通過')
+    log('1', '考試', 'H6', '學生甲', '到場', '通過', '通過', '全部通過', '10/15/2026 11:00:00'),
+    log('2', '考試', 'H6', '學生甲', '到場', '未通過', '未記錄', '未通過', '10/15/2026 13:00:00'),
+    log('3', '考試', 'X160', '學生乙', '取消資格', '未通過', '未記錄', '未通過', '10/15/2026 11:30:00'),
+    log('4', '教學', '基礎配件課程', '學生乙', '缺席', '不適用', '不適用', '不適用', '10/15/2026 11:45:00'),
+    log('5', '考試', 'H6', '不在認證表的人', '到場', '通過', '通過', '全部通過', '10/15/2026 13:10:00'),
+    log('6', '考試', 'X160', '學生甲', '到場', '通過', '通過', '全部通過', '10/15/2026 12:30:00')
   ];
   const plan = externalGroupSync._test.planCertificationColors(matrix, logs);
-  assert.deepEqual(plan.updates.map(update => [update.name, update.equipment, update.status]), [
-    ['學生甲', 'H6', '要補考'],
-    ['學生乙', 'X160', '要補考'],
-    ['學生乙', '基礎配件課程', '要補考']
+  assert.deepEqual(plan.updates.map(update => [update.name, update.equipment, update.status, update.recent, update.colorStatus]), [
+    ['學生甲', 'H6', '要補考', true, '新待補考'],
+    ['學生甲', 'X160', '通過', true, '新通過'],
+    ['學生乙', 'X160', '要補考', false, '要補考'],
+    ['學生乙', '基礎配件課程', '要補考', false, '要補考']
   ]);
+  matrix[1][3] = '更新日期：2026/10/15 14:00:00';
+  assert.equal(externalGroupSync._test.planCertificationColors(matrix, logs).updates.every(update => !update.recent), true);
 });
 
 test('group matrix sync reads the current five-column roster blocks and writes each stage group', () => {
