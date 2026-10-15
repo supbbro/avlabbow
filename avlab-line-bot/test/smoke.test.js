@@ -781,11 +781,12 @@ test('attendance correction applies the chosen status directly and returns to th
   assert.equal(cardActions(examCorrection).some(action => /簡答|上機/.test(action.label)), true);
 });
 
-test('exam arrival has a five-minute limit while teaching never auto-marks late', () => {
+test('exam arrival has a ten-minute limit while teaching never auto-marks late', () => {
   const date = new Date('2026-09-02T00:00:00+08:00');
   const student = { scheduledStart: '12:00' };
-  assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '考試', date, start: '12:00' }, student, new Date('2026-09-02T12:05:00+08:00')), '到場');
-  assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '考試', date, start: '12:00' }, student, new Date('2026-09-02T12:05:01+08:00')), '取消資格');
+  assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '考試', date, start: '12:00' }, student, new Date('2026-09-02T12:05:01+08:00')), '到場');
+  assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '考試', date, start: '12:00' }, student, new Date('2026-09-02T12:10:00+08:00')), '到場');
+  assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '考試', date, start: '12:00' }, student, new Date('2026-09-02T12:10:01+08:00')), '取消資格');
   assert.equal(externalTeaching._test.automaticArrivalStatus({ phase: '教學', date, start: '12:00' }, student, new Date('2026-09-02T13:15:01+08:00')), '到場');
   const teachingReminder = externalTeaching._test.studentReminderText(
     { phase: '教學', date, start: '12:00', end: '13:00', equipment: 'X160', location: '401' },
@@ -804,7 +805,7 @@ test('exam arrival has a five-minute limit while teaching never auto-marks late'
   assert.match(examReminder, /上機考：最多錯 3 題/);
 });
 
-test('an exam no-show after five minutes is canceled and both sides receive first-retest guidance', () => {
+test('an exam no-show after ten minutes is canceled and both sides receive first-retest guidance', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);
   try {
@@ -821,9 +822,9 @@ test('an exam no-show after five minutes is canceled and both sides receive firs
     bindings.appendRow(['U-NO-SHOW-STUDENT','逾時考生','','NO001','external']);
     bindings.appendRow(['U-NO-SHOW-EXAMINER','逾時考官','','','assistant']);
 
-    assert.equal(externalTeaching._test.expireExamQualifications(new Date('2026-10-06T12:05:01+08:00')), 1);
+    assert.equal(externalTeaching._test.expireExamQualifications(new Date('2026-10-06T12:10:01+08:00')), 1);
     assert.equal(students.getRange(2, 6).getValue(), '取消資格');
-    assert.equal(results.getSheetByName('LINE點名紀錄').getRange(2, 14).getValue(), '超過 5 分鐘未到');
+    assert.equal(results.getSheetByName('LINE點名紀錄').getRange(2, 14).getValue(), '超過 10 分鐘未到');
     const pushes = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload));
     assert.deepEqual(new Set(pushes.map(push => push.to)), new Set(['U-NO-SHOW-STUDENT', 'U-NO-SHOW-EXAMINER']));
     const studentPush = pushes.find(push => push.to === 'U-NO-SHOW-STUDENT');
@@ -831,7 +832,7 @@ test('an exam no-show after five minutes is canceled and both sides receive firs
     assert.match(studentPush.messages[0].text, /補考保證金不退費/);
     assert.match(studentPush.messages[0].text, /3be87wRzRBKvdkFb6/);
     isolated.httpOperations.forEach(operation => operation.options.onSuccess());
-    assert.equal(externalTeaching._test.expireExamQualifications(new Date('2026-10-06T12:06:00+08:00')), 0);
+    assert.equal(externalTeaching._test.expireExamQualifications(new Date('2026-10-06T12:11:00+08:00')), 0);
     assert.equal(isolated.httpOperations.length, 2);
   } finally {
     installGlobals(runtime);
@@ -958,7 +959,7 @@ test('a roster student can bind LINE and receives a retest form immediately afte
   const reminderPush = JSON.parse(runtime.httpOperations[0].options.payload);
   assert.equal(reminderPush.to, 'U-external-student-test');
   assert.match(reminderPush.messages[0].text, /13:00-13:15/);
-  assert.match(reminderPush.messages[0].text, /超過 5 分鐘/);
+  assert.match(reminderPush.messages[0].text, /超過 10 分鐘/);
 
   const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
   externalTeaching.handleCommand('開始點名 EXT-BIND-TEST', context);

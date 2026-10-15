@@ -13,6 +13,8 @@ const SHEETS = {
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '侯班影製提前考試週', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
 const REMINDER_LEAD_MINUTES = 60;
+const EXAM_ARRIVAL_GRACE_MINUTES = 10;
+const EXAM_ARRIVAL_TIMEOUT_OPERATOR = `超過 ${EXAM_ARRIVAL_GRACE_MINUTES} 分鐘未到`;
 const EXAM_PASSING_RULES = '【考試通過標準】\n• 簡答題：考制度 2 題＋器材 3 題，最多錯 1 題。\n• 上機考：最多錯 3 題。';
 const COMBINED_QUESTION_BANK_URL = 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X';
 const EXTERNAL_CLASS_SCHEDULE_URL = 'https://docs.google.com/spreadsheets/d/1oaEKt3JVxcdy8yPBGZAuRh3lkhnvRoIJ9rTNbj-Gh9I/edit?gid=0#gid=0';
@@ -101,6 +103,7 @@ function replaceExaminerName(value, originalName, substituteName) {
 }
 const isExam = task => task.phase !== '教學';
 const isTemplate = value => String(value || '').startsWith('_TEMPLATE');
+const isArrivalTimeoutOperator = value => [EXAM_ARRIVAL_TIMEOUT_OPERATOR, '超過 5 分鐘未到', '系統自動判定'].includes(String(value || ''));
 
 function sheet(name) {
   return SpreadsheetApp.openById(ids.externalResults).getSheetByName(name);
@@ -776,7 +779,7 @@ function automaticArrivalStatus(task, student, now = new Date()) {
   if (!isExam(task)) return '到場';
   const start = studentTaskStart(task, student);
   if (!start) return '到場';
-  if (now.getTime() <= start.getTime() + 5 * 60000) return '到場';
+  if (now.getTime() <= start.getTime() + EXAM_ARRIVAL_GRACE_MINUTES * 60000) return '到場';
   return '取消資格';
 }
 
@@ -854,7 +857,7 @@ function attendancePrompt(task, student, notice = '') {
     { label: '❌ 缺席', postback: `點名狀態 ${task.id} ${student.id} 缺席` }
   ];
   const rule = isExam(task)
-    ? '個別時段開始 5 分鐘後尚未點名，將取消考試資格。'
+    ? `個別時段開始 ${EXAM_ARRIVAL_GRACE_MINUTES} 分鐘後尚未點名，將取消考試資格。`
     : '教學週不依時間自動判定遲到；按下「學生已到」會記為到場。';
   return studentStateCard(task, student, {
     title: `${task.phase}點名`,
@@ -1041,7 +1044,7 @@ function upsertAttendance(task, student, operatorName, operatorId) {
   const shortFailed = shortEvaluated && !cumulativeShort;
   const disqualified = student.attendance === '取消資格';
   const disqualifiedReason = operatorName === '保證金未繳' ? '保證金未繳'
-    : operatorName === '超過 5 分鐘未到' ? '超過 5 分鐘未到'
+    : isArrivalTimeoutOperator(operatorName) ? (operatorName === '系統自動判定' ? EXAM_ARRIVAL_TIMEOUT_OPERATOR : operatorName)
       : '取消資格';
   const depositStatus = disqualified ? `不可退保證金（${disqualifiedReason}）`
     : shortEvaluated && (practicalEvaluated || shortFailed)
@@ -1209,7 +1212,7 @@ function correctAttendance(taskId, studentId, status, context) {
   if (!task || !student) return reply('找不到指定的任務或學生，請重新開啟任務。');
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
   const wasCompleted = task.status === '已完成';
-  if (isExam(task) && status === '未點名' && automaticArrivalStatus(task, student) === '取消資格') return reply('已超過個別考試時間 5 分鐘，不能改回未點名；若原點名有誤，請更正為到場或缺席。');
+  if (isExam(task) && status === '未點名' && automaticArrivalStatus(task, student) === '取消資格') return reply(`已超過個別考試時間 ${EXAM_ARRIVAL_GRACE_MINUTES} 分鐘，不能改回未點名；若原點名有誤，請更正為到場或缺席。`);
   if (student.attendance === '取消資格' && task.phase === '考試') {
     const record = sheet(SHEETS.attendance)?.getDataRange().getValues().find(row => row[0] === `${task.id}:${student.id}`);
     if (record?.[13] === '保證金未繳' && !depositRecordFor(student, '考試')?.paid) {
@@ -1304,7 +1307,7 @@ function recordAttendance(taskId, studentId, status, context) {
   const result = (!isExam(task) || ['請假', '缺席', '取消資格'].includes(status)) ? '不適用'
     : student.result === '不適用' ? '未記錄' : student.result;
   updateStudent(student, status, result);
-  upsertAttendance(task, student, status === '取消資格' ? '超過 5 分鐘未到' : permission.name, status === '取消資格' ? 'SYSTEM' : context.userId);
+  upsertAttendance(task, student, status === '取消資格' ? EXAM_ARRIVAL_TIMEOUT_OPERATOR : permission.name, status === '取消資格' ? 'SYSTEM' : context.userId);
   if (status === '取消資格') {
     setScheduleStudentStrikethrough(task, student, true);
     notifyNoShowCancellation(task, student, new Date());
@@ -1313,7 +1316,7 @@ function recordAttendance(taskId, studentId, status, context) {
   const students = studentsFor(task.id, { includeDisqualified: true });
   const allComplete = students.every(item => item.attendance !== '未點名' && (!isExam(task) || !['到場', '遲到'].includes(item.attendance) || examProgress(task, item).step === 'done'));
   if (allComplete) return finishAttendance(task.id, context, { completedStudentId: student.id });
-  const notice = status === '取消資格' ? `🚫 ${student.name} 已超過個別時段 5 分鐘，取消本次考試資格。` : `✅ 已登記 ${student.name}：${status}`;
+  const notice = status === '取消資格' ? `🚫 ${student.name} 已超過個別時段 ${EXAM_ARRIVAL_GRACE_MINUTES} 分鐘，取消本次考試資格。` : `✅ 已登記 ${student.name}：${status}`;
   return showStudent(task.id, student.id, context, notice);
 }
 
@@ -1602,7 +1605,7 @@ function qualificationCancellationMessage(task, student, reason, examiner = fals
     ? graceLabel
       ? `到了本次寬限期限 ${graceLabel}，對帳表仍未在期限內顯示已繳交保證金`
       : `到了 ${formatDate(task.date)}「${task.equipment}」考試的前一天，對帳表仍顯示未繳交該項器材保證金`
-    : `超過個別考試時間 5 分鐘仍未完成到場點名`;
+    : `超過個別考試時間 ${EXAM_ARRIVAL_GRACE_MINUTES} 分鐘仍未完成到場點名`;
   const heading = examiner ? '【考生資格取消】' : '【本次考試資格取消】';
   const audience = examiner ? `${student.name} 因${reasonText}，已取消本次 ${task.equipment} 考試資格。` : `${student.name}你好，因${reasonText}，已取消本次 ${task.equipment} 考試資格。`;
   return { text: `${heading}\n${audience}\n其他器材的考試資格不受影響。\n\n${guidance.text}`, form: guidance.form };
@@ -1741,7 +1744,7 @@ function studentRosterText(task) {
   const names = students.map(student => {
     const operator = operators.get(`${task.id}:${student.id}`) || '';
     if (student.attendance === '取消資格' && operator === '保證金未繳') return `${student.name}（取消：前一天未繳）`;
-    if (student.attendance === '取消資格' && ['超過 5 分鐘未到', '系統自動判定'].includes(operator)) return `${student.name}（取消：逾時未到）`;
+    if (student.attendance === '取消資格' && isArrivalTimeoutOperator(operator)) return `${student.name}（取消：逾時未到）`;
     const policy = depositRefundPolicy(task, student, { registrations, records, logged, operator });
     return policy.late ? `${student.name}（可考／保證金不退）` : student.name;
   });
@@ -1768,7 +1771,7 @@ function dayBeforeExaminerReminderText(task, roster = studentRosterText(task)) {
 function studentReminderText(task, student) {
   const time = `${formatTime(student.scheduledStart || task.start)}-${formatTime(student.scheduledEnd || task.end)}`;
   const attendanceRule = isExam(task)
-    ? '⚠️ 請依個別時間準時到場；超過 5 分鐘將取消本次考試資格。'
+    ? `⚠️ 請依個別時間準時到場；超過 ${EXAM_ARRIVAL_GRACE_MINUTES} 分鐘將取消本次考試資格。`
     : '⚠️ 請依個別時間準時到場。';
   const depositNotice = depositPolicyNotice(task, student);
   return `⏰ 你的對外${task.phase}將於 1 小時內開始\n\n👤 ${student.name}\n📅 ${formatDate(task.date)} ${time}\n📝 ${task.equipment}\n📍 ${task.location || '地點未填'}\n\n${attendanceRule}${depositNotice ? `\n\n${depositNotice}` : ''}${isExam(task) ? `\n\n${EXAM_PASSING_RULES}` : ''}`;
@@ -1877,8 +1880,8 @@ function depositRefundPolicy(task, student, options = {}) {
   const logged = options.logged || existingDepositLogKeys();
   const late = Boolean(record?.paid && deadline && depositPaymentWasLate(record, deadline, logged, student));
   const operator = student.attendance === '取消資格' ? (options.operator ?? attendanceOperatorFor(task, student)) : '';
-  if (operator === '超過 5 分鐘未到' || operator === '系統自動判定') {
-    return { refundable: false, reason: '不可退保證金（超過 5 分鐘未到）', paid: Boolean(record?.paid), late, deadline, registration };
+  if (isArrivalTimeoutOperator(operator)) {
+    return { refundable: false, reason: `不可退保證金（${operator === '系統自動判定' ? EXAM_ARRIVAL_TIMEOUT_OPERATOR : operator}）`, paid: Boolean(record?.paid), late, deadline, registration };
   }
   if (operator === '保證金未繳') {
     return { refundable: false, reason: '不可退保證金（考試前一天仍未繳）', paid: false, late, deadline, registration };
@@ -1892,9 +1895,10 @@ function depositPolicyNotice(task, student, options = {}) {
   if (!isExam(task)) return '';
   const policy = depositRefundPolicy(task, student, options);
   const operator = student.attendance === '取消資格' ? (options.operator ?? attendanceOperatorFor(task, student)) : '';
-  if (operator === '超過 5 分鐘未到' || operator === '系統自動判定') {
+  if (isArrivalTimeoutOperator(operator)) {
     const form = retestForm(task);
-    return `🚫 已超過個別考試時間 5 分鐘未到，取消本次資格。${form.label ? `若要再考，須報名${form.label}；該次補考保證金不退費。` : ''}`;
+    const grace = operator === '超過 5 分鐘未到' ? 5 : EXAM_ARRIVAL_GRACE_MINUTES;
+    return `🚫 已超過個別考試時間 ${grace} 分鐘未到，取消本次資格。${form.label ? `若要再考，須報名${form.label}；該次補考保證金不退費。` : ''}`;
   }
   if (operator === '保證金未繳') {
     const graceLabel = depositGraceLabel(student);
@@ -2282,7 +2286,7 @@ function processDepositRequirements(now = new Date()) {
 }
 
 function notifyNoShowCancellation(task, student, now = new Date(), logSheet = depositLogSheet(), logged = depositLogKeys(logSheet)) {
-  const studentMessage = qualificationCancellationMessage(task, student, '超過 5 分鐘未到');
+  const studentMessage = qualificationCancellationMessage(task, student, EXAM_ARRIVAL_TIMEOUT_OPERATOR);
   const studentUserId = userIdForName(student.name, student.number);
   const studentKey = `EXAM-NO-SHOW-STUDENT:${task.id}:${student.id}`;
   if (studentUserId && !logged.has(studentKey) && !pendingReminderKeys.has(studentKey)) {
@@ -2295,7 +2299,7 @@ function notifyNoShowCancellation(task, student, now = new Date(), logSheet = de
   const examinerUserId = userIdForName(task.examiner) || task.examinerUserId;
   const examinerKey = `EXAM-NO-SHOW-EXAMINER:${task.id}:${student.id}:${examinerUserId}`;
   if (examinerUserId && !logged.has(examinerKey) && !pendingReminderKeys.has(examinerKey)) {
-    const examinerMessage = qualificationCancellationMessage(task, student, '超過 5 分鐘未到', true);
+    const examinerMessage = qualificationCancellationMessage(task, student, EXAM_ARRIVAL_TIMEOUT_OPERATOR, true);
     queuePush(examinerUserId, reply(examinerMessage.text), {
       key: examinerKey,
       onSuccess: () => logDepositAction(logSheet, examinerKey, '逾時未到通知考官', student, task, now, '已送')
@@ -2312,14 +2316,14 @@ function expireExamQualifications(now = new Date()) {
   allTasks().filter(task => isExam(task) && ['已排定', '點名中'].includes(task.status)).forEach(task => {
     studentsFor(task.id, { includeDisqualified: true }).forEach(student => {
       const start = studentTaskStart(task, student);
-      if (!start || Utilities.formatDate(start, timezone, 'yyyy-MM-dd') !== today || now.getTime() <= start.getTime() + 5 * 60000) return;
+      if (!start || Utilities.formatDate(start, timezone, 'yyyy-MM-dd') !== today || now.getTime() <= start.getTime() + EXAM_ARRIVAL_GRACE_MINUTES * 60000) return;
       if (student.attendance === '未點名') {
         updateStudent(student, '取消資格', '不適用');
-        upsertAttendance(task, student, '超過 5 分鐘未到', 'SYSTEM');
+        upsertAttendance(task, student, EXAM_ARRIVAL_TIMEOUT_OPERATOR, 'SYSTEM');
         setScheduleStudentStrikethrough(task, student, true);
         expired++;
       }
-      if (student.attendance !== '取消資格' || !['超過 5 分鐘未到', '系統自動判定'].includes(attendanceOperatorFor(task, student))) return;
+      if (student.attendance !== '取消資格' || !isArrivalTimeoutOperator(attendanceOperatorFor(task, student))) return;
       notifyNoShowCancellation(task, student, now, logSheet, logged);
     });
   });
