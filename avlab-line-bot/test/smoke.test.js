@@ -1862,6 +1862,8 @@ test('external examiner change polling tolerates a one-character name typo and s
     assert.equal(externalTeaching.processPendingExaminerChanges(), 0);
     assert.equal(isolated.httpOperations.length, pushes.length);
     assert.equal(externalTeaching._test.namesSimilar('黃忻妤', '黃忻瑜'), true);
+    assert.equal(externalTeaching._test.equipmentKey('A7S2'), externalTeaching._test.equipmentKey('α7sII'));
+    assert.equal(externalTeaching._test.equipmentKey('錄放機'), externalTeaching._test.equipmentKey('錄放影機'));
     assert.equal(externalTeaching._test.replaceExaminerName('新考官', '原考官', '新考官'), '新考官');
   } finally {
     installGlobals(runtime);

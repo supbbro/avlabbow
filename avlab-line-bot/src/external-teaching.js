@@ -70,7 +70,9 @@ function namesSimilar(left, right) {
   return Math.min(a.length, b.length) >= 3 && editDistance(a, b) <= 1;
 }
 function equipmentKey(value) {
-  const key = String(value || '').toLowerCase().replace(/考試|課程|器材|無線追焦|無線追/g, match => match.startsWith('無線追') ? '無線追' : '').replace(/[^a-z0-9\u3400-\u9fff]/g, '');
+  const key = String(value || '').normalize('NFKC').toLowerCase().replace(/α/g, 'a').replace(/考試|課程|器材|無線追焦|無線追/g, match => match.startsWith('無線追') ? '無線追' : '').replace(/[^a-z0-9\u3400-\u9fff]/g, '');
+  if (['a7s2', 'a7sii', 'a7sll'].includes(key)) return 'a7sii';
+  if (['錄放機', '錄放影機'].includes(key)) return '錄放影機';
   if (/par.*200|200.*par/.test(key)) return 'par200w';
   return key;
 }
@@ -2409,4 +2411,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositGraceDeadlineFor, depositGracePaidKey, depositPaidWithinGrace, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositGraceDeadlineFor, depositGracePaidKey, depositPaidWithinGrace, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, equipmentKey, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
