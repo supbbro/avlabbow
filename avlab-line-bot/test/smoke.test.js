@@ -1511,7 +1511,7 @@ test('group matrix sync derives green and retest colors from cumulative LINE rec
 test('certification colors use existing matrix rows only and follow the latest LINE result', () => {
   const matrix = [
     ['姓名', '系級', '學號', '課程', '帳號', '組別', 'H6考試', 'X160考試', '基礎配件課程'],
-    ['說明', '', '', '更新日期：2026/10/15 12:00:00'],
+    ['說明', '', '', '更新日期：10/15 12:00'],
     ['學生甲', '', '1001', '聲音藝術與錄音工程', '', '第一組'],
     ['學生乙', '', '1002', '聲音藝術與錄音工程', '', '第一組']
   ];
@@ -1529,15 +1529,16 @@ test('certification colors use existing matrix rows only and follow the latest L
     log('5', '考試', 'H6', '不在認證表的人', '到場', '通過', '通過', '全部通過', '10/15/2026 13:10:00'),
     log('6', '考試', 'X160', '學生甲', '到場', '通過', '通過', '全部通過', '10/15/2026 12:30:00')
   ];
-  const plan = externalGroupSync._test.planCertificationColors(matrix, logs);
+  const referenceDate = new Date('2026-10-15T15:00:00+08:00');
+  const plan = externalGroupSync._test.planCertificationColors(matrix, logs, referenceDate);
   assert.deepEqual(plan.updates.map(update => [update.name, update.equipment, update.status, update.recent, update.colorStatus]), [
     ['學生甲', 'H6', '要補考', true, '新待補考'],
     ['學生甲', 'X160', '通過', true, '新通過'],
     ['學生乙', 'X160', '要補考', false, '要補考'],
     ['學生乙', '基礎配件課程', '要補考', false, '要補考']
   ]);
-  matrix[1][3] = '更新日期：2026/10/15 14:00:00';
-  assert.equal(externalGroupSync._test.planCertificationColors(matrix, logs).updates.every(update => !update.recent), true);
+  matrix[1][3] = '更新日期：10/15 14:00';
+  assert.equal(externalGroupSync._test.planCertificationColors(matrix, logs, referenceDate).updates.every(update => !update.recent), true);
 });
 
 test('group matrix sync reads the current five-column roster blocks and writes each stage group', () => {

@@ -12,8 +12,8 @@ const DEPOSIT_RESTORED = '保證金已確認';
 const COLORS = {
   [PASS]: { red: 0.7137255, green: 0.84313726, blue: 0.65882355 },
   [RETEST]: { red: 0.9764706, green: 0.79607844, blue: 0.6117647 },
-  [RECENT_PASS]: { red: 0.5764706, green: 0.76862746, blue: 0.49019608 },
-  [RECENT_RETEST]: { red: 0.9647059, green: 0.69803923, blue: 0.41960785 },
+  [RECENT_PASS]: { red: 0.41568628, green: 0.65882355, blue: 0.30980393 },
+  [RECENT_RETEST]: { red: 0.9019608, green: 0.5686275, blue: 0.21960784 },
   [DEPOSIT_DISQUALIFIED]: { red: 0.9764706, green: 0.79607844, blue: 0.6117647 },
   [DEPOSIT_RESTORED]: { red: 1, green: 1, blue: 1 }
 };
@@ -29,20 +29,25 @@ const personKey = person => compactStudentId(person.studentId)
   : `NAME:${compact(person.name)}`;
 const membershipKey = member => `${personKey(member)}|${compact(member.course)}|${compact(member.group)}`;
 
-function taipeiTimestamp(value) {
+function taipeiTimestamp(value, referenceDate = new Date()) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getTime();
   if (typeof value === 'number' && Number.isFinite(value)) return Math.round((value - 25569) * 86400000);
   const raw = text(value).replace(/^更新日期\s*[:：]\s*/u, '');
   if (!raw || /都更新完了|尚未更新/u.test(raw)) return 0;
   const yearFirst = raw.match(/(\d{4})\s*[\/-]\s*(\d{1,2})\s*[\/-]\s*(\d{1,2})(?:\s+|T)?(\d{1,2})?\s*:?\s*(\d{2})?\s*:?\s*(\d{2})?/u);
   const monthFirst = raw.match(/(\d{1,2})\s*[\/-]\s*(\d{1,2})\s*[\/-]\s*(\d{4})(?:\s+|T)?(\d{1,2})?\s*:?\s*(\d{2})?\s*:?\s*(\d{2})?/u);
-  const match = yearFirst || monthFirst;
+  const monthDay = raw.match(/(\d{1,2})\s*[\/-]\s*(\d{1,2})(?:\s+|T)(\d{1,2})\s*:?\s*(\d{2})?\s*:?\s*(\d{2})?/u);
+  const withoutYear = !yearFirst && !monthFirst ? monthDay : null;
+  const match = yearFirst || monthFirst || withoutYear;
   if (!match) return 0;
-  const year = Number(yearFirst ? match[1] : match[3]);
+  const reference = referenceDate instanceof Date ? referenceDate : new Date(referenceDate);
+  const inferredYear = new Date(reference.getTime() + 8 * 60 * 60000).getUTCFullYear();
+  const year = Number(yearFirst ? match[1] : monthFirst ? match[3] : inferredYear);
   const month = Number(yearFirst ? match[2] : match[1]);
   const day = Number(yearFirst ? match[3] : match[2]);
-  let hour = Number(match[4] || 0);
-  const minute = Number(match[5] || 0), second = Number(match[6] || 0);
+  let hour = Number(withoutYear ? match[3] : match[4] || 0);
+  const minute = Number(withoutYear ? match[4] || 0 : match[5] || 0);
+  const second = Number(withoutYear ? match[5] || 0 : match[6] || 0);
   if (/(?:下午|PM)/iu.test(raw) && hour < 12) hour += 12;
   if (/(?:上午|AM)/iu.test(raw) && hour === 12) hour = 0;
   return Date.UTC(year, month - 1, day, hour - 8, minute, second);
@@ -279,10 +284,10 @@ function planMatrix(rosterRows, matrixRows, logRows) {
   return { groups, memberships, outcomes, updates, missing, fieldUpdates, identityEndColumn };
 }
 
-function planCertificationColors(matrixRows, logRows) {
+function planCertificationColors(matrixRows, logRows, referenceDate = new Date()) {
   const outcomeRecords = outcomeRecordMap(logRows);
   const outcomes = new Map([...outcomeRecords].map(([key, record]) => [key, record.status]));
-  const acknowledgedAt = taipeiTimestamp(matrixRows[1]?.[3]);
+  const acknowledgedAt = taipeiTimestamp(matrixRows[1]?.[3], referenceDate);
   const headerKeys = (matrixRows[0] || []).map(headerEquipmentKey);
   const updates = [];
   for (let rowIndex = 2; rowIndex < matrixRows.length; rowIndex++) {
