@@ -271,9 +271,10 @@ async function schedulerTick() {
   }
   jobs.push([`external-examiner-changes:${stamp}`, externalTeaching.processPendingExaminerChanges, [ids.external, ...EXTERNAL_WORKBOOKS]]);
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
-  // One-time first-retest campaign on 2026-10-16 at 18:00, with a
-  // five-minute catch-up window for a deploy or restart.
-  if (date === '2026-10-16' && hour === 18 && minute < 5) {
+  // One-time first-retest campaign on 2026-10-16 at 22:00. Keep it eligible
+  // after 22:00 so a slow deploy/restart can catch up; the persistent delivery
+  // log inside the campaign prevents a successful reminder from being resent.
+  if (date === '2026-10-16' && hour >= 22) {
     jobs.push([`first-retest-registration:${date}`, () => externalTeaching.sendFirstRetestRegistrationReminders(new Date()), FIRST_RETEST_REMINDER_WORKBOOKS]);
   }
   jobs.push([`registration-confirmations:${stamp}`, () => sendRegistrationConfirmations(runtime), [ids.master, ids.externalRegistration, ids.externalResults]]);
