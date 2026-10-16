@@ -511,7 +511,7 @@ test('retest preserves the passed written result and only asks for the practical
   assert.match(failed.text, /上機未過：請填第一次補考上機考表單/);
   assert.match(failed.text, /考生尚未綁定 LINE/);
   assert.doesNotMatch(failed.text, /【離開前請確認】/);
-  assert.equal(allActions(failed).some(action => action.type === 'uri' && action.uri.includes('forms.gle')), true);
+  assert.equal(allActions(failed).some(action => action.type === 'uri' && action.uri.includes('docs.google.com/forms/')), true);
   assert.notEqual(tasks.getRange(examTaskRow, 12).getValue(), '已完成');
 
   externalTeaching.handleCommand('點名狀態 T-EXAM-CUM S-EXAM-LAST 到場', context);
@@ -830,7 +830,7 @@ test('an exam no-show after ten minutes is canceled and both sides receive first
     const studentPush = pushes.find(push => push.to === 'U-NO-SHOW-STUDENT');
     assert.match(studentPush.messages[0].text, /第一次補考/);
     assert.match(studentPush.messages[0].text, /補考保證金不退費/);
-    assert.match(studentPush.messages[0].text, /3be87wRzRBKvdkFb6/);
+    assert.match(studentPush.messages[0].text, /1FAIpQLSda8PZ99qiviZlSbP3gsJlYSxqK0u3ELzns3isB_Hh9TjySPw/);
     isolated.httpOperations.forEach(operation => operation.options.onSuccess());
     assert.equal(externalTeaching._test.expireExamQualifications(new Date('2026-10-06T12:11:00+08:00')), 0);
     assert.equal(isolated.httpOperations.length, 2);
@@ -1124,7 +1124,7 @@ test('failed exam stages select the next retest form and stop after the second r
   const finalAttempt = externalTeaching._test.examinerRetestInstructions({ phase: '第二次補考' }, ['上機']);
   assert.match(finalAttempt, /上機未通過；本次是第二次補考/);
   assert.doesNotMatch(finalAttempt, /報名表：https|簡答題未通過：/);
-  assert.equal(externalTeaching._test.retestForm({ phase: '考試' }).url, 'https://forms.gle/3be87wRzRBKvdkFb6');
+  assert.equal(externalTeaching._test.retestForm({ phase: '考試' }).url, 'https://docs.google.com/forms/d/e/1FAIpQLSda8PZ99qiviZlSbP3gsJlYSxqK0u3ELzns3isB_Hh9TjySPw/viewform?usp=header');
   assert.equal(externalTeaching._test.retestForm({ phase: '第一次補考' }).url, 'https://forms.gle/t1vrm4U43xMhoWxD9');
   assert.equal(externalTeaching._test.retestForm({ phase: '第二次補考' }).finalAttempt, true);
   assert.match(externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第一次補考', 'https://forms.gle/first'), /第二次補考須繳交 100 元，且不退費/);
@@ -1134,6 +1134,51 @@ test('failed exam stages select the next retest form and stop after the second r
   assert.doesNotMatch(shortOnly, /報名連結|forms\.gle/);
   const practical = externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第一次補考', 'https://forms.gle/first');
   assert.match(practical, /報名連結：https:\/\/forms\.gle\/first/);
+});
+
+test('one-time 18:00 first-retest reminder includes short-answer candidates and logs after LINE success', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  try {
+    const results = isolated.openById(ids.externalResults);
+    const attendance = results.insertSheet('LINE點名紀錄');
+    attendance.appendRow(['紀錄ID','任務ID','日期','時間','階段','器材','學生ID','學生姓名','學號','出席','簡答題','上機','結果','操作人','操作人LINE','更新時間','累計簡答','累計上機','保證金']);
+    attendance.appendRow(['R1','T1',new Date('2026-10-10'),'12:00','考試','H6','S1','待提醒學生','R001','到場','通過','未通過','僅簡答題通過','','',new Date(),'通過','未通過','不可退保證金']);
+    attendance.appendRow(['R2','T2',new Date('2026-10-11'),'12:00','考試','CX350','S1','待提醒學生','R001','取消資格','未記錄','未記錄','取消資格','','',new Date(),'未通過','未通過','不可退保證金']);
+    attendance.appendRow(['R3','T3',new Date('2026-10-12'),'12:00','考試','A7S3','S2','已報名學生','R002','到場','通過','未通過','僅簡答題通過','','',new Date(),'通過','未通過','不可退保證金']);
+    attendance.appendRow(['R4','T4',new Date('2026-10-12'),'12:00','考試','Dwarf圖傳','S3','只補簡答學生','R003','到場','未通過','未記錄','簡答題未通過','','',new Date(),'未通過','未通過','不可退保證金']);
+
+    const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
+    bindings.appendRow(['LINE User ID','姓名','綁定時間','學號','身分類型']);
+    bindings.appendRow(['U-R001','待提醒學生','','R001','external']);
+    bindings.appendRow(['U-R002','已報名學生','','R002','external']);
+    bindings.appendRow(['U-R003','只補簡答學生','','R003','external']);
+
+    const responses = isolated.openById(ids.externalFirstRetestRegistration).insertSheet('表單回覆 1');
+    responses.appendRow(['時間戳記','電子郵件地址','考生姓名','考生系級','考生學號','請問你要？','H6考試','a7s3考試','CX350 考試']);
+    responses.appendRow([new Date('2026-10-15'),'registered@example.com','已報名學生','測試系','R002','補考','',true,'']);
+
+    assert.equal(externalTeaching.sendFirstRetestRegistrationReminders(new Date('2026-10-16T18:00:00+08:00')), 2);
+    assert.equal(isolated.httpOperations.length, 2);
+    const push = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload)).find(payload => payload.to === 'U-R001');
+    assert.equal(push.to, 'U-R001');
+    assert.match(push.messages[0].text, /H6/);
+    assert.match(push.messages[0].text, /CX350/);
+    assert.doesNotMatch(push.messages[0].text, /A7S3|Dwarf/);
+    assert.match(push.messages[0].text, /10\/23（五）23:59/);
+    const shortPush = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload)).find(payload => payload.to === 'U-R003');
+    assert.match(shortPush.messages[0].text, /Dwarf圖傳（簡答題＋上機）/);
+    assert.match(shortPush.messages[0].text, /仍請先填寫這份上機補考表/);
+    assert.match(shortPush.messages[0].text, /只有簡答題通過後，才有上機補考資格/);
+    assert.equal(results.getSheetByName('補考報名提醒紀錄').getLastRow(), 1);
+
+    isolated.httpOperations.forEach(operation => operation.options.onSuccess());
+    assert.equal(results.getSheetByName('補考報名提醒紀錄').getLastRow(), 4);
+    assert.equal(externalTeaching.sendFirstRetestRegistrationReminders(new Date('2026-10-17T18:00:00+08:00')), 0);
+    assert.equal(isolated.httpOperations.length, 2);
+  } finally {
+    installGlobals(runtime);
+  }
 });
 
 test('assistant can grade failed external oral retest by student and equipment', () => {

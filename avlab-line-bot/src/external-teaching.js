@@ -8,7 +8,7 @@ const { retryUuid } = require('./registration-confirmations');
 
 const SHEETS = {
   tasks: '對外任務', students: '任務學生', attendance: 'LINE點名紀錄', groups: 'LINE群組設定',
-  depositReminders: '保證金提醒紀錄'
+  depositReminders: '保證金提醒紀錄', retestRegistrationReminders: '補考報名提醒紀錄'
 };
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '侯班影製提前考試週', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
@@ -18,6 +18,10 @@ const EXAM_ARRIVAL_TIMEOUT_OPERATOR = `超過 ${EXAM_ARRIVAL_GRACE_MINUTES} 分�
 const EXAM_PASSING_RULES = '【考試通過標準】\n• 簡答題：考制度 2 題＋器材 3 題，最多錯 1 題。\n• 上機考：最多錯 3 題。';
 const COMBINED_QUESTION_BANK_URL = 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X';
 const EXTERNAL_CLASS_SCHEDULE_URL = 'https://docs.google.com/spreadsheets/d/1oaEKt3JVxcdy8yPBGZAuRh3lkhnvRoIJ9rTNbj-Gh9I/edit?gid=0#gid=0';
+const FIRST_RETEST_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSda8PZ99qiviZlSbP3gsJlYSxqK0u3ELzns3isB_Hh9TjySPw/viewform?usp=header';
+const FIRST_RETEST_REMINDER_DATE = '2026-10-16';
+const FIRST_RETEST_REGISTRATION_DEADLINE = new Date('2026-10-23T23:59:59+08:00');
+const FIRST_RETEST_RESPONSE_SHEET = '表單回覆 1';
 const DEPOSIT_CORRECTION_CAMPAIGN = '2026-09-28-LATEST-REGISTRATION';
 // Records before this reset date were cleared from the derived task, student,
 // and deposit sheets. Keep their source rows from rebuilding those records.
@@ -1586,7 +1590,137 @@ function retestForm(task) {
   if (phase.includes('第一次補考')) {
     return { url: validFormUrl(process.env.EXTERNAL_SECOND_RETEST_FORM_URL || 'https://forms.gle/t1vrm4U43xMhoWxD9'), label: '第二次補考', finalAttempt: false };
   }
-  return { url: validFormUrl(process.env.EXTERNAL_FIRST_RETEST_FORM_URL || process.env.EXTERNAL_RETEST_FORM_URL || 'https://forms.gle/3be87wRzRBKvdkFb6'), label: '第一次補考', finalAttempt: false };
+  return { url: validFormUrl(process.env.EXTERNAL_FIRST_RETEST_FORM_URL || process.env.EXTERNAL_RETEST_FORM_URL || FIRST_RETEST_FORM_URL), label: '第一次補考', finalAttempt: false };
+}
+
+function retestEquipmentKeys(value) {
+  const raw = String(value || '').normalize('NFKC').trim()
+    .replace(/^新聞館影棚\s*/i, '').replace(/考試\s*$/i, '').trim();
+  const compact = raw.toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]/g, '');
+  if (compact.includes('teradek') && compact.includes('無線追焦')) return ['teradek圖傳', '無線追'];
+  if (compact.includes('無線追焦') || compact === '無線追') return ['無線追'];
+  if (compact.includes('vortex4s8s') || compact === 'v4v8') return ['v4v8'];
+  if (compact.includes('arris60pro') || compact === 'arris60') return ['arris60'];
+  if ((compact.includes('cx350') && compact.includes('棚內機')) || compact === '棚內機') return ['棚內機'];
+  if (compact.includes('3play') || compact.includes('慢播機')) return ['3play'];
+  if (compact === 'atomos螢幕' || compact === 'atomos') return ['atomos'];
+  return [equipmentKey(raw)];
+}
+
+function firstRetestCandidates() {
+  const target = sheet(SHEETS.attendance);
+  if (!target) return [];
+  const latest = new Map();
+  for (const row of target.getDataRange().getValues().slice(1)) {
+    const phase = String(row[4] || '');
+    if (!row[0] || !isCurrentExternalData(row[2]) || phase === '教學' || phase.includes('補考') || !row[5] || !row[7]) continue;
+    const identity = norm(row[8]) || `NAME:${norm(row[7])}`;
+    const canonicalEquipment = retestEquipmentKeys(row[5])[0];
+    const key = `${identity}|${canonicalEquipment}`;
+    const previous = latest.get(key) || {
+      key, identity, name: String(row[7]), number: String(row[8] || ''), equipment: String(row[5]), equipmentKey: canonicalEquipment,
+      shortPassed: false, shortFailed: false, practicalPassed: false, practicalFailed: false, disqualified: false
+    };
+    previous.name = String(row[7]) || previous.name;
+    previous.number = String(row[8] || '') || previous.number;
+    previous.equipment = String(row[5]) || previous.equipment;
+    previous.shortPassed ||= row[10] === '通過' || row[16] === '通過';
+    previous.shortFailed ||= row[10] === '未通過';
+    previous.practicalPassed ||= row[11] === '通過' || row[17] === '通過';
+    previous.practicalFailed ||= row[11] === '未通過';
+    previous.disqualified ||= ['缺席', '取消資格'].includes(String(row[9] || ''));
+    latest.set(key, previous);
+  }
+  return [...latest.values()]
+    .filter(item => !item.practicalPassed && (item.shortFailed || item.practicalFailed || item.disqualified))
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant') || a.equipment.localeCompare(b.equipment, 'zh-Hant'));
+}
+
+function firstRetestRegistrations() {
+  const book = SpreadsheetApp.openById(ids.externalFirstRetestRegistration);
+  const target = book.getSheetByName(FIRST_RETEST_RESPONSE_SHEET);
+  if (!target) return new Set();
+  const rows = target.getDataRange().getValues();
+  if (rows.length < 2) return new Set();
+  const headers = rows[0].map(value => String(value || '').trim());
+  const nameColumn = headers.findIndex(header => header.includes('考生姓名'));
+  const numberColumn = headers.findIndex(header => header.includes('考生學號'));
+  const equipmentColumns = headers.map((header, index) => ({ header, index }))
+    .filter(({ header, index }) => index > numberColumn && /考試$|聲音工作區|導播台|成音台|棚內機|字幕機|慢播機|錄放影機|燈盤/.test(header));
+  const registered = new Set();
+  for (const row of rows.slice(1)) {
+    if (!row[0]) continue;
+    const number = numberColumn >= 0 ? norm(row[numberColumn]) : '';
+    const name = nameColumn >= 0 ? norm(row[nameColumn]) : '';
+    if (!number && !name) continue;
+    const identity = number || `NAME:${name}`;
+    for (const { header, index } of equipmentColumns) {
+      const selected = String(row[index] ?? '').trim();
+      if (!selected || /^(?:false|否|未選擇|不報名)$/i.test(selected)) continue;
+      for (const key of retestEquipmentKeys(header)) registered.add(`${identity}|${key}`);
+    }
+  }
+  return registered;
+}
+
+const RETEST_REMINDER_HEADERS = ['提醒鍵', '提醒日期', '學生姓名', '學號', '器材', 'LINE 使用者 ID', '送達時間', '狀態'];
+
+function firstRetestReminderLogSheet() {
+  const book = SpreadsheetApp.openById(ids.externalResults);
+  let target = book.getSheetByName(SHEETS.retestRegistrationReminders);
+  if (!target) target = book.insertSheet(SHEETS.retestRegistrationReminders);
+  const rows = target.getDataRange().getValues();
+  if (!rows.length || RETEST_REMINDER_HEADERS.some((header, index) => rows[0][index] !== header)) {
+    target.getRange(1, 1, 1, RETEST_REMINDER_HEADERS.length).setValues([RETEST_REMINDER_HEADERS]);
+  }
+  return target;
+}
+
+function firstRetestReminderKey(candidate) {
+  return `FIRST-RETEST-REGISTRATION:${candidate.identity}:${candidate.equipmentKey}`;
+}
+
+function firstRetestReminderText(name, candidates, now) {
+  const deadlineDay = dateKey(now) === dateKey(FIRST_RETEST_REGISTRATION_DEADLINE);
+  const items = candidates.map(item => {
+    const parts = item.disqualified || (item.shortFailed && !item.shortPassed) ? '簡答題＋上機' : '上機';
+    return `• ${item.equipment}（${parts}）`;
+  }).join('\n');
+  return `${deadlineDay ? '⚠️ 今晚截止｜' : ''}第一次補考報名提醒\n${name}你好，你目前仍有以下補考項目尚未完成報名：\n${items}\n\n報名截止：10/23（五）23:59，逾期不受理。\n請使用下方按鈕填寫第一次補考報名表。\n\n若簡答題尚未通過，補考週請先到大勇樓 3F 影音實驗室完成簡答補考；仍請先填寫這份上機補考表。只有簡答題通過後，才有上機補考資格。`;
+}
+
+function sendFirstRetestRegistrationReminders(now = new Date()) {
+  if (dateKey(now) !== FIRST_RETEST_REMINDER_DATE || now > FIRST_RETEST_REGISTRATION_DEADLINE) return 0;
+  const registrations = firstRetestRegistrations();
+  const logSheet = firstRetestReminderLogSheet();
+  const logged = new Set(logSheet.getDataRange().getValues().slice(1).map(row => String(row[0] || '')).filter(Boolean));
+  const grouped = new Map();
+  for (const candidate of firstRetestCandidates()) {
+    if (registrations.has(candidate.key) || logged.has(firstRetestReminderKey(candidate))) continue;
+    const personKey = candidate.identity;
+    if (!grouped.has(personKey)) grouped.set(personKey, []);
+    grouped.get(personKey).push(candidate);
+  }
+  let sent = 0;
+  for (const candidates of grouped.values()) {
+    const first = candidates[0];
+    const userId = userIdForName(first.name, first.number);
+    if (!userId) continue;
+    const reminderKeys = candidates.map(firstRetestReminderKey);
+    const pushKey = `FIRST-RETEST-REGISTRATION:${first.identity}:${reminderKeys.join('|')}`;
+    if (!queuePush(userId, reply(firstRetestReminderText(first.name, candidates, now), [
+      { label: '立即報名補考', uri: retestForm({ phase: '考試' }).url }
+    ]), {
+      key: pushKey,
+      onSuccess: () => {
+        const deliveredAt = new Date();
+        const values = candidates.map((candidate, index) => [reminderKeys[index], dateKey(now), candidate.name, candidate.number, candidate.equipment, userId, deliveredAt, '已送達']);
+        logSheet.getRange(logSheet.getLastRow() + 1, 1, values.length, RETEST_REMINDER_HEADERS.length).setValues(values);
+      }
+    })) continue;
+    sent++;
+  }
+  return sent;
 }
 
 function cancellationRetestGuidance(task) {
@@ -2415,4 +2549,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositGraceDeadlineFor, depositGracePaidKey, depositPaidWithinGrace, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, equipmentKey, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, sendFirstRetestRegistrationReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositGraceDeadlineFor, depositGracePaidKey, depositPaidWithinGrace, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, equipmentKey, retestEquipmentKeys, firstRetestCandidates, firstRetestRegistrations, firstRetestReminderKey, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };

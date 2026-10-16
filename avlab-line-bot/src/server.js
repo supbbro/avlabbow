@@ -23,6 +23,7 @@ const { WorkQueue } = require('./work-queue');
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master, ids.externalRegistration, ids.deposit];
+const FIRST_RETEST_REMINDER_WORKBOOKS = [ids.externalResults, ids.master, ids.externalFirstRetestRegistration];
 const INTERNAL_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.master];
 const INTERNAL_CERT_WORKBOOKS = [ids.internalAttendance, ids.internalCertification];
 const TEACHING_SCHEDULE_WORKBOOKS = [ids.teachingSchedule, ids.externalResults, ids.master];
@@ -270,6 +271,11 @@ async function schedulerTick() {
   }
   jobs.push([`external-examiner-changes:${stamp}`, externalTeaching.processPendingExaminerChanges, [ids.external, ...EXTERNAL_WORKBOOKS]]);
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
+  // One-time first-retest campaign on 2026-10-16 at 18:00, with a
+  // five-minute catch-up window for a deploy or restart.
+  if (date === '2026-10-16' && hour === 18 && minute < 5) {
+    jobs.push([`first-retest-registration:${date}`, () => externalTeaching.sendFirstRetestRegistrationReminders(new Date()), FIRST_RETEST_REMINDER_WORKBOOKS]);
+  }
   jobs.push([`registration-confirmations:${stamp}`, () => sendRegistrationConfirmations(runtime), [ids.master, ids.externalRegistration, ids.externalResults]]);
   // 認證表只依 LINE 點名紀錄上色；不再讀取或改動 1151 修課名單的人員與分組。
   jobs.push([`external-certification-colors:${stamp}`, () => externalGroupSync.syncExternalCertificationColors(runtime.api, ids.externalResults), []]);
