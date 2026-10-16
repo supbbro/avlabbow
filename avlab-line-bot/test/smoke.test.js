@@ -1553,7 +1553,7 @@ test('group matrix sync derives green and retest colors from cumulative LINE rec
   assert.equal(externalGroupSync._test.canonicalEquipment('200W Par'), externalGroupSync._test.canonicalEquipment('Par 200W考試'));
 });
 
-test('certification colors use existing matrix rows only and follow the latest LINE result', () => {
+test('certification colors follow the latest LINE result and plan missing exam takers', () => {
   const matrix = [
     ['姓名', '系級', '學號', '課程', '帳號', '組別', 'H6考試', 'X160考試', '基礎配件課程'],
     ['說明', '', '', '更新日期：10/15 12:00'],
@@ -1580,8 +1580,10 @@ test('certification colors use existing matrix rows only and follow the latest L
     ['學生甲', 'H6', '要補考', true, '新待補考'],
     ['學生甲', 'X160', '通過', true, '新通過'],
     ['學生乙', 'X160', '要補考', false, '要補考'],
-    ['學生乙', '基礎配件課程', '要補考', false, '要補考']
+    ['學生乙', '基礎配件課程', '要補考', false, '要補考'],
+    ['不在認證表的人', 'H6', '通過', true, '新通過']
   ]);
+  assert.deepEqual(plan.missing.map(item => [item.rowIndex, item.name, item.studentId]), [[4, '不在認證表的人', '']]);
   matrix[1][3] = '更新日期：10/15 14:00';
   assert.equal(externalGroupSync._test.planCertificationColors(matrix, logs, referenceDate).updates.every(update => !update.recent), true);
 });

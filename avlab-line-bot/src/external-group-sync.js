@@ -147,8 +147,10 @@ function parseRosterGroups(rows) {
   return groups.filter(group => group.members.length);
 }
 
-function outcomeRecordMap(logRows) {
-  const outcomes = new Map();
+function outcomeRecordIndexes(logRows) {
+  const byName = new Map();
+  const byStudentId = new Map();
+  const candidates = new Map();
   for (const row of logRows.slice(1)) {
     if (!text(row[0]) || text(row[0]).startsWith('_TEMPLATE')) continue;
     const name = compact(row[7]);
@@ -163,7 +165,7 @@ function outcomeRecordMap(logRows) {
     const deposit = text(row[18]);
     const cumulativeShort = text(row[16]);
     const cumulativePractical = text(row[17]);
-    const key = `${name}|${equipment}`;
+    const studentId = compactStudentId(row[8]);
     let status = '';
     if (phase === '教學') {
       if (['到場', '遲到'].includes(attendance)) status = PASS;
@@ -181,9 +183,38 @@ function outcomeRecordMap(logRows) {
     }
     if (!status) continue;
     // LINE 點名紀錄以後寫入的決定性結果為準，讓考官修正後能立即覆蓋舊顏色。
-    outcomes.set(key, { status, recordedAt: taipeiTimestamp(row[15]) });
+    const record = {
+      status,
+      recordedAt: taipeiTimestamp(row[15]),
+      name: text(row[7]),
+      normalizedName: name,
+      studentId,
+      phase,
+      equipment
+    };
+    byName.set(`${name}|${equipment}`, record);
+    if (studentId) byStudentId.set(`${studentId}|${equipment}`, record);
+
+    const candidateKey = studentId ? `ID:${studentId}` : `NAME:${name}`;
+    const candidate = candidates.get(candidateKey) || {
+      name: record.name,
+      normalizedName: name,
+      studentId,
+      hasExam: false,
+      records: new Map()
+    };
+    candidate.name = record.name || candidate.name;
+    candidate.normalizedName = name || candidate.normalizedName;
+    candidate.studentId = studentId || candidate.studentId;
+    candidate.hasExam ||= phase !== '教學';
+    candidate.records.set(equipment, record);
+    candidates.set(candidateKey, candidate);
   }
-  return outcomes;
+  return { byName, byStudentId, candidates };
+}
+
+function outcomeRecordMap(logRows) {
+  return outcomeRecordIndexes(logRows).byName;
 }
 
 function outcomeMap(logRows) {
@@ -285,30 +316,76 @@ function planMatrix(rosterRows, matrixRows, logRows) {
 }
 
 function planCertificationColors(matrixRows, logRows, referenceDate = new Date()) {
-  const outcomeRecords = outcomeRecordMap(logRows);
+  const indexes = outcomeRecordIndexes(logRows);
+  const outcomeRecords = indexes.byName;
   const outcomes = new Map([...outcomeRecords].map(([key, record]) => [key, record.status]));
   const acknowledgedAt = taipeiTimestamp(matrixRows[1]?.[3], referenceDate);
   const headerKeys = (matrixRows[0] || []).map(headerEquipmentKey);
   const updates = [];
+  const existingStudentIds = new Set();
+  const existingNames = new Set();
+
+  const recordFor = (name, studentId, equipment) => {
+    if (studentId) {
+      const byStudentId = indexes.byStudentId.get(`${studentId}|${equipment}`);
+      if (byStudentId) return byStudentId;
+    }
+    const byName = indexes.byName.get(`${compact(name)}|${equipment}`);
+    if (!byName) return null;
+    return !studentId || !byName.studentId || byName.studentId === studentId ? byName : null;
+  };
+
+  const addUpdate = (rowIndex, column, name, studentId, equipment, record) => {
+    const status = record.status === DEPOSIT_DISQUALIFIED ? RETEST : record.status;
+    const recent = Boolean(
+      (status === PASS || status === RETEST)
+      && acknowledgedAt
+      && record.recordedAt > acknowledgedAt
+    );
+    const colorStatus = recent ? (status === PASS ? RECENT_PASS : RECENT_RETEST) : status;
+    updates.push({ rowIndex, column, name, studentId, equipment, status, recent, colorStatus, recordedAt: record.recordedAt });
+  };
+
   for (let rowIndex = 2; rowIndex < matrixRows.length; rowIndex++) {
     const name = text(matrixRows[rowIndex]?.[0]);
     if (!name) continue;
+    const studentId = compactStudentId(matrixRows[rowIndex]?.[2]);
+    existingNames.add(compact(name));
+    if (studentId) existingStudentIds.add(studentId);
     for (let column = 5; column < headerKeys.length; column++) {
       const equipment = headerKeys[column];
       if (!equipment) continue;
-      const record = outcomeRecords.get(`${compact(name)}|${equipment}`);
+      const record = recordFor(name, studentId, equipment);
       if (!record) continue;
-      const status = record.status === DEPOSIT_DISQUALIFIED ? RETEST : record.status;
-      const recent = Boolean(
-        (status === PASS || status === RETEST)
-        && acknowledgedAt
-        && record.recordedAt > acknowledgedAt
-      );
-      const colorStatus = recent ? (status === PASS ? RECENT_PASS : RECENT_RETEST) : status;
-      updates.push({ rowIndex, column, name, equipment, status, recent, colorStatus, recordedAt: record.recordedAt });
+      addUpdate(rowIndex, column, name, studentId, equipment, record);
     }
   }
-  return { acknowledgedAt, outcomes, updates };
+
+  // 認證表不再依賴 1151 修課名單；若 LINE 已有考試結果但表內沒有該學號，直接補一列。
+  const missing = [];
+  for (const candidate of indexes.candidates.values()) {
+    if (!candidate.hasExam) continue;
+    const exists = candidate.studentId
+      ? existingStudentIds.has(candidate.studentId)
+      : existingNames.has(candidate.normalizedName);
+    if (exists) continue;
+    const rowIndex = matrixRows.length + missing.length;
+    const item = {
+      rowIndex,
+      name: candidate.name,
+      studentId: candidate.studentId,
+      values: [candidate.name, '', candidate.studentId, 'LINE 點名補入', '', '未分組']
+    };
+    missing.push(item);
+    if (candidate.studentId) existingStudentIds.add(candidate.studentId);
+    existingNames.add(candidate.normalizedName);
+    for (let column = 5; column < headerKeys.length; column++) {
+      const equipment = headerKeys[column];
+      const record = candidate.records.get(equipment);
+      if (equipment && record) addUpdate(rowIndex, column, candidate.name, candidate.studentId, equipment, record);
+    }
+  }
+  return { acknowledgedAt, outcomes, updates, missing };
 }
 
 function quoted(name) { return `'${String(name).replaceAll("'", "''")}'`; }
@@ -325,8 +402,23 @@ async function syncExternalCertificationColors(api, spreadsheetId) {
 
   const requests = [];
   const appliedAfterSuccess = [];
+  if (plan.missing.length) {
+    const exemplarRowIndex = Math.max(2, matrixRows.length - 1);
+    requests.push({ copyPaste: {
+      source: { sheetId: matrixSheetId, startRowIndex: exemplarRowIndex, endRowIndex: exemplarRowIndex + 1, startColumnIndex: 0, endColumnIndex: 6 },
+      destination: { sheetId: matrixSheetId, startRowIndex: plan.missing[0].rowIndex, endRowIndex: plan.missing.at(-1).rowIndex + 1, startColumnIndex: 0, endColumnIndex: 6 },
+      pasteType: 'PASTE_FORMAT',
+      pasteOrientation: 'NORMAL'
+    } });
+    for (const item of plan.missing) requests.push({ updateCells: {
+      range: { sheetId: matrixSheetId, startRowIndex: item.rowIndex, endRowIndex: item.rowIndex + 1, startColumnIndex: 0, endColumnIndex: 6 },
+      rows: [{ values: item.values.map(value => ({ userEnteredValue: { stringValue: value } })) }],
+      fields: 'userEnteredValue'
+    } });
+  }
   for (const update of plan.updates) {
-    const cacheKey = `color-only|${spreadsheetId}|${update.rowIndex}|${update.column}`;
+    const identity = update.studentId ? `ID:${update.studentId}` : `NAME:${compact(update.name)}`;
+    const cacheKey = `color-only|${spreadsheetId}|${update.rowIndex}|${update.column}|${identity}|${update.equipment}`;
     if (lastApplied.get(cacheKey) === update.colorStatus) continue;
     requests.push({ repeatCell: {
       range: { sheetId: matrixSheetId, startRowIndex: update.rowIndex, endRowIndex: update.rowIndex + 1, startColumnIndex: update.column, endColumnIndex: update.column + 1 },
@@ -340,7 +432,12 @@ async function syncExternalCertificationColors(api, spreadsheetId) {
   }
   if (requests.length) await api.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } });
   for (const [cacheKey, status] of appliedAfterSuccess) lastApplied.set(cacheKey, status);
-  return { updated: requests.length, matched: plan.updates.length, recent: plan.updates.filter(update => update.recent).length };
+  return {
+    updated: requests.length,
+    matched: plan.updates.length,
+    appended: plan.missing.length,
+    recent: plan.updates.filter(update => update.recent).length
+  };
 }
 
 module.exports = {
