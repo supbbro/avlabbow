@@ -58,7 +58,7 @@ function maybeDate(value, spreadsheetId, sheetName, column) {
     [`${ids.leave}|表單回覆 1`]: [0, 5],
     [`${ids.external}|表單回覆 1`]: [0, 2],
     [`${ids.retest}|表單回覆 1`]: [0, 6],
-    [`${ids.externalResults}|對外任務`]: [3, 14, 15],
+    [`${ids.externalResults}|對外任務`]: [3, 14, 15, 18, 19],
     [`${ids.externalResults}|任務學生`]: [7],
     [`${ids.externalResults}|LINE點名紀錄`]: [2, 15],
     [`${ids.externalResults}|LINE群組設定`]: [8, 9],

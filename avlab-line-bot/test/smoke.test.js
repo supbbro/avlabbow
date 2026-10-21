@@ -314,6 +314,14 @@ test('task start is interpreted in Taipei regardless of the Railway process time
   assert.equal(start.toISOString(), '2026-09-02T10:05:00.000Z');
 });
 
+test('examiner hours run from the first student record until task completion', () => {
+  assert.equal(externalTeaching._test.examinerHoursBetween(
+    new Date('2026-10-21T18:00:00+08:00'),
+    new Date('2026-10-21T19:30:00+08:00')
+  ), 1.5);
+  assert.equal(externalTeaching._test.examinerDurationText(1.5), '1 小時 30 分鐘');
+});
+
 test('external commands are routed to the smaller workbook set', () => {
   assert.equal(externalTeaching.isExternalCommand('近期任務'), true);
   assert.equal(externalTeaching.isExternalCommand('開始點名 T1'), true);
@@ -423,6 +431,7 @@ test('group attendance writes a normalized record and completes the task', () =>
   const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
 
   const attendanceStart = externalTeaching.handleCommand('開始點名 T1', context);
+  assert.equal(tasks.getRange(taskRow, 19).getValue(), '', '只開啟點名卡不應開始計時');
   assert.match(attendanceStart.text, /學生甲/);
   assert.match(attendanceStart.text, /考生名單/);
   assert.equal(attendanceStart.lineMessage.type, 'template');
@@ -461,6 +470,19 @@ test('group attendance writes a normalized record and completes the task', () =>
   assert.equal(recentTasks.action.type, 'postback');
   assert.equal(recentTasks.action.data, '近期任務');
   assert.equal(tasks.getRange(taskRow, 12).getValue(), '已完成');
+  const startedAt = tasks.getRange(taskRow, 19).getValue();
+  const completedAt = tasks.getRange(taskRow, 20).getValue();
+  const examinerHours = tasks.getRange(taskRow, 21).getValue();
+  assert.equal(startedAt instanceof Date, true);
+  assert.equal(completedAt instanceof Date, true);
+  assert.equal(completedAt >= startedAt, true);
+  assert.equal(Number.isFinite(examinerHours), true);
+  assert.equal(tasks.getRange(taskRow, 22).getValue(), '測試者');
+  assert.equal(tasks.getRange(taskRow, 23).getValue(), 'U1');
+  assert.match(lastTeachingAttendance.text, /考官時數：/);
+  const originalTiming = tasks.getRange(taskRow, 19, 1, 3).getValues()[0];
+  externalTeaching.handleCommand('更正點名 T1 S1 遲到', context);
+  assert.deepEqual(tasks.getRange(taskRow, 19, 1, 3).getValues()[0], originalTiming, '完成後修改紀錄不應重算時數');
   assert.doesNotMatch(externalTeaching.handleCommand('點名首頁 T1', context).text, /【點名首頁/);
 
   tasks.appendRow(['T-RESUME','1151','教學',new Date(),'12:00','13:00','回首頁測試','401','測試者','U1','','點名中',true,true,'','','','']);

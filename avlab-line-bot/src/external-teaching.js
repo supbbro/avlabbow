@@ -10,6 +10,8 @@ const SHEETS = {
   tasks: '對外任務', students: '任務學生', attendance: 'LINE點名紀錄', groups: 'LINE群組設定',
   depositReminders: '保證金提醒紀錄', retestRegistrationReminders: '補考報名提醒紀錄'
 };
+const TASK_HEADERS = ['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','教學官／考官','考官LINE User ID','LINE群組ID','任務狀態','前一天提醒','兩小時前提醒','前一天提醒時間','兩小時前提醒時間','來源分頁','來源位置','第一位考生登記時間','任務完成時間','考官時數（小時）','實際操作考官','實際操作考官LINE User ID'];
+const TASK_TIMING_COLUMN = 19;
 const MANAGERS = ['徐嘉翔', '蔡季妍', '吳欣芸'];
 const SOURCE_TABS = ['教學週分班表I', '教學週分班表II', '侯班影製提前考試週', '考試週分班表I', '考試週分班表II', '第一次補考週分班表', '第二次補考週分班表'];
 const REMINDER_LEAD_MINUTES = 60;
@@ -166,7 +168,8 @@ function taskFromRow(row, rowNumber) {
     date: row[3], start: row[4], end: row[5], equipment: row[6], location: row[7], examiner: row[8],
     examinerUserId: row[9], groupId: row[10], status: String(row[11] || '').trim(),
     dayBefore: row[12], twoHours: row[13], dayBeforeSentAt: row[14], twoHoursSentAt: row[15],
-    sourceSheet: row[16], sourceRange: row[17]
+    sourceSheet: row[16], sourceRange: row[17], attendanceStartedAt: row[18], attendanceCompletedAt: row[19],
+    examinerHours: row[20], actualExaminer: row[21], actualExaminerUserId: row[22]
   };
 }
 
@@ -390,7 +393,15 @@ function syncFromSchedule() {
   const taskSheet = sheet(SHEETS.tasks), studentSheet = sheet(SHEETS.students);
   if (!taskSheet || !studentSheet) throw new Error('找不到對外任務或任務學生工作表');
 
-  const taskRows = taskSheet.getDataRange().getValues();
+  let taskRows = taskSheet.getDataRange().getValues();
+  if (!taskRows.length) taskSheet.appendRow(TASK_HEADERS);
+  else {
+    const timingHeaders = TASK_HEADERS.slice(TASK_TIMING_COLUMN - 1);
+    if (timingHeaders.some((header, index) => taskRows[0][TASK_TIMING_COLUMN - 1 + index] !== header)) {
+      taskSheet.getRange(1, TASK_TIMING_COLUMN, 1, timingHeaders.length).setValues([timingHeaders]);
+    }
+  }
+  taskRows = taskSheet.getDataRange().getValues();
   const existingTasks = new Map();
   for (let i = 1; i < taskRows.length; i++) if (taskRows[i][0] && !isTemplate(taskRows[i][0])) existingTasks.set(String(taskRows[i][0]), { row: i + 1, values: taskRows[i], task: taskFromRow(taskRows[i], i + 1) });
   const parsedIds = new Set();
@@ -411,16 +422,19 @@ function syncFromSchedule() {
     const oneHourSentAt = !scheduleChanged && !examinerChanged && reminderBelongsToSchedule(existing?.task.twoHoursSentAt, incoming.date, incoming.start)
       ? existing.task.twoHoursSentAt : '';
     const incomingExaminerUserId = userIdForExaminerName(incoming.examiner);
+    const timing = existing && !scheduleChanged
+      ? [existing.task.attendanceStartedAt || '', existing.task.attendanceCompletedAt || '', existing.task.examinerHours ?? '', existing.task.actualExaminer || '', existing.task.actualExaminerUserId || '']
+      : ['', '', '', '', ''];
     const desired = [incoming.id, incoming.term, incoming.phase, incoming.date, incoming.start, incoming.end, incoming.equipment, incoming.location,
       incoming.examiner, incomingExaminerUserId || (!examinerChanged ? existing?.task.examinerUserId : '') || '', existing?.task.groupId || '', status,
       existing ? existing.task.dayBefore : true, existing ? existing.task.twoHours : true,
-      dayBeforeSentAt, oneHourSentAt, incoming.sourceSheet, incoming.sourceRange];
+      dayBeforeSentAt, oneHourSentAt, incoming.sourceSheet, incoming.sourceRange, ...timing];
     if (!existing) { taskSheet.appendRow(desired); tasksAdded++; }
     else if (rowChanged(existing.values, desired)) { taskSheet.getRange(existing.row, 1, 1, desired.length).setValues([desired]); tasksUpdated++; }
   }
   for (const existing of existingTasks.values()) {
     if (SOURCE_TABS.includes(String(existing.task.sourceSheet)) && !parsedIds.has(existing.task.id)) {
-      taskSheet.getRange(existing.row, 1, 1, 18).setValues([Array(18).fill('')]); tasksUpdated++;
+      taskSheet.getRange(existing.row, 1, 1, TASK_HEADERS.length).setValues([Array(TASK_HEADERS.length).fill('')]); tasksUpdated++;
     }
   }
 
@@ -762,6 +776,55 @@ function resumeActiveAttendance(context, now = new Date()) {
 }
 
 function updateTaskStatus(task, status) { sheet(SHEETS.tasks).getRange(task.row, 12).setValue(status); task.status = status; }
+function validTimestamp(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function firstStudentRecordTime(taskId) {
+  const target = sheet(SHEETS.attendance);
+  if (!target) return null;
+  return target.getDataRange().getValues().slice(1)
+    .filter(row => String(row[1] || '') === taskId && String(row[13] || '') !== '保證金未繳')
+    .map(row => validTimestamp(row[15])).filter(Boolean)
+    .sort((left, right) => left - right)[0] || null;
+}
+function examinerHoursBetween(startedAt, completedAt) {
+  const start = validTimestamp(startedAt), end = validTimestamp(completedAt);
+  if (!start || !end) return '';
+  return Math.round((Math.max(0, end.getTime() - start.getTime()) / 3600000) * 100) / 100;
+}
+function startTaskTiming(task, operatorName, operatorId, now = new Date()) {
+  const existing = validTimestamp(task.attendanceStartedAt);
+  if (existing) return existing;
+  const startedAt = firstStudentRecordTime(task.id) || validTimestamp(now) || new Date();
+  const target = sheet(SHEETS.tasks);
+  target.getRange(task.row, TASK_TIMING_COLUMN).setValue(startedAt);
+  target.getRange(task.row, TASK_TIMING_COLUMN + 3, 1, 2).setValues([[operatorName || task.examiner || '', operatorId || task.examinerUserId || '']]);
+  task.attendanceStartedAt = startedAt;
+  task.actualExaminer = operatorName || task.examiner || '';
+  task.actualExaminerUserId = operatorId || task.examinerUserId || '';
+  return startedAt;
+}
+function completeTaskTiming(task, now = new Date()) {
+  if (validTimestamp(task.attendanceCompletedAt)) return task.examinerHours;
+  const startedAt = validTimestamp(task.attendanceStartedAt) || firstStudentRecordTime(task.id);
+  if (!startedAt) return '';
+  const completedAt = validTimestamp(now) || new Date();
+  const hours = examinerHoursBetween(startedAt, completedAt);
+  sheet(SHEETS.tasks).getRange(task.row, TASK_TIMING_COLUMN, 1, 3).setValues([[startedAt, completedAt, hours]]);
+  task.attendanceStartedAt = startedAt;
+  task.attendanceCompletedAt = completedAt;
+  task.examinerHours = hours;
+  return hours;
+}
+function examinerDurationText(hours) {
+  if (hours === '' || hours === null || hours === undefined || !Number.isFinite(Number(hours))) return '';
+  const minutes = Math.max(0, Math.round(Number(hours) * 60));
+  if (!minutes) return '不足 1 分鐘';
+  const wholeHours = Math.floor(minutes / 60), remaining = minutes % 60;
+  return [wholeHours ? `${wholeHours} 小時` : '', remaining ? `${remaining} 分鐘` : ''].filter(Boolean).join(' ');
+}
 function updateStudent(student, attendance, result) {
   const target = sheet(SHEETS.students);
   target.getRange(student.row, 6, 1, 3).setValues([[attendance, result, new Date()]]);
@@ -1308,6 +1371,7 @@ function recordAttendance(taskId, studentId, status, context) {
   if (!task || !student) return reply('找不到指定的任務或學生，請重新開啟任務。');
   const permission = canOperate(task, context); if (!permission.ok) return reply(permission.message);
   if (student.attendance === '取消資格') return reply('此考生目前已取消資格；請從「查看點名結果」進入「修改紀錄」更正。');
+  startTaskTiming(task, permission.name, context.userId);
   const result = (!isExam(task) || ['請假', '缺席', '取消資格'].includes(status)) ? '不適用'
     : student.result === '不適用' ? '未記錄' : student.result;
   updateStudent(student, status, result);
@@ -1411,7 +1475,9 @@ function completionTaskCard(task, students, studentNextStep = null, completedStu
     const refundable = students.filter(student => certificationForStudent(task, student).refundable && depositRefundPolicy(task, student).refundable).length;
     return `可退保證金 ${refundable}｜尚未符合 ${students.length - refundable}`;
   })() : '';
-  const note = [studentNextStep?.text, completionReminderText(task)].filter(Boolean).join('\n\n');
+  const duration = examinerDurationText(task.examinerHours);
+  const durationLine = duration ? `考官時數：${duration}（第一位考生登記至任務完成）` : '';
+  const note = [studentNextStep?.text, durationLine, completionReminderText(task)].filter(Boolean).join('\n\n');
   const completedStudent = students.find(student => student.id === completedStudentId) || (students.length === 1 ? students[0] : null);
   const actions = [
     ...(studentNextStep?.actions || []),
@@ -1460,6 +1526,7 @@ function finishAttendance(taskId, context, { studentNextStep = null, completedSt
   const pending = students.filter(student => student.attendance === '未點名' || (isExam(task) && ['到場', '遲到'].includes(student.attendance) && examProgress(task, student).step !== 'done'));
   if (pending.length) return reply(`尚有 ${pending.length} 位學生未完成登記。`, [{ label: '繼續點名', text: `開始點名 ${task.id}` }]);
   updateTaskStatus(task, '已完成');
+  completeTaskTiming(task);
   return completionTaskCard(task, students, studentNextStep, completedStudentId);
 }
 
@@ -2561,4 +2628,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, sendFirstRetestRegistrationReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositGraceDeadlineFor, depositGracePaidKey, depositPaidWithinGrace, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, equipmentKey, retestEquipmentKeys, firstRetestCandidates, firstRetestRegistrations, firstRetestReminderKey, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, sendFirstRetestRegistrationReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositGraceDeadlineFor, depositGracePaidKey, depositPaidWithinGrace, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, equipmentKey, retestEquipmentKeys, firstRetestCandidates, firstRetestRegistrations, firstRetestReminderKey, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName, examinerHoursBetween, examinerDurationText } };
