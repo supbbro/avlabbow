@@ -490,9 +490,12 @@ test('retest preserves the passed written result and only asks for the practical
   students.appendRow(['T-EXAM-CUM','S-EXAM-CUM','補考學生','999',1,'未點名','未記錄','']);
   students.appendRow(['T-EXAM-CUM','S-EXAM-LAST','最後考生','998',2,'未點名','未記錄','']);
   const examMenu = externalTeaching.handleCommand('開始點名 T-EXAM-CUM', context);
-  assert.deepEqual(examMenu.lineMessage.template.columns[0].actions.map(action => action.label), ['考生已到', '查看／評分']);
+  assert.deepEqual(examMenu.lineMessage.template.columns[0].actions.map(action => action.label), ['考生已到', '修正點名']);
   const attendancePrompt = externalTeaching.handleCommand('查看考生 T-EXAM-CUM S-EXAM-CUM', context);
   assert.equal(cardActions(attendancePrompt).some(action => action.label.includes('取消資格')), false);
+  assert.deepEqual(cardActions(attendancePrompt).map(action => action.label), ['✅ 考生已到', '✏️ 修正點名']);
+  const manualAttendance = externalTeaching.handleCommand('修改紀錄 T-EXAM-CUM S-EXAM-CUM', context);
+  assert.deepEqual(cardActions(manualAttendance).slice(0, 3).map(action => action.label), ['點名改為到場', '點名改為遲到', '點名改為缺席']);
   const firstPrompt = externalTeaching.handleCommand('點名狀態 T-EXAM-CUM S-EXAM-CUM 到場', context);
   assert.match(firstPrompt.text, /簡答題：⏳ 尚未評分/);
   assert.match(firstPrompt.text, /上機：⏳ 尚未評分/);

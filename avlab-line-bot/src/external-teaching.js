@@ -848,7 +848,8 @@ function studentStateCard(task, student, options = {}) {
 
 function attendancePrompt(task, student, notice = '') {
   const attendanceActions = isExam(task) ? [
-    { label: '✅ 考生已到', postback: `到場判定 ${task.id} ${student.id}` }
+    { label: '✅ 考生已到', postback: `到場判定 ${task.id} ${student.id}` },
+    { label: '✏️ 修正點名', postback: `修改紀錄 ${task.id} ${student.id}` }
   ] : [
     { label: '✅ 學生已到', postback: `到場判定 ${task.id} ${student.id}` },
     { label: '❌ 缺席', postback: `點名狀態 ${task.id} ${student.id} 缺席` }
@@ -884,7 +885,7 @@ function candidateMenu(task, page = 1, notice = '') {
   const candidateActions = student => {
     if (student.attendance === '未點名') return isExam(task) ? [
       postbackAction('考生已到', `到場判定 ${task.id} ${student.id}`),
-      postbackAction('查看／評分', `查看考生 ${task.id} ${student.id}`)
+      postbackAction('修正點名', `修改紀錄 ${task.id} ${student.id}`)
     ] : [
       postbackAction('學生已到', `到場判定 ${task.id} ${student.id}`),
       postbackAction('缺席', `點名狀態 ${task.id} ${student.id} 缺席`)
