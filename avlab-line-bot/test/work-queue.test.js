@@ -43,3 +43,28 @@ test('background reminders still run during a burst of LINE messages', async () 
   assert.ok(order.indexOf('reminder') > order.indexOf('LINE-1'));
   assert.ok(order.indexOf('reminder') < order.indexOf('LINE-12'));
 });
+
+test('queue status exposes a running background job and waiting LINE event', async () => {
+  let release;
+  const queue = new WorkQueue(() => {});
+  const background = queue.enqueue(() => new Promise(resolve => { release = resolve; }), 'background');
+  const line = queue.enqueue(async () => 'LINE');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(queue.status(), {
+    running: true,
+    currentPriority: 'background',
+    currentSeconds: 0,
+    interactiveWaiting: 1,
+    backgroundWaiting: 0
+  });
+  release('background');
+  assert.equal(await background, 'background');
+  assert.equal(await line, 'LINE');
+  assert.deepEqual(queue.status(), {
+    running: false,
+    currentPriority: null,
+    currentSeconds: 0,
+    interactiveWaiting: 0,
+    backgroundWaiting: 0
+  });
+});

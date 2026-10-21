@@ -181,6 +181,8 @@ class GoogleSheetsRuntime {
     ] });
     this.api = google.sheets({ version: 'v4', auth });
     this.driveApi = google.drive({ version: 'v3', auth });
+    const configuredRequestTimeout = Number(process.env.GOOGLE_REQUEST_TIMEOUT_MS || 8000);
+    this.requestOptions = { timeout: Number.isFinite(configuredRequestTimeout) ? Math.max(1000, configuredRequestTimeout) : 8000 };
     this.sheets = new Map();
     this.loadedAt = new Map();
     this.loading = new Map();
@@ -239,7 +241,7 @@ class GoogleSheetsRuntime {
   async getWorkbookMetadata(spreadsheetId, { force = false } = {}) {
     const isFresh = this.metadata.has(spreadsheetId) && Date.now() - (this.metadataLoadedAt.get(spreadsheetId) || 0) < this.metadataCacheTtlMs;
     if (!force && isFresh) return this.metadata.get(spreadsheetId);
-    const meta = await this.api.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId,title))' });
+    const meta = await this.api.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId,title))' }, this.requestOptions);
     const metadata = new Map((meta.data.sheets || []).map(s => [s.properties.title, s.properties.sheetId]));
     this.metadata.set(spreadsheetId, metadata);
     this.metadataLoadedAt.set(spreadsheetId, Date.now());
@@ -252,7 +254,7 @@ class GoogleSheetsRuntime {
     const names = requested.filter(name => metadata.has(name));
     const response = names.length ? await this.api.spreadsheets.values.batchGet({
       spreadsheetId, ranges: names.map(a1), valueRenderOption: 'FORMATTED_VALUE', dateTimeRenderOption: 'FORMATTED_STRING'
-    }) : { data: { valueRanges: [] } };
+    }, this.requestOptions) : { data: { valueRanges: [] } };
     const book = new Map();
     names.forEach((name, index) => {
       const values = response.data.valueRanges?.[index]?.values || [];
@@ -263,7 +265,7 @@ class GoogleSheetsRuntime {
   }
 
   async loadExcelWorkbook(fileId, requested) {
-    const response = await this.driveApi.files.get({ fileId, alt: 'media' }, { responseType: 'arraybuffer' });
+    const response = await this.driveApi.files.get({ fileId, alt: 'media' }, { ...this.requestOptions, responseType: 'arraybuffer' });
     const workbook = XLSX.read(Buffer.from(response.data), { type: 'buffer', cellDates: true });
     const rawSheets = Object.fromEntries(workbook.SheetNames.map(name => [
       name,
@@ -298,13 +300,13 @@ class GoogleSheetsRuntime {
     for (const op of this.operations) {
       const spreadsheetId = op.sheet.spreadsheetId;
       if (op.kind === 'addSheet') {
-        const response = await this.api.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [{ addSheet: { properties: { title: op.sheet.name } } }] } });
+        const response = await this.api.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [{ addSheet: { properties: { title: op.sheet.name } } }] } }, this.requestOptions);
         op.sheet.sheetId = response.data.replies?.[0]?.addSheet?.properties?.sheetId;
         if (op.sheet.sheetId != null) this.metadata.get(spreadsheetId)?.set(op.sheet.name, op.sheet.sheetId);
       } else if (op.kind === 'clear') {
-        await this.api.spreadsheets.values.clear({ spreadsheetId, range: a1(op.sheet.name) });
+        await this.api.spreadsheets.values.clear({ spreadsheetId, range: a1(op.sheet.name) }, this.requestOptions);
       } else if (op.kind === 'append') {
-        await this.api.spreadsheets.values.append({ spreadsheetId, range: `${a1(op.sheet.name)}!A1`, valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', requestBody: { values: sheetApiValues(op.values) } });
+        await this.api.spreadsheets.values.append({ spreadsheetId, range: `${a1(op.sheet.name)}!A1`, valueInputOption: 'USER_ENTERED', insertDataOption: 'INSERT_ROWS', requestBody: { values: sheetApiValues(op.values) } }, this.requestOptions);
       } else if (op.kind === 'update') {
         const endRow = op.row + op.values.length - 1;
         const width = Math.max(...op.values.map(row => row.length));
@@ -330,10 +332,10 @@ class GoogleSheetsRuntime {
     }
     await Promise.all([...batchUpdates].map(([spreadsheetId, data]) => this.api.spreadsheets.values.batchUpdate({
       spreadsheetId, requestBody: { valueInputOption: 'USER_ENTERED', data }
-    })));
+    }, this.requestOptions)));
     await Promise.all([...formatUpdates].map(([spreadsheetId, requests]) => this.api.spreadsheets.batchUpdate({
       spreadsheetId, requestBody: { requests }
-    })));
+    }, this.requestOptions)));
     this.operations = [];
   }
 

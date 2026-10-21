@@ -55,7 +55,8 @@ async function lineRequest(path, body) {
   const response = await fetch(`https://api.line.me/v2/bot${path}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10_000)
   });
   if (!response.ok) throw new Error(`LINE API ${response.status}: ${await response.text()}`);
 }
@@ -211,7 +212,12 @@ async function handleLineEvent(event) {
 }
 
 app.get('/', (_req, res) => res.type('text').send('AV Lab LINE Bot is running'));
-app.get('/health', (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+app.get('/health', (_req, res) => res.json({
+  ok: true,
+  time: new Date().toISOString(),
+  version: String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || 'local').slice(0, 7),
+  queue: workQueue.status()
+}));
 
 app.post('/webhook', express.raw({ type: 'application/json', limit: '1mb' }), (req, res) => {
   if (!validLineSignature(req.body, req.get('x-line-signature'))) return res.status(401).send('Invalid signature');

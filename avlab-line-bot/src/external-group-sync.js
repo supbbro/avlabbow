@@ -392,11 +392,11 @@ function quoted(name) { return `'${String(name).replaceAll("'", "''")}'`; }
 
 async function syncExternalCertificationColors(api, spreadsheetId) {
   const ranges = [`${quoted(MATRIX_SHEET)}!A:AL`, `${quoted(LOG_SHEET)}!A:S`];
-  const values = await api.spreadsheets.values.batchGet({ spreadsheetId, ranges, valueRenderOption: 'FORMATTED_VALUE' });
+  const values = await api.spreadsheets.values.batchGet({ spreadsheetId, ranges, valueRenderOption: 'FORMATTED_VALUE' }, { timeout: 8000 });
   const [matrixRows = [], logRows = []] = (values.data.valueRanges || []).map(range => range.values || []);
   if (!matrixRows.length || !logRows.length) return { updated: 0, reason: '缺少必要分頁資料' };
   const plan = planCertificationColors(matrixRows, logRows);
-  const metadata = await api.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId,title))' });
+  const metadata = await api.spreadsheets.get({ spreadsheetId, fields: 'sheets(properties(sheetId,title))' }, { timeout: 8000 });
   const matrixSheetId = (metadata.data.sheets || []).find(sheet => sheet.properties?.title === MATRIX_SHEET)?.properties?.sheetId;
   if (matrixSheetId == null) throw new Error(`找不到分頁：${MATRIX_SHEET}`);
 
@@ -430,7 +430,7 @@ async function syncExternalCertificationColors(api, spreadsheetId) {
     } });
     appliedAfterSuccess.push([cacheKey, update.colorStatus]);
   }
-  if (requests.length) await api.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } });
+  if (requests.length) await api.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } }, { timeout: 8000 });
   for (const [cacheKey, status] of appliedAfterSuccess) lastApplied.set(cacheKey, status);
   return {
     updated: requests.length,

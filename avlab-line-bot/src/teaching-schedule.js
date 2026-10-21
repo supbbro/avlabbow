@@ -73,7 +73,7 @@ async function loadDocumentLabels(api, { force = false } = {}) {
     ranges: MONTH_TABS.map(tab => `'${tab}'!A1:I100`),
     includeGridData: true,
     fields: 'sheets(properties(title),data(startRow,startColumn,rowData(values(formattedValue,hyperlink,textFormatRuns(startIndex,format(link(uri))),chipRuns(startIndex,chip(richLinkProperties(uri)))))))'
-  });
+  }, { timeout: 8000 });
   const next = new Map();
   for (const tab of response.data.sheets || []) for (const grid of tab.data || []) {
     const startRow = grid.startRow || 0, startColumn = grid.startColumn || 0;
