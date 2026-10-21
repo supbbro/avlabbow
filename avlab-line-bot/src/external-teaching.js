@@ -155,13 +155,6 @@ function userIdForExaminerName(name) {
   return candidates.length === 1 ? String(candidates[0][0]) : '';
 }
 
-function studentIsTaskExaminer(task, student, studentUserId = '') {
-  if (studentUserId && task.examinerUserId && studentUserId === task.examinerUserId) return true;
-  const studentName = norm(student.name);
-  return String(task.examiner || '').split(/[,，、/&+＋\n]/)
-    .map(norm).filter(Boolean).some(name => name === studentName);
-}
-
 function taskFromRow(row, rowNumber) {
   return {
     row: rowNumber, id: String(row[0] || '').trim(), term: row[1], phase: String(row[2] || '').trim(),
@@ -1316,8 +1309,6 @@ function correctExamPart(taskId, studentId, part, value, context) {
     ? '本次只更新卡片；通過／需補考狀態未改變，不重複傳送考生私訊。'
     : correctionNotification?.sent
       ? `📨 已通知考生：結果已改為${currentOutcome === 'passed' ? '通過' : '需補考'}。`
-      : correctionNotification?.skippedExaminer
-        ? '考生同時為本場考官，不另行推播考生結果。'
       : correctionNotification?.configured === false
         ? '⚠️ 結果已改為需補考，但補考表單尚未設定，請聯絡教學部並現場告知考生。'
         : '⚠️ 結果已改變，但考生尚未綁定 LINE，請考官現場告知。';
@@ -1397,7 +1388,7 @@ function examStudentNextStep(task, student, { notify = false } = {}) {
     const lines = [`【${student.name} 接下來】`, refundPolicy.refundable
       ? '✅ 通過，請考生在保證金單簽名。'
       : `✅ 考試通過；${refundPolicy.reason || '本次保證金不可退'}，不需簽退費欄。`];
-    if (notification && !notification.sent && !notification.skippedExaminer) lines.push('⚠️ 考生尚未綁定 LINE，請現場告知。');
+    if (notification && !notification.sent) lines.push('⚠️ 考生尚未綁定 LINE，請現場告知。');
     return { text: lines.join('\n'), actions: [] };
   }
   const failedParts = !progress.shortPassed ? ['簡答題'] : ['上機'];
@@ -1854,7 +1845,6 @@ function notifyStudentForExamOutcome(task, student, { corrected = false } = {}) 
   if (progress.step !== 'done') return { sent: false, configured: true, pending: true };
   const studentUserId = userIdForName(student.name, student.number);
   if (!studentUserId) return { sent: false, configured: true, unbound: true };
-  if (studentIsTaskExaminer(task, student, studentUserId)) return { sent: false, configured: true, skippedExaminer: true };
   if (progress.shortPassed && progress.practicalPassed) {
     queuePush(studentUserId, reply(passedExamMessage(task, student, corrected)));
     return { sent: true, configured: true, outcome: 'passed' };
