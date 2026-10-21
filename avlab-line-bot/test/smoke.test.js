@@ -1186,6 +1186,7 @@ test('assistant can grade failed external oral retest by student and equipment',
   const bindings = runtime.openById(ids.master).getSheetByName('用戶綁定');
   bindings.appendRow(['U-ORAL-ASSISTANT', '現場助理', '', '', 'assistant']);
   attendance.appendRow(['ORAL-ORIGINAL', 'EXT-ORIGINAL', new Date('2026-09-22'), '12:00', '考試', 'H6', 'S-ORIGINAL', '口試學生', 'ORAL001', '到場', '未通過', '未記錄', '簡答題未通過', '考官', 'U1', new Date(), '未通過', '未通過', '不可退保證金']);
+  attendance.appendRow(['ORAL-CANCELED', 'EXT-CANCELED', new Date('2026-09-23'), '12:00', '考試', 'A7S3', 'S-CANCELED', '取消資格學生', 'ORAL002', '取消資格', '不適用', '不適用', '取消資格', '超過 10 分鐘未到', 'U1', new Date(), '未通過', '未通過', '不可退保證金（取消資格）']);
   const assistant = { sourceType: 'user', chatId: 'U-ORAL-ASSISTANT', userId: 'U-ORAL-ASSISTANT' };
   const blocked = externalTeaching.handleCommand('簡答補考', { sourceType: 'user', chatId: 'U-UNBOUND', userId: 'U-UNBOUND' });
   assert.match(blocked.text, /只有已綁定的中心助理/);
@@ -1200,13 +1201,20 @@ test('assistant can grade failed external oral retest by student and equipment',
   assert.ok(navigationCard);
   assert.deepEqual(navigationCard.actions.map(item => item.label), ['🔄 更新補考名單', '🔙 回助理首頁', '🏠 回首頁']);
   assert.equal(navigationCard.actions[2].text, '主選單');
+  const canceledCard = menu.lineMessage.template.columns.find(item => item.title === '取消資格學生');
+  assert.ok(canceledCard);
+  assert.match(canceledCard.text, /A7S3/);
   const fail = externalTeaching.handleCommand(card.actions[1].data, assistant);
   assert.match(fail.text, /簡答題：未通過/);
   const passed = externalTeaching.handleCommand(card.actions[0].data, assistant);
   assert.match(passed.text, /簡答題：通過/);
   const rows = attendance.getDataRange().getValues();
   assert.equal(rows.filter(row => row[0] === card.actions[0].data.split(' ')[1]).length, 1);
-  assert.equal(externalTeaching.handleCommand('簡答補考', assistant).lineMessage?.template.columns.some(item => item.title === '口試學生'), false);
+  const canceledPassed = externalTeaching.handleCommand(canceledCard.actions[0].data, assistant);
+  assert.match(canceledPassed.text, /簡答題：通過/);
+  const refreshedMenu = externalTeaching.handleCommand('簡答補考', assistant);
+  assert.equal(refreshedMenu.lineMessage?.template.columns.some(item => item.title === '口試學生'), false);
+  assert.equal(refreshedMenu.lineMessage?.template.columns.some(item => item.title === '取消資格學生'), false);
 });
 
 test('deposit workbook parser normalizes initial and retest payment rows', () => {

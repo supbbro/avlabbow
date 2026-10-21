@@ -1807,7 +1807,8 @@ function oralRetestCandidates() {
   const latest = new Map();
   for (const row of target.getDataRange().getValues().slice(1)) {
     if (!row[0] || !isCurrentExternalData(row[2]) || row[4] === '教學' || !row[5] || !row[7]) continue;
-    if (!['通過', '未通過'].includes(String(row[10] || ''))) continue;
+    const canceled = String(row[9] || '') === '取消資格';
+    if (!canceled && !['通過', '未通過'].includes(String(row[10] || ''))) continue;
     const identity = norm(row[8]) || norm(row[7]);
     const key = `${identity}|${equipmentKey(row[5])}`;
     const previous = latest.get(key);
