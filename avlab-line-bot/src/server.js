@@ -80,6 +80,31 @@ async function sendFirstRetestTestToHsinYu() {
   return 1;
 }
 
+async function resendAttendanceCardToYuChun() {
+  const taskId = 'EXT-1151-630A3F3884';
+  const name = '曾郁淳';
+  const userId = 'Ua06bb548f3c9a8fc00492711dfdb56b4';
+  const logKey = `MANUAL:ATTENDANCE-CARD:2026-10-21:${taskId}:${userId}:v2`;
+  const logSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName('LINE補發紀錄');
+  if (!logSheet) throw new Error('找不到 LINE補發紀錄');
+  if (logSheet.getDataRange().getValues().slice(1).some(row => String(row[0] || '') === logKey)) return 0;
+  const card = externalTeaching.handleCommand(`開始點名 ${taskId}`, {
+    sourceType: 'user', userId, chatId: userId
+  });
+  const messages = toLineMessages(card);
+  if (!messages.length) throw new Error(`無法產生 ${name} 的點名卡`);
+  try {
+    await lineRequest('/message/push', { to: userId, messages });
+  } catch (error) {
+    const fallback = { type: 'text', text: String(card?.text || '請由「我的對內／對外任務」重新開啟點名卡。').slice(0, 5000) };
+    if (card?.fallbackQuickReply?.items?.length) fallback.quickReply = { items: card.fallbackQuickReply.items.slice(0, 13) };
+    console.error('Manual attendance card resend rejected; retrying text fallback:', error.message);
+    await lineRequest('/message/push', { to: userId, messages: [fallback] });
+  }
+  logSheet.appendRow([logKey, userId, '3play 考試點名卡補發', new Date(), taskId, name]);
+  return 1;
+}
+
 function toLineMessage(reply) {
   const normalized = typeof reply === 'string' ? { text: reply } : reply;
   if (normalized?.lineMessage) return normalized.lineMessage;
@@ -291,6 +316,9 @@ async function schedulerTick() {
     }, [ids.teachingSchedule, ids.externalResults]]);
   }
   jobs.push([`external-examiner-changes:${stamp}`, externalTeaching.processPendingExaminerChanges, [ids.external, ...EXTERNAL_WORKBOOKS]]);
+  if (date === '2026-10-21' && hour >= 18) {
+    jobs.push([`manual-attendance-resend:${date}`, resendAttendanceCardToYuChun, EXTERNAL_WORKBOOKS]);
+  }
   jobs.push([`external-reminders:${stamp}`, externalTeaching.sendExternalReminders, EXTERNAL_WORKBOOKS]);
   if (date === '2026-10-16' && hour >= 21) {
     jobs.push([`first-retest-test:${date}`, sendFirstRetestTestToHsinYu, [ids.master, ids.externalResults]]);
