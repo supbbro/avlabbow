@@ -1826,7 +1826,9 @@ function oralRetestMenu(context, page = 1) {
   if (!boundAssistantName(context.userId)) return reply('只有已綁定的中心助理可以登記簡答補考。');
   const candidates = oralRetestCandidates();
   if (!candidates.length) return reply('目前沒有簡答題未通過、待現場補考的考生。', externalNav([], '中心助理', '回助理首頁'));
-  const pageSize = 10, pages = Math.ceil(candidates.length / pageSize);
+  // LINE carousel最多 10 張；保留最後一張做固定導覽，讓按鈕不會因
+  // quick reply 被點掉或收起後就找不到回首頁。
+  const pageSize = 9, pages = Math.ceil(candidates.length / pageSize);
   const current = Math.min(Math.max(1, Number(page) || 1), pages);
   const visible = candidates.slice((current - 1) * pageSize, current * pageSize);
   const columns = visible.map(candidate => ({
@@ -1838,6 +1840,15 @@ function oralRetestMenu(context, page = 1) {
       { type: 'uri', label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL }
     ]
   }));
+  columns.push({
+    title: '操作選單',
+    text: '完成登記或暫時離開時，可從這裡返回。',
+    actions: [
+      { type: 'postback', label: '🔄 更新補考名單', data: '簡答補考' },
+      { type: 'message', label: '🔙 回助理首頁', text: '中心助理' },
+      { type: 'message', label: '🏠 回首頁', text: '主選單' }
+    ]
+  });
   const nav = [];
   if (current > 1) nav.push({ label: '⬅️ 上一頁', postback: `簡答補考名單 ${current - 1}` });
   if (current < pages) nav.push({ label: '下一頁 ➡️', postback: `簡答補考名單 ${current + 1}` });
