@@ -27,8 +27,9 @@ const FIRST_RETEST_REMINDER_WORKBOOKS = [ids.externalResults, ids.master, ids.ex
 const INTERNAL_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.master];
 const INTERNAL_CERT_WORKBOOKS = [ids.internalAttendance, ids.internalCertification];
 const TEACHING_SCHEDULE_WORKBOOKS = [ids.teachingSchedule, ids.externalResults, ids.master];
-const TASK_QUERY_WORKBOOKS = [ids.task, ids.internalAttendance, ids.internalCertification, ids.externalClassSchedule, ids.externalResults, ids.assistant, ids.master];
-const LIVE_TASK_WORKBOOKS = [ids.task, ids.externalClassSchedule, ids.externalResults];
+// 「我的任務」只需要綁定、對內排班與已同步的對外任務。不要在每次點擊時
+// 重讀七個檔案並重建整份對外排程，否則多人同時查詢很容易撞到 Sheets 配額。
+const TASK_QUERY_WORKBOOKS = [ids.task, ids.externalResults, ids.master];
 const LIGHTWEIGHT_COMMANDS = new Set(['主選單', '對外學生', '對外更多', '中心助理', '助理更多', '助理排程', '助理工具', '請假選項', '請假', '查詢', '常用連結', '講義區', '講義文件', '講義影片攝影', '講義影片燈光', '講義影片聲音', '講義影片影棚']);
 function personalQueryWorkbooks(text) {
   const command = String(text || '').trim();
@@ -175,8 +176,7 @@ async function handleLineEvent(event) {
           } else if (internalTeaching.isInternalCommand(text)) {
             await runtime.loadOnly(INTERNAL_WORKBOOKS, { force: internalTeaching.requiresFreshData(text) });
           } else if (combinedTaskQuery) {
-            await runtime.loadOnly(TASK_QUERY_WORKBOOKS, { forceIds: LIVE_TASK_WORKBOOKS });
-            externalTeaching.syncFromSchedule();
+            await runtime.loadOnly(TASK_QUERY_WORKBOOKS, { maxAgeMs: 15_000 });
           } else if (externalTeaching.isExternalCommand(text)) {
             await runtime.loadOnly(EXTERNAL_WORKBOOKS, { force: externalTeaching.requiresFreshData(text) });
           } else if (LIGHTWEIGHT_COMMANDS.has(text)) {
@@ -222,7 +222,20 @@ app.post('/webhook', express.raw({ type: 'application/json', limit: '1mb' }), (r
   for (const event of payload.events || []) {
     // WorkQueue already logs failures; consume the rejected promise so one
     // bad event cannot terminate the Node process with an unhandled rejection.
-    void enqueue(() => handleLineEvent(event)).catch(() => {});
+    void enqueue(() => handleLineEvent(event)).catch(async error => {
+      // LINE API failures may mean the reply token was already consumed; only
+      // send the busy notice for upstream failures such as a temporary Sheets
+      // quota error.
+      if (!event.replyToken || /^LINE API\s/i.test(String(error?.message || ''))) return;
+      try {
+        await lineRequest('/message/reply', {
+          replyToken: event.replyToken,
+          messages: [{ type: 'text', text: '⚠️ 資料暫時忙碌，請稍後再按一次「我的任務」。' }]
+        });
+      } catch (replyError) {
+        console.error('Unable to send temporary failure notice:', replyError);
+      }
+    });
   }
 });
 
@@ -312,7 +325,10 @@ async function schedulerTick() {
     pendingScheduleKinds.add(kind);
     try {
       await enqueue(async () => {
-        if (workbookIds) await runtime.loadOnly(workbookIds, { force: true });
+        // Share the same one-minute snapshot between overlapping jobs. Each job
+        // previously forced the same large workbooks to reload, exhausting the
+        // per-minute Sheets read quota before interactive LINE commands ran.
+        if (workbookIds) await runtime.loadOnly(workbookIds, { maxAgeMs: 45_000 });
         else await runtime.loadAll({ force: true });
         await fn();
         await runtime.flush();

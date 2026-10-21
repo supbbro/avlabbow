@@ -242,6 +242,20 @@ test('Google Sheets runtime caches each workbook and supports forced refresh', a
   assert.equal(loads, 2);
 });
 
+test('Google Sheets runtime keeps cached data when a refresh hits the read quota', async () => {
+  const cached = new GoogleSheetsRuntime();
+  const previous = new Map([['用戶綁定', { cached: true }]]);
+  cached.sheets.set(ids.master, previous);
+  cached.loadedAt.set(ids.master, 0);
+  cached.loadWorkbook = async () => {
+    const error = new Error("Quota exceeded for quota metric 'Read requests'");
+    error.response = { status: 429 };
+    throw error;
+  };
+  await cached.loadOnly([ids.master], { force: true });
+  assert.equal(cached.sheets.get(ids.master), previous);
+});
+
 test('forced value refresh reuses cached spreadsheet metadata', async () => {
   const cached = new GoogleSheetsRuntime();
   let metadataLoads = 0, valueLoads = 0;

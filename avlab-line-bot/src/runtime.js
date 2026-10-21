@@ -51,6 +51,12 @@ function sheetApiValues(values) {
   return values.map(row => row.map(sheetApiValue));
 }
 
+function isSheetsReadQuotaError(error) {
+  const status = Number(error?.response?.status || error?.code || 0);
+  const message = String(error?.message || error?.response?.data?.error?.message || '');
+  return status === 429 || /quota exceeded.*read requests|read requests.*quota exceeded|RESOURCE_EXHAUSTED/i.test(message);
+}
+
 function maybeDate(value, spreadsheetId, sheetName, column) {
   if (typeof value !== 'string' || !value.trim()) return value;
   const dateColumns = {
@@ -205,8 +211,18 @@ class GoogleSheetsRuntime {
       const isFresh = this.sheets.has(spreadsheetId) && now - (this.loadedAt.get(spreadsheetId) || 0) < maxAgeMs;
       if (!shouldForce && isFresh) return null;
       if (!shouldForce && this.loading.has(spreadsheetId)) return this.loading.get(spreadsheetId);
+      const hasCachedWorkbook = this.sheets.has(spreadsheetId);
       const pending = this.loadWorkbook(spreadsheetId, workbooks[spreadsheetId], { forceMetadata })
         .then(() => this.loadedAt.set(spreadsheetId, Date.now()))
+        .catch(error => {
+          // A busy minute must not make every LINE command disappear. Keep the
+          // last complete snapshot and let the next refresh retry naturally.
+          if (hasCachedWorkbook && isSheetsReadQuotaError(error)) {
+            console.warn(`Google Sheets read quota reached; using cached workbook ${spreadsheetId}`);
+            return;
+          }
+          throw error;
+        })
         .finally(() => this.loading.delete(spreadsheetId));
       this.loading.set(spreadsheetId, pending);
       return pending;
