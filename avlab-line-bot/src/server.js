@@ -63,13 +63,13 @@ async function lineRequest(path, body) {
 
 async function sendFirstRetestTestToHsinYu() {
   const name = '黃忻妤';
-  const logKey = 'TEST:FIRST-RETEST-REGISTRATION:2026-10-24-NOON-DEADLINE:黃忻妤';
+  const logKey = 'TEST:FIRST-RETEST-REGISTRATION:2026-10-24-MISSING-ITEMS:黃忻妤';
   const logSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName('LINE補發紀錄');
   if (!logSheet) throw new Error('找不到 LINE補發紀錄');
   if (logSheet.getDataRange().getValues().slice(1).some(row => String(row[0] || '') === logKey)) return 0;
   const userId = externalTeaching._test.userIdForName(name, '');
   if (!userId) throw new Error(`${name} 尚未綁定 LINE`);
-  const message = `【功能測試｜不代表本人有未通過項目】\n補考報名提醒\n${name}你好：\n\n若有簡答題或上機考未通過，且有補考報名需求，記得在 10/25 12:00 前完成報名。\n\n【保證金退費機制】\n• 考試週未到：即使補考週通過，保證金仍不退費。\n• 考試週有到但未通過：若補考週通過，保證金可以退費。\n\n若簡答題尚未通過，仍可先填寫補考報名表，但須先通過簡答題，才有上機補考資格。\n\n※ 本訊息僅供版面與文案測試，尚未群發。`;
+  const message = `【功能測試｜不代表本人有未通過項目】\n補考報名提醒\n${name}你好，你目前以下測試項目尚未完成補考報名：\n• H6（簡答題＋上機）\n• A7S3（上機）\n\n如果有補考報名需求，記得在 10/25 12:00 前完成報名。\n\n【保證金退費機制】\n• 考試週未到：即使補考週通過，保證金仍不退費。\n• 考試週有到但未通過：若補考週通過，保證金可以退費。\n\n若簡答題尚未通過，仍可先填寫補考報名表，但須先通過簡答題，才有上機補考資格。\n\n※ 上列為測試項目，本訊息僅供版面與文案測試，尚未群發。`;
   await lineRequest('/message/push', {
     to: userId,
     messages: [{
@@ -78,7 +78,7 @@ async function sendFirstRetestTestToHsinYu() {
       quickReply: { items: [{ type: 'action', action: { type: 'uri', label: '立即報名補考', uri: 'https://forms.gle/3be87wRzRBKvdkFb6' } }] }
     }]
   });
-  logSheet.appendRow([logKey, userId, '10/25 補考報名提醒測試', new Date()]);
+  logSheet.appendRow([logKey, userId, '10/25 補考未報項目提醒測試', new Date()]);
   return 1;
 }
 

@@ -1171,6 +1171,7 @@ test('one-time first-retest reminder includes short-answer candidates, deadline,
     assert.equal(push.to, 'U-R001');
     assert.match(push.messages[0].text, /H6/);
     assert.match(push.messages[0].text, /CX350/);
+    assert.match(push.messages[0].text, /以下項目尚未完成補考報名/);
     assert.doesNotMatch(push.messages[0].text, /A7S3|Dwarf/);
     assert.match(push.messages[0].text, /10\/25 12:00 前完成報名/);
     assert.match(push.messages[0].text, /考試週未到.*保證金仍不退費/s);
