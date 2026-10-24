@@ -40,6 +40,7 @@ function personalQueryWorkbooks(text) {
   return null;
 }
 const workQueue = new WorkQueue(error => console.error('Queued job failed:', error));
+let retestCampaignStatus = { state: 'not-run', queued: 0, attemptedAt: null };
 
 function enqueue(job, priority = 'interactive') { return workQueue.enqueue(job, priority); }
 
@@ -216,7 +217,8 @@ app.get('/health', (_req, res) => res.json({
   ok: true,
   time: new Date().toISOString(),
   version: String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || 'local').slice(0, 7),
-  queue: workQueue.status()
+  queue: workQueue.status(),
+  retestCampaign: retestCampaignStatus
 }));
 
 app.post('/webhook', express.raw({ type: 'application/json', limit: '1mb' }), (req, res) => {
@@ -318,7 +320,11 @@ async function schedulerTick() {
   // campaign day so a slow deploy/restart can catch up; the persistent delivery
   // log inside the campaign prevents a successful reminder from being resent.
   if (date === '2026-10-24') {
-    jobs.push([`first-retest-registration:${date}`, () => externalTeaching.sendFirstRetestRegistrationReminders(new Date()), FIRST_RETEST_REMINDER_WORKBOOKS]);
+    jobs.push([`first-retest-registration:${date}`, () => {
+      const queued = externalTeaching.sendFirstRetestRegistrationReminders(new Date());
+      retestCampaignStatus = { state: 'queued', queued, attemptedAt: new Date().toISOString() };
+      return queued;
+    }, FIRST_RETEST_REMINDER_WORKBOOKS]);
   }
   jobs.push([`registration-confirmations:${stamp}`, () => sendRegistrationConfirmations(runtime), [ids.master, ids.externalRegistration, ids.externalResults]]);
   // 認證表只依 LINE 點名紀錄上色；不再讀取或改動 1151 修課名單的人員與分組。
