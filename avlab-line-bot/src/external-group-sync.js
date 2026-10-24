@@ -57,7 +57,7 @@ function canonicalEquipment(value) {
   const key = compact(value).replace(/(?:考試|教學)$/u, '');
   if (key.includes('基礎配件課程')) return '基礎配件課程';
   if (key.includes('聲音工作區')) return '聲音工作區';
-  if (key.includes('棚內機')) return '棚內機';
+  if (key.includes('棚內機') || key === 'CX350') return '棚內機';
   if (key.includes('導播台')) return '導播台';
   if (key.includes('字幕機')) return '字幕機';
   if (key.includes('燈盤')) return '燈盤';

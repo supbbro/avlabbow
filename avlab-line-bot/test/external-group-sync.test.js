@@ -73,3 +73,9 @@ test('Teradek wireless-follow aliases match the wireless follow-focus matrix col
   assert.equal(externalGroupSync._test.canonicalEquipment('Teradek圖傳考試'), 'TERADEK圖傳');
   assert.equal(externalGroupSync._test.canonicalEquipment('無線追焦組'), '無線追焦組');
 });
+
+test('CX350 exam results map to the current studio-camera certification column', () => {
+  assert.equal(externalGroupSync._test.canonicalEquipment('CX350'), '棚內機');
+  assert.equal(externalGroupSync._test.canonicalEquipment('CX350考試'), '棚內機');
+  assert.equal(externalGroupSync._test.canonicalEquipment('棚內機考試'), '棚內機');
+});
