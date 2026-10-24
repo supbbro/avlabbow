@@ -63,7 +63,7 @@ function canonicalEquipment(value) {
   if (key.includes('燈盤')) return '燈盤';
   if (key.includes('成音台')) return '成音台';
   if (key.includes('3PLAY')) return '3PLAY';
-  if (key.includes('TERADEK') || key.includes('TEREK') || key === '無限追') return 'TERADEK';
+  if (key.includes('TERADEK無線追') || key.includes('TEREK無限追') || key === '無限追') return '無線追焦組';
   if (key.includes('錄放影機') || key.includes('錄放機')) return '錄放影機';
   if (key.includes('無線追焦')) return '無線追焦組';
   if (['A7SIII', 'Α7SIII', 'A7S3', 'Α7S3'].includes(key)) return 'A7S3';
