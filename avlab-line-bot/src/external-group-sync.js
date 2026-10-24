@@ -63,6 +63,7 @@ function canonicalEquipment(value) {
   if (key.includes('燈盤')) return '燈盤';
   if (key.includes('成音台')) return '成音台';
   if (key.includes('3PLAY')) return '3PLAY';
+  if (key.includes('TERADEK')) return 'TERADEK';
   if (key.includes('錄放影機') || key.includes('錄放機')) return '錄放影機';
   if (key.includes('無線追焦')) return '無線追焦組';
   if (['A7SIII', 'Α7SIII', 'A7S3', 'Α7S3'].includes(key)) return 'A7S3';
@@ -166,6 +167,15 @@ function outcomeRecordIndexes(logRows) {
     const cumulativeShort = text(row[16]);
     const cumulativePractical = text(row[17]);
     const studentId = compactStudentId(row[8]);
+    const absent = ['請假', '未到', '缺席', '取消資格'].includes(attendance);
+    // Sheet operators may correct the current short-answer and practical
+    // columns directly. Treat an explicit all-pass correction as decisive even
+    // when the older cumulative columns or deposit note still contain the
+    // timeout result written by the bot.
+    const currentAttemptPass = !absent && (
+      (shortAnswer === PASS && practical === PASS)
+      || total === '全部通過'
+    );
     let status = '';
     if (phase === '教學') {
       if (['到場', '遲到'].includes(attendance)) status = PASS;
@@ -174,7 +184,9 @@ function outcomeRecordIndexes(logRows) {
       status = DEPOSIT_RESTORED;
     } else if (attendance === '取消資格' && operator === DEPOSIT_DISQUALIFIED) {
       status = DEPOSIT_DISQUALIFIED;
-    } else if ((cumulativeShort === PASS && cumulativePractical === PASS) || deposit === '可退保證金') {
+    } else if (currentAttemptPass
+      || (cumulativeShort === PASS && cumulativePractical === PASS)
+      || deposit === '可退保證金') {
       status = PASS;
     } else if (['請假', '未到', '缺席', '取消資格'].includes(attendance)
       || [shortAnswer, practical, total, cumulativeShort, cumulativePractical].some(value => value === '未通過')

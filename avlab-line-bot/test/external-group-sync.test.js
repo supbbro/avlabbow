@@ -46,3 +46,27 @@ test('certification sync matches by student number and appends missing A7S3 exam
     [3, '新增學生', '113405002', 'A7S3', '新待補考']
   ]);
 });
+
+test('manual all-pass correction overrides stale cumulative timeout result', () => {
+  const matrix = [
+    ['姓名', '系級', '學號', '課程', '帳號', '組別', '導播台考試'],
+    ['說明', '', '', '更新日期：10/16 21:50'],
+    ['測試學生', '', '113405001', '測試課程', '', '第一組']
+  ];
+  const row = examLog('1', '導播台', '測試學生', '113405001', '通過', '通過', '10/21/2026 12:15:07');
+  row[13] = '超過 10 分鐘未到';
+  row[16] = '未通過';
+  row[17] = '未通過';
+  row[18] = '不可退保證金（超過 10 分鐘未到）';
+
+  const plan = externalGroupSync._test.planCertificationColors(matrix, [HEADER, row], new Date('2026-10-21T13:00:00+08:00'));
+
+  assert.deepEqual(plan.updates.map(update => [update.rowIndex, update.equipment, update.colorStatus]), [
+    [2, '導播台', '新通過']
+  ]);
+});
+
+test('Teradek wireless-follow log matches the Teradek transmitter matrix column', () => {
+  assert.equal(externalGroupSync._test.canonicalEquipment('Teradek無線追'), 'TERADEK');
+  assert.equal(externalGroupSync._test.canonicalEquipment('Teradek圖傳考試'), 'TERADEK');
+});
