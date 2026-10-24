@@ -19,8 +19,8 @@ const EXAM_PASSING_RULES = '【考試通過標準】\n• 簡答題：考制度 
 const COMBINED_QUESTION_BANK_URL = 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X';
 const EXTERNAL_CLASS_SCHEDULE_URL = 'https://docs.google.com/spreadsheets/d/1oaEKt3JVxcdy8yPBGZAuRh3lkhnvRoIJ9rTNbj-Gh9I/edit?gid=0#gid=0';
 const FIRST_RETEST_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSda8PZ99qiviZlSbP3gsJlYSxqK0u3ELzns3isB_Hh9TjySPw/viewform?usp=header';
-const FIRST_RETEST_REMINDER_DATE = '2026-10-16';
-const FIRST_RETEST_REGISTRATION_DEADLINE = new Date('2026-10-23T23:59:59+08:00');
+const FIRST_RETEST_REMINDER_DATE = '2026-10-24';
+const FIRST_RETEST_REGISTRATION_DEADLINE = new Date('2026-10-25T12:00:00+08:00');
 const FIRST_RETEST_RESPONSE_SHEET = '表單回覆 1';
 const DEPOSIT_CORRECTION_CAMPAIGN = '2026-09-28-LATEST-REGISTRATION';
 // Records before this reset date were cleared from the derived task, student,
@@ -1673,12 +1673,11 @@ function firstRetestReminderKey(candidate) {
 }
 
 function firstRetestReminderText(name, candidates, now) {
-  const deadlineDay = dateKey(now) === dateKey(FIRST_RETEST_REGISTRATION_DEADLINE);
   const items = candidates.map(item => {
     const parts = item.disqualified || (item.shortFailed && !item.shortPassed) ? '簡答題＋上機' : '上機';
     return `• ${item.equipment}（${parts}）`;
   }).join('\n');
-  return `${deadlineDay ? '⚠️ 今晚截止｜' : ''}第一次補考報名提醒\n${name}你好，你目前仍有以下補考項目尚未完成報名：\n${items}\n\n報名截止：10/23（五）23:59，逾期不受理。\n請使用下方按鈕填寫第一次補考報名表。\n\n若簡答題尚未通過，補考週請先到大勇樓 3F 影音實驗室完成簡答補考；仍請先填寫這份上機補考表。只有簡答題通過後，才有上機補考資格。`;
+  return `補考報名提醒\n${name}你好，你目前仍有以下簡答題／上機考未通過項目：\n${items}\n\n如果有補考報名需求，記得在 10/25 12:00 前完成報名。\n\n【保證金退費機制】\n• 考試週未到：即使補考週通過，保證金仍不退費。\n• 考試週有到但未通過：若補考週通過，保證金可以退費。\n\n若簡答題尚未通過，仍可先填寫補考報名表，但須先通過簡答題，才有上機補考資格。`;
 }
 
 function sendFirstRetestRegistrationReminders(now = new Date()) {

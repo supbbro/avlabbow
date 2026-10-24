@@ -1143,7 +1143,7 @@ test('failed exam stages select the next retest form and stop after the second r
   assert.match(practical, /報名連結：https:\/\/forms\.gle\/first/);
 });
 
-test('one-time 18:00 first-retest reminder includes short-answer candidates and logs after LINE success', () => {
+test('one-time first-retest reminder includes short-answer candidates, deadline, and refund rules', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);
   try {
@@ -1165,23 +1165,25 @@ test('one-time 18:00 first-retest reminder includes short-answer candidates and 
     responses.appendRow(['時間戳記','電子郵件地址','考生姓名','考生系級','考生學號','請問你要？','H6考試','a7s3考試','CX350 考試']);
     responses.appendRow([new Date('2026-10-15'),'registered@example.com','已報名學生','測試系','R002','補考','',true,'']);
 
-    assert.equal(externalTeaching.sendFirstRetestRegistrationReminders(new Date('2026-10-16T18:00:00+08:00')), 2);
+    assert.equal(externalTeaching.sendFirstRetestRegistrationReminders(new Date('2026-10-24T18:00:00+08:00')), 2);
     assert.equal(isolated.httpOperations.length, 2);
     const push = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload)).find(payload => payload.to === 'U-R001');
     assert.equal(push.to, 'U-R001');
     assert.match(push.messages[0].text, /H6/);
     assert.match(push.messages[0].text, /CX350/);
     assert.doesNotMatch(push.messages[0].text, /A7S3|Dwarf/);
-    assert.match(push.messages[0].text, /10\/23（五）23:59/);
+    assert.match(push.messages[0].text, /10\/25 12:00 前完成報名/);
+    assert.match(push.messages[0].text, /考試週未到.*保證金仍不退費/s);
+    assert.match(push.messages[0].text, /考試週有到但未通過.*保證金可以退費/s);
     const shortPush = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload)).find(payload => payload.to === 'U-R003');
     assert.match(shortPush.messages[0].text, /Dwarf圖傳（簡答題＋上機）/);
-    assert.match(shortPush.messages[0].text, /仍請先填寫這份上機補考表/);
-    assert.match(shortPush.messages[0].text, /只有簡答題通過後，才有上機補考資格/);
+    assert.match(shortPush.messages[0].text, /仍可先填寫補考報名表/);
+    assert.match(shortPush.messages[0].text, /須先通過簡答題，才有上機補考資格/);
     assert.equal(results.getSheetByName('補考報名提醒紀錄').getLastRow(), 1);
 
     isolated.httpOperations.forEach(operation => operation.options.onSuccess());
     assert.equal(results.getSheetByName('補考報名提醒紀錄').getLastRow(), 4);
-    assert.equal(externalTeaching.sendFirstRetestRegistrationReminders(new Date('2026-10-17T18:00:00+08:00')), 0);
+    assert.equal(externalTeaching.sendFirstRetestRegistrationReminders(new Date('2026-10-25T11:00:00+08:00')), 0);
     assert.equal(isolated.httpOperations.length, 2);
   } finally {
     installGlobals(runtime);
