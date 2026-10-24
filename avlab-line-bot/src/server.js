@@ -44,6 +44,12 @@ let retestCampaignStatus = { state: 'not-run', queued: 0, attemptedAt: null };
 
 function enqueue(job, priority = 'interactive') { return workQueue.enqueue(job, priority); }
 
+function runRetestCampaign(now = new Date()) {
+  const queued = externalTeaching.sendFirstRetestRegistrationReminders(now);
+  retestCampaignStatus = { state: 'queued', queued, attemptedAt: new Date().toISOString() };
+  return queued;
+}
+
 function validLineSignature(buffer, signature) {
   if (!signature) return false;
   const expected = crypto.createHmac('sha256', process.env.LINE_CHANNEL_SECRET).update(buffer).digest('base64');
@@ -320,11 +326,7 @@ async function schedulerTick() {
   // campaign day so a slow deploy/restart can catch up; the persistent delivery
   // log inside the campaign prevents a successful reminder from being resent.
   if (date === '2026-10-24') {
-    jobs.push([`first-retest-registration:${date}`, () => {
-      const queued = externalTeaching.sendFirstRetestRegistrationReminders(new Date());
-      retestCampaignStatus = { state: 'queued', queued, attemptedAt: new Date().toISOString() };
-      return queued;
-    }, FIRST_RETEST_REMINDER_WORKBOOKS]);
+    jobs.push([`first-retest-registration:${date}`, () => runRetestCampaign(new Date()), FIRST_RETEST_REMINDER_WORKBOOKS]);
   }
   jobs.push([`registration-confirmations:${stamp}`, () => sendRegistrationConfirmations(runtime), [ids.master, ids.externalRegistration, ids.externalResults]]);
   // 認證表只依 LINE 點名紀錄上色；不再讀取或改動 1151 修課名單的人員與分組。
@@ -364,6 +366,26 @@ app.listen(port, '0.0.0.0', error => {
     return;
   }
   console.log(`Listening on port ${port}`);
+  setTimeout(() => {
+    if (formatDate(new Date(), 'yyyy-MM-dd') !== '2026-10-24') return;
+    enqueue(async () => {
+      try {
+        await runtime.loadOnly(FIRST_RETEST_REMINDER_WORKBOOKS, { force: true });
+        const queued = runRetestCampaign(new Date());
+        const delivery = await runtime.flush();
+        retestCampaignStatus = {
+          state: 'finished', queued, delivered: delivery.delivered, failed: delivery.failed,
+          attemptedAt: retestCampaignStatus.attemptedAt
+        };
+      } catch (error) {
+        retestCampaignStatus = {
+          state: 'failed', queued: 0, attemptedAt: new Date().toISOString(),
+          error: String(error?.message || error).slice(0, 200)
+        };
+        throw error;
+      }
+    }, 'background').catch(error => console.error('One-time retest campaign failed:', error));
+  }, 5_000).unref();
 });
 
 module.exports = { app, validLineSignature, toLineMessage, toFallbackLineMessage };
