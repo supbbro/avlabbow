@@ -68,5 +68,8 @@ test('manual all-pass correction overrides stale cumulative timeout result', () 
 
 test('Teradek wireless-follow log matches the Teradek transmitter matrix column', () => {
   assert.equal(externalGroupSync._test.canonicalEquipment('Teradek無線追'), 'TERADEK');
+  assert.equal(externalGroupSync._test.canonicalEquipment('terek無限追'), 'TERADEK');
+  assert.equal(externalGroupSync._test.canonicalEquipment('無限追'), 'TERADEK');
   assert.equal(externalGroupSync._test.canonicalEquipment('Teradek圖傳考試'), 'TERADEK');
+  assert.equal(externalGroupSync._test.canonicalEquipment('無線追焦組'), '無線追焦組');
 });
