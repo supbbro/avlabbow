@@ -1174,6 +1174,7 @@ test('one-time first-retest reminder includes short-answer candidates, deadline,
     assert.match(push.messages[0].text, /以下項目尚未完成補考報名/);
     assert.doesNotMatch(push.messages[0].text, /A7S3|Dwarf/);
     assert.match(push.messages[0].text, /10\/25 12:00 前完成報名/);
+    assert.match(push.messages[0].text, /全組成員都通過該項器材.*整組才會取得器材資格/s);
     assert.match(push.messages[0].text, /考試週未到.*保證金仍不退費/s);
     assert.match(push.messages[0].text, /考試週有到但未通過.*保證金可以退費/s);
     const shortPush = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload)).find(payload => payload.to === 'U-R003');

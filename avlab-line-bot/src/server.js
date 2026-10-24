@@ -314,10 +314,10 @@ async function schedulerTick() {
   if (date === '2026-10-24') {
     jobs.push([`first-retest-test:${date}`, sendFirstRetestTestToHsinYu, [ids.master, ids.externalResults]]);
   }
-  // One-time first-retest campaign on 2026-10-16 at 22:00. Keep it eligible
-  // after 22:00 so a slow deploy/restart can catch up; the persistent delivery
+  // One-time retest-registration campaign. Keep it eligible for the rest of the
+  // campaign day so a slow deploy/restart can catch up; the persistent delivery
   // log inside the campaign prevents a successful reminder from being resent.
-  if (date === '2026-10-16' && hour >= 22) {
+  if (date === '2026-10-24') {
     jobs.push([`first-retest-registration:${date}`, () => externalTeaching.sendFirstRetestRegistrationReminders(new Date()), FIRST_RETEST_REMINDER_WORKBOOKS]);
   }
   jobs.push([`registration-confirmations:${stamp}`, () => sendRegistrationConfirmations(runtime), [ids.master, ids.externalRegistration, ids.externalResults]]);
