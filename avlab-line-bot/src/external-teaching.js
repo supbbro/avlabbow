@@ -1589,8 +1589,8 @@ function retestEquipmentKeys(value) {
   const raw = String(value || '').normalize('NFKC').trim()
     .replace(/^新聞館影棚\s*/i, '').replace(/考試\s*$/i, '').trim();
   const compact = raw.toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]/g, '');
-  if (compact.includes('teradek') && compact.includes('無線追焦')) return ['teradek圖傳', '無線追'];
-  if (compact.includes('無線追焦') || compact === '無線追') return ['無線追'];
+  if ((compact.includes('teradek') || compact.includes('terek')) && (compact.includes('無線追') || compact.includes('無限追'))) return ['無線追'];
+  if (compact.includes('無線追焦') || compact.includes('無限追') || compact === '無線追') return ['無線追'];
   if (compact.includes('vortex4s8s') || compact === 'v4v8') return ['v4v8'];
   if (compact.includes('arris60pro') || compact === 'arris60') return ['arris60'];
   if ((compact.includes('cx350') && compact.includes('棚內機')) || compact === '棚內機') return ['棚內機'];

@@ -1192,6 +1192,41 @@ test('one-time first-retest reminder includes short-answer candidates, deadline,
   }
 });
 
+test('wireless follow-focus aliases stay separate from Teradek transmitter in retest matching', () => {
+  assert.deepEqual(externalTeaching._test.retestEquipmentKeys('Teradek無線追焦組'), ['無線追']);
+  assert.deepEqual(externalTeaching._test.retestEquipmentKeys('Teradek無線追'), ['無線追']);
+  assert.deepEqual(externalTeaching._test.retestEquipmentKeys('terek無限追'), ['無線追']);
+  assert.deepEqual(externalTeaching._test.retestEquipmentKeys('無限追'), ['無線追']);
+  assert.deepEqual(externalTeaching._test.retestEquipmentKeys('Teradek圖傳'), ['teradek圖傳']);
+});
+
+test('wireless follow-focus retest candidates keep only the three students who have not passed', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  try {
+    const attendance = isolated.openById(ids.externalResults).insertSheet('LINE點名紀錄');
+    attendance.appendRow(['紀錄ID','任務ID','日期','時間','階段','器材','學生ID','學生姓名','學號','出席','簡答題','上機','結果','操作人','操作人LINE','更新時間','累計簡答','累計上機','保證金']);
+    const add = (id, equipment, name, number, attendanceStatus, short, practical) => attendance.appendRow([
+      id, 'T-WIRELESS', new Date('2026-10-19'), '18:05', '考試', equipment, `S-${id}`, name, number,
+      attendanceStatus, short, practical, practical === '通過' ? '全部通過' : '未通過', '', '', new Date(), short === '通過' ? '通過' : '未通過', practical === '通過' ? '通過' : '未通過', ''
+    ]);
+    add('W1', 'Teradek無線追焦組', '李庭緯', '113405213', '到場', '通過', '未通過');
+    add('W2', 'Teradek無線追焦組', '洪稚森', '113405210', '到場', '通過', '未通過');
+    add('W3', 'Teradek無線追焦組', '楊馥寧', '115405514', '到場', '通過', '通過');
+    add('W4', 'Teradek無線追焦組', '馮翰偉', '113405182', '取消資格', '不適用', '不適用');
+    add('W5', 'Teradek無線追', '何施慜', '113405042', '到場', '通過', '通過');
+    add('W6', 'Teradek無線追', '張仲懷', '113405147', '到場', '通過', '通過');
+
+    const names = externalTeaching._test.firstRetestCandidates()
+      .filter(candidate => candidate.equipmentKey === '無線追')
+      .map(candidate => candidate.name)
+      .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    assert.deepEqual(names, ['李庭緯', '洪稚森', '馮翰偉'].sort((a, b) => a.localeCompare(b, 'zh-Hant')));
+  } finally {
+    installGlobals(runtime);
+  }
+});
+
 test('assistant can grade failed external oral retest by student and equipment', () => {
   const attendance = runtime.openById(ids.externalResults).getSheetByName('LINE點名紀錄');
   const bindings = runtime.openById(ids.master).getSheetByName('用戶綁定');
