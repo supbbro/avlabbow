@@ -148,9 +148,8 @@ async function sendSecondRetestVisibilityTestToHsinYu() {
   return 1;
 }
 
-async function sendHomeRecoveryToHsinYu() {
-  const name = '黃忻妤';
-  const logKey = 'RECOVERY:HOME-NAVIGATION:2026-10-27:V1:黃忻妤';
+async function sendHomeRecovery(name) {
+  const logKey = `RECOVERY:HOME-NAVIGATION:2026-10-27:V1:${name}`;
   const logSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName('LINE補發紀錄');
   if (!logSheet) throw new Error('找不到 LINE補發紀錄');
   if (logSheet.getDataRange().getValues().slice(1).some(row => String(row[0] || '') === logKey)) return 0;
@@ -448,7 +447,8 @@ app.listen(port, '0.0.0.0', error => {
     enqueue(async () => {
       await runtime.loadOnly([ids.master, ids.externalResults], { force: true });
       const sent = await sendSecondRetestVisibilityTestToHsinYu();
-      const recovered = await sendHomeRecoveryToHsinYu();
+      let recovered = 0;
+      for (const name of ['黃忻妤', '鍾采彤']) recovered += await sendHomeRecovery(name);
       const delivery = await runtime.flush();
       console.log(`Startup one-time messages: retest=${sent}, homeRecovery=${recovered}, flushed=${delivery.delivered}, failed=${delivery.failed}`);
     }, 'background').catch(error => console.error('Second-retest visibility test failed:', error));
