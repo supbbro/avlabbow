@@ -1702,7 +1702,7 @@ function firstRetestReminderText(name, candidates, now) {
     const parts = item.disqualified || (item.shortFailed && !item.shortPassed) ? '簡答題＋上機' : '上機';
     return `• ${item.equipment}（${parts}）`;
   }).join('\n');
-  return `提醒\n${name}你好，你目前以下項目尚未完成補考報名：\n${items}\n\n補考報名已在 10/23 截止，但若您有補考需求而來不及報名，請務必在 10/25 12:00 前完成報名。\n\n【重要提醒】\n同一組必須全組成員都通過該項器材，整組才會取得器材資格。請記得完成未通過項目的補考報名，以免影響全組器材資格。\n\n【保證金退費機制】\n• 考試週未到：補考週通過簡答題與上機後，原考試保證金可以退費。\n• 考試週有到但未通過：補考週通過後，原考試保證金可以退費。\n• 因考試前一天仍未繳保證金而取消資格：補考通過仍不可退原考試保證金。\n\n若簡答題尚未通過，仍可先填寫補考報名表，但須先通過簡答題，才有上機補考資格。`;
+  return `提醒\n${name}你好，你目前以下項目尚未完成補考報名：\n${items}\n\n補考報名已在 10/23 截止，但若您有補考需求而來不及報名，請務必在 10/25 12:00 前完成報名。\n\n【重要提醒】\n同一組必須全組成員都通過該項器材，整組才會取得器材資格。請記得完成未通過項目的補考報名，以免影響全組器材資格。\n\n【保證金退費機制】\n• 考試週出席狀態為「缺席」：補考週通過簡答題與上機後，原考試保證金可以退費。\n• 考試週有到但未通過：補考週通過後，原考試保證金可以退費。\n• 考試週出席狀態為「取消資格」：補考通過仍不可退原考試保證金。\n\n若簡答題尚未通過，仍可先填寫補考報名表，但須先通過簡答題，才有上機補考資格。`;
 }
 
 function sendFirstRetestRegistrationReminders(now = new Date()) {
@@ -2053,8 +2053,7 @@ function originalExamRefundRestriction(task, student) {
   });
   const restrictionRows = rows.filter(row => {
     const attendance = String(row[9] || '');
-    const operator = String(row[13] || '');
-    return attendance === '取消資格' && operator === '保證金未繳';
+    return attendance === '取消資格';
   });
   const rowTime = row => {
     const updated = row[15] instanceof Date ? row[15] : new Date(row[15]);
@@ -2079,8 +2078,14 @@ function originalExamRefundRestriction(task, student) {
   if (currentTaskManuallyArrived) manualArrivalTimes.push(Date.now());
   const laterManualArrival = manualArrivalTimes.some(time => time >= latestRestrictionTime);
   if (laterManualArrival) return null;
-  const detail = '考試週因考試前一天仍未繳保證金而取消資格';
-  return { detail, unpaid: true, absent: false };
+  const unpaid = unpaidEvents.length > 0 || restrictionRows.some(row => String(row[13] || '') === '保證金未繳');
+  const timedOut = restrictionRows.some(row => isArrivalTimeoutOperator(row[13]));
+  const detail = unpaid
+    ? '考試週因考試前一天仍未繳保證金而取消資格'
+    : timedOut
+      ? '考試週出席狀態為取消資格（逾時未到）'
+      : '考試週出席狀態為取消資格';
+  return { detail, unpaid, canceled: true };
 }
 
 function depositRefundPolicy(task, student, options = {}) {

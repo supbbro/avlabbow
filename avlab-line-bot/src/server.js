@@ -76,7 +76,7 @@ async function sendFirstRetestTestToHsinYu() {
   if (logSheet.getDataRange().getValues().slice(1).some(row => String(row[0] || '') === logKey)) return 0;
   const userId = externalTeaching._test.userIdForName(name, '');
   if (!userId) throw new Error(`${name} 尚未綁定 LINE`);
-  const message = `【功能測試｜不代表本人有未通過項目】\n補考報名提醒\n${name}你好，你目前以下測試項目尚未完成補考報名：\n• H6（簡答題＋上機）\n• A7S3（上機）\n\n如果有補考報名需求，記得在 10/25 12:00 前完成報名。\n\n【保證金退費機制】\n• 考試週未到：補考週通過簡答題與上機後，原考試保證金可以退費。\n• 考試週有到但未通過：補考週通過後，原考試保證金可以退費。\n• 因考試前一天仍未繳保證金而取消資格：補考通過仍不可退原考試保證金。\n\n若簡答題尚未通過，仍可先填寫補考報名表，但須先通過簡答題，才有上機補考資格。\n\n※ 上列為測試項目，本訊息僅供版面與文案測試，尚未群發。`;
+  const message = `【功能測試｜不代表本人有未通過項目】\n補考報名提醒\n${name}你好，你目前以下測試項目尚未完成補考報名：\n• H6（簡答題＋上機）\n• A7S3（上機）\n\n如果有補考報名需求，記得在 10/25 12:00 前完成報名。\n\n【保證金退費機制】\n• 考試週出席狀態為「缺席」：補考週通過簡答題與上機後，原考試保證金可以退費。\n• 考試週有到但未通過：補考週通過後，原考試保證金可以退費。\n• 考試週出席狀態為「取消資格」：補考通過仍不可退原考試保證金。\n\n若簡答題尚未通過，仍可先填寫補考報名表，但須先通過簡答題，才有上機補考資格。\n\n※ 上列為測試項目，本訊息僅供版面與文案測試，尚未群發。`;
   await lineRequest('/message/push', {
     to: userId,
     messages: [{

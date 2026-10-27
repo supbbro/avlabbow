@@ -1177,9 +1177,9 @@ test('one-time first-retest reminder includes short-answer candidates, deadline,
     assert.doesNotMatch(push.messages[0].text, /A7S3|Dwarf/);
     assert.match(push.messages[0].text, /10\/25 12:00 前完成報名/);
     assert.match(push.messages[0].text, /全組成員都通過該項器材.*整組才會取得器材資格/s);
-    assert.match(push.messages[0].text, /考試週未到.*原考試保證金可以退費/s);
+    assert.match(push.messages[0].text, /出席狀態為「缺席」.*原考試保證金可以退費/s);
     assert.match(push.messages[0].text, /考試週有到但未通過.*保證金可以退費/s);
-    assert.match(push.messages[0].text, /考試前一天仍未繳保證金.*不可退原考試保證金/s);
+    assert.match(push.messages[0].text, /出席狀態為「取消資格」.*不可退原考試保證金/s);
     const shortPush = isolated.httpOperations.map(operation => JSON.parse(operation.options.payload)).find(payload => payload.to === 'U-R003');
     assert.match(shortPush.messages[0].text, /Dwarf圖傳（簡答題＋上機）/);
     assert.match(shortPush.messages[0].text, /仍可先填寫補考報名表/);
@@ -1330,7 +1330,7 @@ test('deposit workbook parser normalizes initial and retest payment rows', () =>
   assert.equal(externalTeaching._test.dayBeforeDate(new Date('2026-10-09T00:00:00+08:00')), '2026-10-08');
 });
 
-test('exam-week absence remains refundable after passing a retest while unpaid disqualification does not', () => {
+test('exam-week canceled qualification blocks refunds while a corrected absence does not', () => {
   const isolated = new GoogleSheetsRuntime();
   installGlobals(isolated);
   try {
@@ -1355,22 +1355,23 @@ test('exam-week absence remains refundable after passing a retest while unpaid d
     const originalRow = attendance.getLastRow();
 
     let policy = externalTeaching._test.depositRefundPolicy(task, student);
-    assert.equal(policy.refundable, true);
-    assert.equal(policy.examWeekRestriction, undefined);
+    assert.equal(policy.refundable, false);
+    assert.equal(policy.examWeekRestriction, true);
+    assert.match(policy.detail, /出席狀態為取消資格/);
     let card = externalTeaching.handleCommand(`查看考生 ${task.id} ${student.id}`, { sourceType: 'group', chatId: 'G1', userId: 'U1' });
-    assert.doesNotMatch(card.text, /【重點】不可退保證金/);
-    assert.match(card.text, /保證金：✅ 可退保證金/);
+    assert.match(card.text, /【重點】不可退保證金/);
+    assert.match(card.text, /不可退原因：考試週出席狀態為取消資格/);
     const valueTexts = card.lineMessage.contents.body.contents.flatMap(item => item.contents || [item]);
-    assert.equal(valueTexts.find(item => item.text === '✅ 可退保證金')?.color, '#2E7D32');
+    assert.equal(valueTexts.find(item => item.text === '🚫 不可退保證金')?.color, '#C62828');
 
-    attendance.getRange(originalRow, 10).setValue('到場');
+    attendance.getRange(originalRow, 10).setValue('缺席');
     attendance.getRange(originalRow, 14).setValue('人工修正');
     attendance.getRange(originalRow, 16).setValue(new Date('2026-10-27T17:00:00+08:00'));
     policy = externalTeaching._test.depositRefundPolicy(task, student);
     assert.equal(policy.examWeekRestriction, undefined);
     assert.equal(policy.refundable, true);
     card = externalTeaching.handleCommand(`查看考生 ${task.id} ${student.id}`, { sourceType: 'group', chatId: 'G1', userId: 'U1' });
-    assert.doesNotMatch(card.text, /考試週未到/);
+    assert.doesNotMatch(card.text, /出席狀態為取消資格/);
 
     const unpaidStudent = { id: 'S-REFUND-UNPAID', name: '未繳退費測試生', number: 'REFUND-HISTORY-002', attendance: '到場', result: '全部通過' };
     attendance.appendRow([
