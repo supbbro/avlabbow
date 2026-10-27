@@ -89,6 +89,33 @@ async function sendFirstRetestTestToHsinYu() {
   return 1;
 }
 
+async function sendSecondRetestVisibilityTestToHsinYu() {
+  const name = '黃忻妤';
+  const logKey = 'TEST:SECOND-RETEST-EXAMINER-ONLY:2026-10-27:V1:黃忻妤';
+  const logSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName('LINE補發紀錄');
+  if (!logSheet) throw new Error('找不到 LINE補發紀錄');
+  if (logSheet.getDataRange().getValues().slice(1).some(row => String(row[0] || '') === logKey)) return 0;
+  const userId = externalTeaching._test.userIdForName(name, '');
+  if (!userId) throw new Error(`${name} 尚未綁定 LINE`);
+  const formUrl = externalTeaching._test.retestForm({ phase: '第一次補考' }).url;
+  await lineRequest('/message/push', {
+    to: userId,
+    messages: [
+      {
+        type: 'text',
+        text: `【功能測試｜考官畫面】\n測試考生的上機第一次補考未通過，需要第二次補考。\n\n請考官協助考生完成第二次補考報名，並向考生收取 100 元報名費；該費用不退費。\n\n第二次補考報名網址：\n${formUrl}\n\n※ 本訊息僅測試版面，不會建立任何補考或收費紀錄。`,
+        quickReply: { items: [{ type: 'action', action: { type: 'uri', label: '第二次補考報名', uri: formUrl } }] }
+      },
+      {
+        type: 'text',
+        text: '【功能測試｜考生畫面】\n你的測試項目需要第二次補考。請洽現場考官，由考官協助完成報名。第二次補考須繳交 100 元報名費，且不退費。\n\n※ 考生訊息不會附報名網址；本訊息不代表本人有未通過項目。'
+      }
+    ]
+  });
+  logSheet.appendRow([logKey, userId, '第二次補考考官／考生訊息權限測試', new Date()]);
+  return 1;
+}
+
 function toLineMessage(reply) {
   const normalized = typeof reply === 'string' ? { text: reply } : reply;
   if (normalized?.lineMessage) return normalized.lineMessage;
@@ -366,6 +393,14 @@ app.listen(port, '0.0.0.0', error => {
     return;
   }
   console.log(`Listening on port ${port}`);
+  setTimeout(() => {
+    enqueue(async () => {
+      await runtime.loadOnly([ids.master, ids.externalResults], { force: true });
+      const sent = await sendSecondRetestVisibilityTestToHsinYu();
+      const delivery = await runtime.flush();
+      console.log(`Second-retest visibility test: sent=${sent}, flushed=${delivery.delivered}, failed=${delivery.failed}`);
+    }, 'background').catch(error => console.error('Second-retest visibility test failed:', error));
+  }, 7_000).unref();
   setTimeout(() => {
     if (formatDate(new Date(), 'yyyy-MM-dd') !== '2026-10-24') return;
     enqueue(async () => {
