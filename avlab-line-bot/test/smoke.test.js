@@ -1123,26 +1123,62 @@ test('a bound student receives a teaching reminder without an automatic late rul
 });
 
 test('failed exam stages select the next retest form and stop after the second retest', () => {
+  const secondRetestUrl = 'https://docs.google.com/forms/d/e/1FAIpQLScq1u-GkuWTStst5s6UDT2puDOM3XkEy5R8Xq3H6Smd-Wn5Jg/viewform?usp=publish-editor';
   const examinerShort = externalTeaching._test.examinerRetestInstructions({ phase: '考試' }, ['簡答題']);
   assert.match(examinerShort, /簡答題未通過：補考週可/);
   assert.doesNotMatch(examinerShort, /上機未通過：|報名表：https/);
   const examinerPractical = externalTeaching._test.examinerRetestInstructions({ phase: '第一次補考' }, ['上機']);
-  assert.match(examinerPractical, /第二次補考上機考報名表：https:\/\/forms\.gle\/t1vrm4U43xMhoWxD9/);
-  assert.match(examinerPractical, /100 元，且不退費/);
+  assert.match(examinerPractical, /請考官協助考生填寫第二次補考報名表/);
+  assert.match(examinerPractical, /收取 100 元報名費/);
+  assert.match(examinerPractical, /1FAIpQLScq1u-GkuWTStst5s6UDT2puDOM3XkEy5R8Xq3H6Smd-Wn5Jg/);
   assert.doesNotMatch(examinerPractical, /簡答題未通過：/);
   const finalAttempt = externalTeaching._test.examinerRetestInstructions({ phase: '第二次補考' }, ['上機']);
   assert.match(finalAttempt, /上機未通過；本次是第二次補考/);
   assert.doesNotMatch(finalAttempt, /報名表：https|簡答題未通過：/);
   assert.equal(externalTeaching._test.retestForm({ phase: '考試' }).url, 'https://docs.google.com/forms/d/e/1FAIpQLSda8PZ99qiviZlSbP3gsJlYSxqK0u3ELzns3isB_Hh9TjySPw/viewform?usp=header');
-  assert.equal(externalTeaching._test.retestForm({ phase: '第一次補考' }).url, 'https://forms.gle/t1vrm4U43xMhoWxD9');
+  assert.equal(externalTeaching._test.retestForm({ phase: '第一次補考' }).url, secondRetestUrl);
+  assert.equal(externalTeaching._test.retestForm({ phase: '第一次補考' }).examinerOnly, true);
   assert.equal(externalTeaching._test.retestForm({ phase: '第二次補考' }).finalAttempt, true);
   assert.match(externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第一次補考', 'https://forms.gle/first'), /第二次補考須繳交 100 元，且不退費/);
-  assert.match(externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第二次補考', 'https://forms.gle/second'), /第二次補考須繳交 100 元，且不退費/);
+  const secondRetestStudentMessage = externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第二次補考', secondRetestUrl);
+  assert.match(secondRetestStudentMessage, /請洽現場考官.*協助.*第二次補考報名/s);
+  assert.match(secondRetestStudentMessage, /100 元報名費/);
+  assert.doesNotMatch(secondRetestStudentMessage, /https:\/\/|1FAIpQLScq1u/);
   const shortOnly = externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['簡答題'], '第一次補考', '');
   assert.match(shortOnly, /補考週期間.*隨時到場進行口頭補考/);
   assert.doesNotMatch(shortOnly, /報名連結|forms\.gle/);
   const practical = externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第一次補考', 'https://forms.gle/first');
   assert.match(practical, /報名連結：https:\/\/forms\.gle\/first/);
+});
+
+test('second-retest form is shown to the examiner but never sent to the student', () => {
+  const resultBook = runtime.openById(ids.externalResults);
+  const tasks = resultBook.getSheetByName('對外任務');
+  const students = resultBook.getSheetByName('任務學生');
+  const attendance = resultBook.getSheetByName('LINE點名紀錄');
+  const bindings = runtime.openById(ids.master).getSheetByName('用戶綁定');
+  const context = { sourceType: 'group', chatId: 'G1', userId: 'U1' };
+  const url = 'https://docs.google.com/forms/d/e/1FAIpQLScq1u-GkuWTStst5s6UDT2puDOM3XkEy5R8Xq3H6Smd-Wn5Jg/viewform?usp=publish-editor';
+  const equipment = '第二次補考連結測試器材';
+  tasks.appendRow(['T-SECOND-RETEST-LINK','1151','第一次補考',new Date('2026-10-29'),'12:00','13:00',equipment,'401','測試者','','G1','已排定',true,true,'','','','']);
+  students.appendRow(['T-SECOND-RETEST-LINK','S-SECOND-RETEST-LINK','二補連結測試生','SECOND-LINK-001',1,'未點名','未記錄','']);
+  students.appendRow(['T-SECOND-RETEST-LINK','S-SECOND-RETEST-PENDING','尚未點名生','SECOND-LINK-002',2,'未點名','未記錄','']);
+  attendance.appendRow(['ORIGINAL-SECOND-RETEST-LINK','T-ORIGINAL-SECOND-RETEST',new Date('2026-10-20'),'12:00','考試',equipment,'S-SECOND-RETEST-LINK','二補連結測試生','SECOND-LINK-001','到場','通過','未通過','僅簡答題通過','測試考官','U1',new Date(),'通過','未通過','不可退保證金']);
+  bindings.appendRow(['U-SECOND-RETEST-STUDENT','二補連結測試生','','SECOND-LINK-001','external_student']);
+
+  externalTeaching.handleCommand('點名狀態 T-SECOND-RETEST-LINK S-SECOND-RETEST-LINK 到場', context);
+  runtime.httpOperations = [];
+  const failed = externalTeaching.handleCommand('上機登記 T-SECOND-RETEST-LINK S-SECOND-RETEST-LINK 未通過', context);
+  assert.match(failed.text, /請考官協助考生填寫第二次補考報名表/);
+  assert.match(failed.text, /收取 100 元報名費/);
+  assert.equal(allActions(failed).some(action => action.type === 'uri' && action.uri === url), true);
+
+  assert.equal(runtime.httpOperations.length, 1);
+  const studentPush = JSON.parse(runtime.httpOperations[0].options.payload);
+  assert.equal(studentPush.to, 'U-SECOND-RETEST-STUDENT');
+  assert.match(studentPush.messages[0].text, /請洽現場考官/);
+  assert.match(studentPush.messages[0].text, /100 元報名費/);
+  assert.doesNotMatch(JSON.stringify(studentPush), /1FAIpQLScq1u-GkuWTStst5s6UDT2puDOM3XkEy5R8Xq3H6Smd-Wn5Jg|publish-editor/);
 });
 
 test('one-time first-retest reminder includes short-answer candidates, deadline, and refund rules', () => {

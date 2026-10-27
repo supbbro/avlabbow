@@ -19,6 +19,7 @@ const EXAM_PASSING_RULES = '【考試通過標準】\n• 簡答題：考制度 
 const COMBINED_QUESTION_BANK_URL = 'https://drive.google.com/drive/folders/1e2ZLeGh5wKkncOCji7lczR23Ogq6Gr6X';
 const EXTERNAL_CLASS_SCHEDULE_URL = 'https://docs.google.com/spreadsheets/d/1oaEKt3JVxcdy8yPBGZAuRh3lkhnvRoIJ9rTNbj-Gh9I/edit?gid=0#gid=0';
 const FIRST_RETEST_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSda8PZ99qiviZlSbP3gsJlYSxqK0u3ELzns3isB_Hh9TjySPw/viewform?usp=header';
+const SECOND_RETEST_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScq1u-GkuWTStst5s6UDT2puDOM3XkEy5R8Xq3H6Smd-Wn5Jg/viewform?usp=publish-editor';
 const FIRST_RETEST_REMINDER_DATE = '2026-10-24';
 const FIRST_RETEST_REGISTRATION_DEADLINE = new Date('2026-10-25T12:00:00+08:00');
 const FIRST_RETEST_RESPONSE_SHEET = '表單回覆 1';
@@ -1358,9 +1359,12 @@ function examStudentNextStep(task, student, { notify = false } = {}) {
   const lines = [`【${student.name} 接下來】`];
   if (failedParts.includes('簡答題')) lines.push('❌ 簡答未過：補考週到影音實驗室補考，不用填表。');
   else if (form.finalAttempt) lines.push('❌ 上機未過：第二次補考結束，請依實驗室規定處理。');
+  else if (form.examinerOnly) {
+    lines.push('❌ 上機未過：請考官協助考生填寫第二次補考報名表。');
+    lines.push('💰 請考官向考生收取 100 元報名費；該費用不退費。');
+  }
   else {
     lines.push(`❌ 上機未過：請填${form.label}上機考表單。`);
-    if (form.label === '第二次補考') lines.push('第二次補考須繳 100 元，且不退費。');
   }
   if (notification && !notification.sent) lines.push(notification.configured
     ? '⚠️ 考生尚未綁定 LINE，請現場告知。'
@@ -1603,11 +1607,11 @@ function validFormUrl(value) {
 
 function retestForm(task) {
   const phase = String(task?.phase || '');
-  if (phase.includes('第二次補考')) return { url: '', label: '', finalAttempt: true };
+  if (phase.includes('第二次補考')) return { url: '', label: '', finalAttempt: true, examinerOnly: false };
   if (phase.includes('第一次補考')) {
-    return { url: validFormUrl(process.env.EXTERNAL_SECOND_RETEST_FORM_URL || 'https://forms.gle/t1vrm4U43xMhoWxD9'), label: '第二次補考', finalAttempt: false };
+    return { url: validFormUrl(process.env.EXTERNAL_SECOND_RETEST_FORM_URL || SECOND_RETEST_FORM_URL), label: '第二次補考', finalAttempt: false, examinerOnly: true };
   }
-  return { url: validFormUrl(process.env.EXTERNAL_FIRST_RETEST_FORM_URL || process.env.EXTERNAL_RETEST_FORM_URL || FIRST_RETEST_FORM_URL), label: '第一次補考', finalAttempt: false };
+  return { url: validFormUrl(process.env.EXTERNAL_FIRST_RETEST_FORM_URL || process.env.EXTERNAL_RETEST_FORM_URL || FIRST_RETEST_FORM_URL), label: '第一次補考', finalAttempt: false, examinerOnly: false };
 }
 
 function retestEquipmentKeys(value) {
@@ -1739,9 +1743,15 @@ function sendFirstRetestRegistrationReminders(now = new Date()) {
   return sent;
 }
 
-function cancellationRetestGuidance(task) {
+function cancellationRetestGuidance(task, examiner = false) {
   const form = retestForm(task);
   if (form.finalAttempt) return { text: '本次為第二次補考，已無下一次補考表單，請直接聯絡影音實驗室。', form };
+  if (form.examinerOnly) return {
+    text: examiner
+      ? `若考生仍要參加本項考試，請考官協助填寫${form.label}報名表並收取 100 元報名費；該費用不退費。${form.url ? `\n報名連結：${form.url}` : '\n補考連結尚未設定，請聯絡教學部。'}`
+      : `若仍要參加本項考試，請洽現場考官協助完成${form.label}報名；須繳交 100 元報名費，且不退費。`,
+    form
+  };
   return {
     text: `若仍要參加本項考試，請重新報名${form.label}。該次補考保證金不退費。${form.url ? `\n報名連結：${form.url}` : '\n補考連結尚未設定，請聯絡影音實驗室。'}`,
     form
@@ -1749,7 +1759,7 @@ function cancellationRetestGuidance(task) {
 }
 
 function qualificationCancellationMessage(task, student, reason, examiner = false) {
-  const guidance = cancellationRetestGuidance(task);
+  const guidance = cancellationRetestGuidance(task, examiner);
   const graceLabel = depositGraceLabel(student);
   const reasonText = reason === '保證金未繳'
     ? graceLabel
@@ -1768,23 +1778,29 @@ function examinerRetestInstructions(task, failedParts) {
     lines.push(`• ${failedParts.join('、')}未通過；本次是第二次補考，沒有下一次補考表單，請依實驗室規定處理。`);
   } else {
     if (failedParts.includes('簡答題')) lines.push('• 簡答題未通過：補考週可於影音實驗室開放時間到場口頭補考，由助理登記，不需填上機報名表。');
-    if (failedParts.includes('上機')) lines.push(`• 上機未通過：請考生填寫${form.label}上機考報名表${form.url ? `：${form.url}` : '（請向教學部確認連結）'}。`);
-    if (form.label === '第二次補考') lines.push('• 第二次補考須繳交 100 元，且不退費。');
-    else lines.push('• 若第一次補考仍未通過，第二次補考須繳交 100 元，且不退費。');
+    if (failedParts.includes('上機') && form.examinerOnly) lines.push(`• 上機未通過：請考官協助考生填寫${form.label}報名表${form.url ? `：${form.url}` : '（請向教學部確認連結）'}。`);
+    else if (failedParts.includes('上機')) lines.push(`• 上機未通過：請考生填寫${form.label}上機考報名表${form.url ? `：${form.url}` : '（請向教學部確認連結）'}。`);
+    if (form.examinerOnly && failedParts.includes('上機')) lines.push('• 請考官向考生收取 100 元報名費；該費用不退費。');
+    else if (!form.examinerOnly) lines.push('• 若第一次補考仍未通過，第二次補考須繳交 100 元，且不退費。');
   }
   lines.push('• LINE 私訊僅供輔助，請當面確認考生知道下一步。');
   return lines.join('\n');
 }
 
 function retestMessage(task, student, failedParts, label, url, corrected = false) {
-  const feeNotice = label === '第二次補考'
-    ? '\n\n💰 第二次補考須繳交 100 元，且不退費。'
-    : '\n\n提醒：若第一次補考仍未通過，申請第二次補考須繳交 100 元，且不退費。';
+  const examinerOnly = label === '第二次補考';
   const short = failedParts.includes('簡答題');
   const practical = failedParts.includes('上機');
+  const feeNotice = examinerOnly && practical
+    ? '\n\n💰 第二次補考須繳交 100 元報名費，且不退費；請洽現場考官協助報名。'
+    : !examinerOnly
+      ? '\n\n提醒：若第一次補考仍未通過，申請第二次補考須繳交 100 元，且不退費。'
+      : '';
   const instructions = [
     short ? '🗣️ 簡答題：請在補考週期間，於影音實驗室開放時間隨時到場進行口頭補考；不必填寫上機報名表。現場助理會登記結果。' : '',
-    practical ? `🎬 上機考：請填寫${label}上機考報名表，依後續安排應試。${short ? '須先通過簡答題，才可參加上機考。' : ''}${url ? `\n報名連結：${url}` : ''}` : ''
+    practical ? examinerOnly
+      ? `🎬 上機考：請洽現場考官，由考官協助完成${label}報名。${short ? '須先通過簡答題，才可參加上機考。' : ''}`
+      : `🎬 上機考：請填寫${label}上機考報名表，依後續安排應試。${short ? '須先通過簡答題，才可參加上機考。' : ''}${url ? `\n報名連結：${url}` : ''}` : ''
   ].filter(Boolean).join('\n\n');
   const heading = corrected ? `考試結果更正｜${label || '補考'}提醒` : `${label || '補考'}提醒`;
   return `【${heading}】\n${student.name}你好，你的 ${task.equipment} 考試尚有項目未通過：${failedParts.join('、')}。\n\n${instructions}${feeNotice}`;
@@ -1811,8 +1827,9 @@ function notifyStudentForExamOutcome(task, student, { corrected = false } = {}) 
   const form = retestForm(task);
   const needsForm = failedParts.includes('上機') && !form.finalAttempt;
   if (needsForm && !form.url) return { sent: false, configured: false, finalAttempt: form.finalAttempt };
-  const actions = needsForm ? [{ label: '上機補考報名', uri: form.url }] : [];
-  queuePush(studentUserId, reply(retestMessage(task, student, failedParts, form.label, needsForm ? form.url : '', corrected), actions));
+  const studentCanOpenForm = needsForm && !form.examinerOnly;
+  const actions = studentCanOpenForm ? [{ label: '上機補考報名', uri: form.url }] : [];
+  queuePush(studentUserId, reply(retestMessage(task, student, failedParts, form.label, studentCanOpenForm ? form.url : '', corrected), actions));
   return { sent: true, configured: true, finalAttempt: form.finalAttempt, outcome: 'retest' };
 }
 
@@ -2336,7 +2353,8 @@ function notifyUnpaidCancellation(task, student, now, logSheet, logged) {
   const studentUserId = userIdForName(student.name, student.number);
   const studentKey = `DEPOSIT-CANCEL-STUDENT:${task.id}:${student.id}`;
   if (studentUserId && !logged.has(studentKey) && !pendingReminderKeys.has(studentKey)) {
-    const actions = studentMessage.form.url ? [{ label: `${studentMessage.form.label}報名`, uri: studentMessage.form.url }] : [];
+    const actions = studentMessage.form.url && !studentMessage.form.examinerOnly
+      ? [{ label: `${studentMessage.form.label}報名`, uri: studentMessage.form.url }] : [];
     queuePush(studentUserId, reply(studentMessage.text, actions), {
       key: studentKey,
       onSuccess: () => logDepositAction(logSheet, studentKey, '未繳取消通知考生', student, task, now, '已送／補考不退費')
@@ -2346,7 +2364,9 @@ function notifyUnpaidCancellation(task, student, now, logSheet, logged) {
   const examinerKey = `DEPOSIT-CANCEL-EXAMINER:${task.id}:${student.id}:${examinerUserId}`;
   if (examinerUserId && !logged.has(examinerKey) && !pendingReminderKeys.has(examinerKey)) {
     const examinerMessage = qualificationCancellationMessage(task, student, '保證金未繳', true);
-    queuePush(examinerUserId, reply(examinerMessage.text), {
+    const examinerActions = examinerMessage.form.url && examinerMessage.form.examinerOnly
+      ? [{ label: `${examinerMessage.form.label}報名`, uri: examinerMessage.form.url }] : [];
+    queuePush(examinerUserId, reply(examinerMessage.text, examinerActions), {
       key: examinerKey,
       onSuccess: () => logDepositAction(logSheet, examinerKey, '未繳取消通知考官', student, task, now, '已送')
     });
@@ -2530,7 +2550,8 @@ function notifyNoShowCancellation(task, student, now = new Date(), logSheet = de
   const studentUserId = userIdForName(student.name, student.number);
   const studentKey = `EXAM-NO-SHOW-STUDENT:${task.id}:${student.id}`;
   if (studentUserId && !logged.has(studentKey) && !pendingReminderKeys.has(studentKey)) {
-    const actions = studentMessage.form.url ? [{ label: `${studentMessage.form.label}報名`, uri: studentMessage.form.url }] : [];
+    const actions = studentMessage.form.url && !studentMessage.form.examinerOnly
+      ? [{ label: `${studentMessage.form.label}報名`, uri: studentMessage.form.url }] : [];
     queuePush(studentUserId, reply(studentMessage.text, actions), {
       key: studentKey,
       onSuccess: () => logDepositAction(logSheet, studentKey, '逾時未到通知考生', student, task, now, '已送／補考不退費')
@@ -2540,7 +2561,9 @@ function notifyNoShowCancellation(task, student, now = new Date(), logSheet = de
   const examinerKey = `EXAM-NO-SHOW-EXAMINER:${task.id}:${student.id}:${examinerUserId}`;
   if (examinerUserId && !logged.has(examinerKey) && !pendingReminderKeys.has(examinerKey)) {
     const examinerMessage = qualificationCancellationMessage(task, student, EXAM_ARRIVAL_TIMEOUT_OPERATOR, true);
-    queuePush(examinerUserId, reply(examinerMessage.text), {
+    const examinerActions = examinerMessage.form.url && examinerMessage.form.examinerOnly
+      ? [{ label: `${examinerMessage.form.label}報名`, uri: examinerMessage.form.url }] : [];
+    queuePush(examinerUserId, reply(examinerMessage.text, examinerActions), {
       key: examinerKey,
       onSuccess: () => logDepositAction(logSheet, examinerKey, '逾時未到通知考官', student, task, now, '已送')
     });
