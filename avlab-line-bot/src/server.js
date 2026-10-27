@@ -91,21 +91,56 @@ async function sendFirstRetestTestToHsinYu() {
 
 async function sendSecondRetestVisibilityTestToHsinYu() {
   const name = '黃忻妤';
-  const logKey = 'TEST:SECOND-RETEST-STUDENT-FORMAT:2026-10-27:V2:黃忻妤';
+  const logKey = 'TEST:SECOND-RETEST-EXAMINER-CARD:2026-10-27:V3:黃忻妤';
   const logSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName('LINE補發紀錄');
   if (!logSheet) throw new Error('找不到 LINE補發紀錄');
   if (logSheet.getDataRange().getValues().slice(1).some(row => String(row[0] || '') === logKey)) return 0;
   const userId = externalTeaching._test.userIdForName(name, '');
   if (!userId) throw new Error(`${name} 尚未綁定 LINE`);
-  const fakeTask = { phase: '第一次補考', equipment: 'H6' };
-  const fakeStudent = { name: '測試考生小光' };
-  const form = externalTeaching._test.retestForm(fakeTask);
-  const message = `${externalTeaching._test.retestMessage(fakeTask, fakeStudent, ['上機'], form.label, '')}\n\n※ 功能測試：以上皆為假考生資料，不代表任何人的真實考試結果，也不會建立補考紀錄。`;
+  const form = externalTeaching._test.retestForm({ phase: '第一次補考' });
+  const statusRow = (label, value, color = '#222222') => ({
+    type: 'box', layout: 'horizontal', spacing: 'md',
+    contents: [
+      { type: 'text', text: label, size: 'sm', color: '#777777', flex: 3 },
+      { type: 'text', text: value, size: 'sm', color, weight: 'bold', flex: 7, align: 'end', wrap: true }
+    ]
+  });
+  const message = {
+    type: 'flex',
+    altText: '功能測試｜第二次補考考官卡片',
+    contents: {
+      type: 'bubble', size: 'kilo',
+      header: {
+        type: 'box', layout: 'vertical', paddingAll: '14px', backgroundColor: '#F5F5F5',
+        contents: [
+          { type: 'text', text: '功能測試｜考官畫面', size: 'sm', color: '#666666', weight: 'bold' },
+          { type: 'text', text: '測試考生小光', size: 'xl', color: '#222222', weight: 'bold', margin: 'sm' },
+          { type: 'text', text: 'H6｜第一次補考結果', size: 'xs', color: '#888888', margin: 'sm' }
+        ]
+      },
+      body: {
+        type: 'box', layout: 'vertical', paddingAll: '16px', spacing: 'md',
+        contents: [
+          { type: 'text', text: '學號 TEST001', size: 'sm', color: '#555555' },
+          statusRow('出席', '到場'),
+          statusRow('簡答題', '✅ 通過', '#2E7D32'),
+          statusRow('上機', '❌ 未通過', '#C62828'),
+          { type: 'separator', color: '#DDDDDD' },
+          { type: 'text', text: '【測試考生小光 接下來】\n❌ 上機未過：請考官協助考生填寫第二次補考報名表。\n💰 請考官向考生收取 100 元報名費；該費用不退費。', size: 'sm', color: '#333333', wrap: true },
+          { type: 'text', text: '※ 功能測試：以上皆為假資料，不會建立補考或收費紀錄。', size: 'xs', color: '#888888', wrap: true }
+        ]
+      },
+      footer: {
+        type: 'box', layout: 'vertical', paddingAll: '12px',
+        contents: [{ type: 'button', style: 'primary', height: 'sm', action: { type: 'uri', label: '第二次補考報名', uri: form.url } }]
+      }
+    }
+  };
   await lineRequest('/message/push', {
     to: userId,
-    messages: [{ type: 'text', text: message }]
+    messages: [message]
   });
-  logSheet.appendRow([logKey, userId, '第二次補考考生通知版型測試（假資料）', new Date()]);
+  logSheet.appendRow([logKey, userId, '第二次補考考官卡片版型測試（假資料）', new Date()]);
   return 1;
 }
 
