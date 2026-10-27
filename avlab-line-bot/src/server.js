@@ -148,6 +148,25 @@ async function sendSecondRetestVisibilityTestToHsinYu() {
   return 1;
 }
 
+async function sendHomeRecoveryToHsinYu() {
+  const name = '黃忻妤';
+  const logKey = 'RECOVERY:HOME-NAVIGATION:2026-10-27:V1:黃忻妤';
+  const logSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName('LINE補發紀錄');
+  if (!logSheet) throw new Error('找不到 LINE補發紀錄');
+  if (logSheet.getDataRange().getValues().slice(1).some(row => String(row[0] || '') === logKey)) return 0;
+  const userId = externalTeaching._test.userIdForName(name, '');
+  if (!userId) throw new Error(`${name} 尚未綁定 LINE`);
+  await lineRequest('/message/push', {
+    to: userId,
+    messages: [{
+      type: 'text',
+      text: '✅ 導覽已恢復\n\n先前收到的舊卡片無法補上新按鈕；請按下方「回首頁」重新進入，即可繼續使用。'
+    }]
+  });
+  logSheet.appendRow([logKey, userId, '首頁導覽恢復訊息', new Date()]);
+  return 1;
+}
+
 function toLineMessage(reply) {
   const normalized = typeof reply === 'string' ? { text: reply } : reply;
   if (normalized?.lineMessage) return normalized.lineMessage;
@@ -429,8 +448,9 @@ app.listen(port, '0.0.0.0', error => {
     enqueue(async () => {
       await runtime.loadOnly([ids.master, ids.externalResults], { force: true });
       const sent = await sendSecondRetestVisibilityTestToHsinYu();
+      const recovered = await sendHomeRecoveryToHsinYu();
       const delivery = await runtime.flush();
-      console.log(`Second-retest visibility test: sent=${sent}, flushed=${delivery.delivered}, failed=${delivery.failed}`);
+      console.log(`Startup one-time messages: retest=${sent}, homeRecovery=${recovered}, flushed=${delivery.delivered}, failed=${delivery.failed}`);
     }, 'background').catch(error => console.error('Second-retest visibility test failed:', error));
   }, 7_000).unref();
   setTimeout(() => {
