@@ -21,6 +21,7 @@ const { sendRegistrationConfirmations } = require('./registration-confirmations'
 const navigation = require('./navigation');
 const { WorkQueue } = require('./work-queue');
 const { ensureHomeOnLastMessage } = require('./line-navigation');
+const { selectNavigationRecoveryRecipients } = require('./navigation-recovery');
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master, ids.externalRegistration, ids.deposit];
@@ -148,22 +149,42 @@ async function sendSecondRetestVisibilityTestToHsinYu() {
   return 1;
 }
 
-async function sendHomeRecovery(name) {
-  const logKey = `RECOVERY:HOME-NAVIGATION:2026-10-27:V1:${name}`;
+async function sendHomeRecoveryCampaign() {
   const logSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName('LINE補發紀錄');
   if (!logSheet) throw new Error('找不到 LINE補發紀錄');
-  if (logSheet.getDataRange().getValues().slice(1).some(row => String(row[0] || '') === logKey)) return 0;
-  const userId = externalTeaching._test.userIdForName(name, '');
-  if (!userId) throw new Error(`${name} 尚未綁定 LINE`);
-  await lineRequest('/message/push', {
-    to: userId,
-    messages: [{
-      type: 'text',
-      text: '✅ 導覽已恢復\n\n先前收到的舊卡片無法補上新按鈕；請按下方「回首頁」重新進入，即可繼續使用。'
-    }]
-  });
-  logSheet.appendRow([logKey, userId, '首頁導覽恢復訊息', new Date()]);
-  return 1;
+  const bindings = SpreadsheetApp.openById(ids.master).getSheetByName('用戶綁定')?.getDataRange().getValues() || [];
+  const assistants = SpreadsheetApp.openById(ids.internalAttendance).getSheetByName('教學考試點名和通過情況總表')?.getDataRange().getValues() || [];
+  const logRows = logSheet.getDataRange().getValues();
+  const alreadyRecovered = new Set(logRows.slice(1).flatMap(row =>
+    /首頁導覽恢復訊息|全體首頁選單更新/.test(String(row[2] || '')) && row[1] ? [String(row[1])] : []));
+  const recipients = selectNavigationRecoveryRecipients(bindings, assistants)
+    .filter(recipient => !alreadyRecovered.has(recipient.userId));
+  const groups = new Map();
+  for (const recipient of recipients) {
+    if (!groups.has(recipient.role)) groups.set(recipient.role, []);
+    groups.get(recipient.role).push(recipient);
+  }
+  const accepted = [];
+  for (const group of groups.values()) {
+    const menu = bot.getMainMenu(group[0].userId);
+    const message = toLineMessage({ ...menu, text: `✅ 選單已更新\n\n${menu.text}` });
+    for (let index = 0; index < group.length; index += 500) {
+      const batch = group.slice(index, index + 500);
+      await lineRequest('/message/multicast', { to: batch.map(recipient => recipient.userId), messages: [message] });
+      accepted.push(...batch);
+    }
+  }
+  if (accepted.length) {
+    const now = new Date();
+    const rows = accepted.map(recipient => [
+      `RECOVERY:HOME-NAVIGATION:2026-10-28:V2:${recipient.userId}`,
+      recipient.userId,
+      '全體首頁選單更新',
+      now
+    ]);
+    logSheet.getRange(logSheet.getLastRow() + 1, 1, rows.length, 4).setValues(rows);
+  }
+  return { eligible: recipients.length + alreadyRecovered.size, sent: accepted.length, skipped: alreadyRecovered.size };
 }
 
 function toLineMessage(reply) {
@@ -445,12 +466,11 @@ app.listen(port, '0.0.0.0', error => {
   console.log(`Listening on port ${port}`);
   setTimeout(() => {
     enqueue(async () => {
-      await runtime.loadOnly([ids.master, ids.externalResults], { force: true });
+      await runtime.loadOnly([ids.master, ids.internalAttendance, ids.externalResults], { force: true });
       const sent = await sendSecondRetestVisibilityTestToHsinYu();
-      let recovered = 0;
-      for (const name of ['黃忻妤', '鍾采彤']) recovered += await sendHomeRecovery(name);
+      const recovery = await sendHomeRecoveryCampaign();
       const delivery = await runtime.flush();
-      console.log(`Startup one-time messages: retest=${sent}, homeRecovery=${recovered}, flushed=${delivery.delivered}, failed=${delivery.failed}`);
+      console.log(`Startup one-time messages: retest=${sent}, homeRecovery=${JSON.stringify(recovery)}, flushed=${delivery.delivered}, failed=${delivery.failed}`);
     }, 'background').catch(error => console.error('Second-retest visibility test failed:', error));
   }, 7_000).unref();
   setTimeout(() => {
