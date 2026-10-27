@@ -545,10 +545,12 @@ test('retest preserves the passed written result and only asks for the practical
 
   tasks.appendRow(['T-RETEST-CUM','1151','第一次補考',futureRetest,'12:00','13:00','CX350','401','測試者','','G1','已排定',true,true,'','','','']);
   students.appendRow(['T-RETEST-CUM','S-RETEST-CUM','補考學生','999',1,'未點名','未記錄','']);
-  externalTeaching.handleCommand('開始點名 T-RETEST-CUM', context);
+  const retestMenu = externalTeaching.handleCommand('開始點名 T-RETEST-CUM', context);
+  assert.match(retestMenu.lineMessage.template.columns[0].text, /簡答已通過/);
   const retestPrompt = externalTeaching.handleCommand('點名狀態 T-RETEST-CUM S-RETEST-CUM 到場', context);
   const resultLabels = cardActions(retestPrompt).map(action => action.label);
-  assert.match(retestPrompt.text, /簡答題：✅ 通過/);
+  assert.match(retestPrompt.text, /簡答題：✅ 已通過（沿用，不需重考）/);
+  assert.match(retestPrompt.text, /歷史簡答通過紀錄已沿用/);
   assert.match(retestPrompt.text, /上機：⏳ 尚未評分/);
   assert.equal(resultLabels.some(label => label === '上機 ✅'), true);
   assert.equal(resultLabels.some(label => label === '上機 ❌'), true);
@@ -1261,6 +1263,43 @@ test('assistant can grade failed external oral retest by student and equipment',
   const refreshedMenu = externalTeaching.handleCommand('簡答補考', assistant);
   assert.equal(refreshedMenu.lineMessage?.template.columns.some(item => item.title === '口試學生'), false);
   assert.equal(refreshedMenu.lineMessage?.template.columns.some(item => item.title === '取消資格學生'), false);
+});
+
+test('scheduled practical retests join the oral-retest section and cards preserve prior short-answer passes', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  try {
+    const results = isolated.openById(ids.externalResults);
+    const attendance = results.insertSheet('LINE點名紀錄');
+    const tasks = results.insertSheet('對外任務');
+    const students = results.insertSheet('任務學生');
+    results.insertSheet('保證金提醒紀錄').appendRow(['提醒鍵','類型','學生姓名','學號','任務ID','提醒時間','狀態']);
+    attendance.appendRow(['紀錄ID','任務ID','日期','時間','階段','器材','學生ID','學生姓名','學號','出席','簡答題','上機','結果','操作人','操作人LINE','更新時間','累計簡答','累計上機','保證金']);
+    tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','考官','考官LINE User ID','群組ID','狀態']);
+    students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間']);
+    tasks.appendRow(['T-RETEST-NEEDS-SHORT','1151','第一次補考',new Date('2026-10-29'),'12:00','13:00','A7S3','401','考官','','G1','已排定']);
+    tasks.appendRow(['T-RETEST-SHORT-PASSED','1151','第一次補考',new Date('2026-10-29'),'13:00','14:00','H6','401','考官','','G1','已排定']);
+    tasks.appendRow(['T-RETEST-NO-ORIGINAL','1151','第一次補考',new Date('2026-10-29'),'14:00','15:00','Dwarf圖傳','401','考官','','G1','已排定']);
+    students.appendRow(['T-RETEST-NEEDS-SHORT','S-NEEDS-SHORT','需補簡答學生','SHORT-FAIL',1,'未點名','未記錄','']);
+    students.appendRow(['T-RETEST-SHORT-PASSED','S-SHORT-PASSED','簡答已過學生','SHORT-PASS',1,'未點名','未記錄','']);
+    students.appendRow(['T-RETEST-NO-ORIGINAL','S-NO-ORIGINAL','排程缺簡答學生','SHORT-NONE',1,'未點名','未記錄','']);
+    attendance.appendRow(['ORIGINAL-SHORT-FAIL','T-ORIGINAL-FAIL',new Date('2026-10-20'),'12:00','考試','A7S3','S-NEEDS-SHORT','需補簡答學生','SHORT-FAIL','到場','未通過','未記錄','簡答題未通過','','',new Date(),'未通過','未通過','不可退保證金']);
+    attendance.appendRow(['ORIGINAL-SHORT-PASS','T-ORIGINAL-PASS',new Date('2026-10-20'),'13:00','考試','H6','S-SHORT-PASSED','簡答已過學生','SHORT-PASS','到場','通過','未通過','僅簡答題通過','','',new Date(),'通過','未通過','不可退保證金']);
+
+    const candidates = externalTeaching._test.oralRetestCandidates();
+    assert.equal(candidates.some(item => item.name === '需補簡答學生' && item.equipment === 'A7S3'), true);
+    assert.equal(candidates.some(item => item.name === '排程缺簡答學生' && item.equipment === 'Dwarf圖傳'), true);
+    assert.equal(candidates.some(item => item.name === '簡答已過學生' && item.equipment === 'H6'), false);
+
+    const needsShortCard = externalTeaching.handleCommand('查看考生 T-RETEST-NEEDS-SHORT S-NEEDS-SHORT', { sourceType: 'group', chatId: 'G1', userId: 'U1' });
+    assert.match(needsShortCard.text, /歷史簡答：🚨 尚未通過，須先補考/);
+    assert.match(needsShortCard.text, /已排入上機補考.*請先完成簡答補考/s);
+    const passedCard = externalTeaching.handleCommand('查看考生 T-RETEST-SHORT-PASSED S-SHORT-PASSED', { sourceType: 'group', chatId: 'G1', userId: 'U1' });
+    assert.match(passedCard.text, /歷史簡答：✅ 已通過（免重考）/);
+    assert.doesNotMatch(passedCard.text, /須先補考/);
+  } finally {
+    installGlobals(runtime);
+  }
 });
 
 test('deposit workbook parser normalizes initial and retest payment rows', () => {

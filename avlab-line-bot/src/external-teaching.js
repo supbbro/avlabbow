@@ -106,6 +106,7 @@ function replaceExaminerName(value, originalName, substituteName) {
   return changed ? replaced : '';
 }
 const isExam = task => task.phase !== '教學';
+const isRetest = task => String(task?.phase || '').includes('補考');
 const isTemplate = value => String(value || '').startsWith('_TEMPLATE');
 const isArrivalTimeoutOperator = value => [EXAM_ARRIVAL_TIMEOUT_OPERATOR, '超過 5 分鐘未到', '系統自動判定'].includes(String(value || ''));
 
@@ -847,6 +848,10 @@ function studentStateCard(task, student, options = {}) {
 }
 
 function attendancePrompt(task, student, notice = '') {
+  const retestProgress = isRetest(task) ? examProgress(task, student) : null;
+  const retestShortWarning = retestProgress && !retestProgress.shortPassed
+    ? '🚨【先補簡答】此考生已排入上機補考，但歷史簡答尚未通過；請先完成簡答補考，通過後才能進行上機。'
+    : '';
   const attendanceActions = isExam(task) ? [
     { label: '✅ 考生已到', postback: `到場判定 ${task.id} ${student.id}` },
     { label: '✏️ 修正點名', postback: `修改紀錄 ${task.id} ${student.id}` }
@@ -861,10 +866,17 @@ function attendancePrompt(task, student, notice = '') {
     title: `${task.phase}點名`,
     rows: [
       { label: '個別時間', value: formatTime(student.scheduledStart || task.start) },
-      { label: '目前出席', value: student.attendance }
+      { label: '目前出席', value: student.attendance },
+      ...(retestProgress ? [{
+        label: '歷史簡答',
+        value: retestProgress.shortPassed ? '✅ 已通過（免重考）' : '🚨 尚未通過，須先補考',
+        color: retestProgress.shortPassed ? '#2E7D32' : '#C62828',
+        labelColor: retestProgress.shortPassed ? '#2E7D32' : '#C62828',
+        labelWeight: 'bold'
+      }] : [])
     ],
     actions: attendanceActions,
-    note: [notice, depositPolicyNotice(task, student), rule].filter(Boolean).join('\n\n'),
+    note: [notice, retestShortWarning, depositPolicyNotice(task, student), rule].filter(Boolean).join('\n\n'),
     navigation: [
       { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
       { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
@@ -901,7 +913,7 @@ function candidateMenu(task, page = 1, notice = '') {
   };
   const columns = visible.map((student, index) => ({
     title: String(student.name || '未填姓名').slice(0, 40),
-    text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}`.slice(0, 60),
+    text: `${(currentPage - 1) * pageSize + index + 1}/${students.length}｜${task.equipment}\n時間 ${formatTime(student.scheduledStart || task.start)}｜${student.attendance}${isRetest(task) ? `\n${examProgress(task, student).shortPassed ? '簡答已通過' : '須先補簡答'}` : ''}`.slice(0, 60),
     actions: candidateActions(student)
   }));
   const navActions = [];
@@ -1060,6 +1072,12 @@ function upsertAttendance(task, student, operatorName, operatorId) {
 function resultPrompt(task, student, notice = '', extraActions = [], { includeModify = true } = {}) {
   const progress = examProgress(task, student);
   const refundPolicy = depositRefundPolicy(task, student);
+  const inheritedShortPass = isRetest(task) && progress.previous.shortAnswer;
+  const retestShortWarning = isRetest(task) && !progress.shortPassed
+    ? '🚨【先補簡答】此考生已排入上機補考，但簡答尚未通過；請先完成簡答補考，通過後才能進行上機。'
+    : inheritedShortPass
+      ? '✅ 歷史簡答通過紀錄已沿用，本場不需重考簡答，可直接進行上機。'
+      : '';
   const actions = [];
   if (!progress.shortRecorded) actions.push(
     { label: '簡答題 ✅', postback: `簡答登記 ${task.id} ${student.id} 通過` },
@@ -1075,7 +1093,10 @@ function resultPrompt(task, student, notice = '', extraActions = [], { includeMo
   const practicalText = progress.shortRecorded && !progress.shortPassed ? '⛔ 簡答題未通過，無上機資格' : stateText(progress.practicalRecorded, progress.practicalPassed);
   const rows = [
     { label: '出席', value: student.attendance },
-    { label: '簡答題', value: stateText(progress.shortRecorded, progress.shortPassed) },
+    { label: '簡答題', value: inheritedShortPass ? '✅ 已通過（沿用，不需重考）'
+      : isRetest(task) && !progress.shortPassed && !progress.shortRecorded ? '🚨 尚未通過，須先補考'
+        : stateText(progress.shortRecorded, progress.shortPassed),
+      ...(isRetest(task) ? { color: progress.shortPassed ? '#2E7D32' : '#C62828' } : {}) },
     { label: '上機', value: practicalText }
   ];
   if (progress.shortRecorded && progress.practicalRecorded) rows.push({
@@ -1088,7 +1109,7 @@ function resultPrompt(task, student, notice = '', extraActions = [], { includeMo
   });
   return studentStateCard(task, student, {
     title: '考試評分卡', rows, actions,
-    note: [notice, depositPolicyNotice(task, student), EXAM_PASSING_RULES, progress.step === 'done' ? '本次評分已完成。' : '請直接在卡片上選擇本階段結果。'].filter(Boolean).join('\n\n'),
+    note: [notice, retestShortWarning, depositPolicyNotice(task, student), EXAM_PASSING_RULES, progress.step === 'done' ? '本次評分已完成。' : '請直接在卡片上選擇本階段結果。'].filter(Boolean).join('\n\n'),
     navigation: [
       { label: '📚 合併版題庫', uri: COMBINED_QUESTION_BANK_URL },
       { label: '回考生名單', postback: `考生名單 ${task.id} 1` }
@@ -1801,16 +1822,32 @@ function oralRetestCandidates() {
   const latest = new Map();
   for (const row of target.getDataRange().getValues().slice(1)) {
     if (!row[0] || !isCurrentExternalData(row[2]) || row[4] === '教學' || !row[5] || !row[7]) continue;
-    const canceled = String(row[9] || '') === '取消資格';
-    if (!canceled && !['通過', '未通過'].includes(String(row[10] || ''))) continue;
+    const missed = ['取消資格', '缺席'].includes(String(row[9] || ''));
+    if (!missed && !['通過', '未通過'].includes(String(row[10] || '')) && !['通過', '未通過'].includes(String(row[16] || ''))) continue;
     const identity = norm(row[8]) || norm(row[7]);
     const key = `${identity}|${equipmentKey(row[5])}`;
     const previous = latest.get(key);
     const shortPassed = row[10] === '通過' || row[16] === '通過' || Boolean(previous?.shortPassed);
     const practicalPassed = row[11] === '通過' || row[17] === '通過' || Boolean(previous?.practicalPassed);
-    latest.set(key, { key, name: String(row[7]), number: String(row[8] || ''), equipment: String(row[5]), shortPassed, practicalPassed });
+    latest.set(key, { key, name: String(row[7]), number: String(row[8] || ''), equipment: String(row[5]), shortPassed, practicalPassed, shortRequired: missed || row[10] === '未通過' || row[16] === '未通過' || Boolean(previous?.shortRequired) });
   }
-  return [...latest.values()].filter(item => !item.shortPassed).sort((a, b) => a.equipment.localeCompare(b.equipment, 'zh-Hant') || a.name.localeCompare(b.name, 'zh-Hant'));
+  for (const task of allTasks().filter(isRetest)) {
+    for (const student of studentsFor(task.id, { includeDisqualified: true })) {
+      const identity = norm(student.number) || norm(student.name);
+      const key = `${identity}|${equipmentKey(task.equipment)}`;
+      const previous = latest.get(key);
+      const [sessionShort, sessionPractical] = resultParts(student.result);
+      latest.set(key, {
+        key, name: String(student.name), number: String(student.number || ''), equipment: String(task.equipment),
+        shortPassed: sessionShort === '通過' || Boolean(previous?.shortPassed),
+        practicalPassed: sessionPractical === '通過' || Boolean(previous?.practicalPassed),
+        shortRequired: sessionShort !== '通過' && !previous?.shortPassed,
+        scheduledRetest: true
+      });
+    }
+  }
+  return [...latest.values()].filter(item => !item.shortPassed && (item.shortRequired || item.scheduledRetest))
+    .sort((a, b) => a.equipment.localeCompare(b.equipment, 'zh-Hant') || a.name.localeCompare(b.name, 'zh-Hant'));
 }
 
 function oralRetestRecordId(candidate) {
@@ -2619,4 +2656,4 @@ function replayDailyReminders(now, replay) {
   return queued;
 }
 
-module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, sendFirstRetestRegistrationReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositGraceDeadlineFor, depositGracePaidKey, depositPaidWithinGrace, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, equipmentKey, retestEquipmentKeys, firstRetestCandidates, firstRetestRegistrations, firstRetestReminderKey, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
+module.exports = { handleCommand, resumeActiveAttendance, sendExternalReminders, sendFirstRetestRegistrationReminders, replayDailyReminders, syncFromSchedule, onExaminerChangeFormSubmit, processPendingExaminerChanges, isExternalCommand, requiresFreshData, isCombinedTaskQuery, _test: { comparable, rowChanged, reminderBelongsToSchedule, parseTaskStart, automaticArrivalStatus, expireExamQualifications, retestForm, retestMessage, examinerRetestInstructions, qualificationCancellationMessage, studentReminderText, dayBeforeExaminerReminderText, dayBeforeExaminerReminderDue, rosterStudents, enrichStudentsFromRoster, paidFlag, depositRecordFor, depositRefundPolicy, depositPolicyNotice, depositTeachingNote, syncDepositFromRegistrations, dayBeforeDate, depositDeadlineFor, depositGraceDeadlineFor, depositGracePaidKey, depositPaidWithinGrace, depositReminderText, registrationCoversTask, processDepositRequirements, depositCorrectionMessage, sendDepositCorrectionCampaign, correctionCampaignKey, setScheduleStudentStrikethrough, studentsFor, dateKey, isCurrentExternalData, editDistance, namesSimilar, equipmentKey, retestEquipmentKeys, firstRetestCandidates, firstRetestRegistrations, firstRetestReminderKey, oralRetestCandidates, replaceExaminerName, replaceExternalExaminer, userIdForExaminerName, userIdForName } };
