@@ -797,8 +797,8 @@ function studentStateCard(task, student, options = {}) {
   const cardRows = rows.map(row => ({
     type: 'box', layout: 'horizontal', spacing: 'md',
     contents: [
-      { type: 'text', text: String(row.label), size: 'sm', color: '#777777', flex: 3 },
-      { type: 'text', text: String(row.value), size: 'sm', color: '#222222', weight: 'bold', flex: 7, wrap: true, align: 'end' }
+      { type: 'text', text: String(row.label), size: 'sm', color: row.labelColor || '#777777', weight: row.labelWeight || 'regular', flex: 3 },
+      { type: 'text', text: String(row.value), size: 'sm', color: row.color || '#222222', weight: row.weight || 'bold', flex: 7, wrap: true, align: 'end' }
     ]
   }));
   const fallback = [
@@ -1080,7 +1080,11 @@ function resultPrompt(task, student, notice = '', extraActions = [], { includeMo
   ];
   if (progress.shortRecorded && progress.practicalRecorded) rows.push({
     label: '保證金', value: progress.shortPassed && progress.practicalPassed && refundPolicy.refundable
-      ? '✅ 可退保證金' : `❌ ${refundPolicy.reason || '不可退保證金'}`
+      ? '✅ 可退保證金' : '🚫 不可退保證金',
+    color: progress.shortPassed && progress.practicalPassed && refundPolicy.refundable ? '#2E7D32' : '#C62828'
+  });
+  if (progress.shortRecorded && progress.practicalRecorded && !refundPolicy.refundable && refundPolicy.detail) rows.push({
+    label: '不可退原因', value: refundPolicy.detail, color: '#C62828', labelColor: '#C62828', labelWeight: 'bold'
   });
   return studentStateCard(task, student, {
     title: '考試評分卡', rows, actions,
@@ -2001,27 +2005,88 @@ function attendanceOperatorFor(task, student) {
   return String(row?.[13] || '');
 }
 
+function originalExamRefundRestriction(task, student) {
+  const target = sheet(SHEETS.attendance);
+  if (!target) return null;
+  const currentTaskManuallyArrived = String(task.phase || '').includes('考試') && !String(task.phase || '').includes('補考')
+    && ['到場', '遲到'].includes(String(student.attendance || ''));
+  const rows = target.getDataRange().getValues().slice(1).filter(row => {
+    const phase = String(row[4] || '');
+    return isCurrentExternalData(row[2]) && phase.includes('考試') && !phase.includes('補考') && sameCertificationStudent(row, task, student);
+  });
+  const restrictionRows = rows.filter(row => {
+    const attendance = String(row[9] || '');
+    const operator = String(row[13] || '');
+    return (attendance === '取消資格' && operator === '保證金未繳') || attendance === '缺席' || isArrivalTimeoutOperator(operator);
+  });
+  const rowTime = row => {
+    const updated = row[15] instanceof Date ? row[15] : new Date(row[15]);
+    if (!Number.isNaN(updated.getTime())) return updated.getTime();
+    const dated = row[2] instanceof Date ? row[2] : new Date(row[2]);
+    return Number.isNaN(dated.getTime()) ? 0 : dated.getTime();
+  };
+  const depositHistory = sheet(SHEETS.depositReminders);
+  const unpaidEvents = depositHistory ? depositHistory.getDataRange().getValues().slice(1).filter(logRow => {
+    if (String(logRow[1] || '') !== '取消資格' || String(logRow[6] || '') !== '保證金未繳') return false;
+    const samePerson = norm(student.number) ? norm(logRow[3]) === norm(student.number) : norm(logRow[2]) === norm(student.name);
+    if (!samePerson) return false;
+    return rows.some(row => String(row[1] || '') === String(logRow[4] || ''));
+  }) : [];
+  if (!restrictionRows.length && !unpaidEvents.length) return null;
+  const eventTime = row => {
+    const value = row[5] instanceof Date ? row[5] : new Date(row[5]);
+    return Number.isNaN(value.getTime()) ? 0 : value.getTime();
+  };
+  const latestRestrictionTime = Math.max(0, ...restrictionRows.map(rowTime), ...unpaidEvents.map(eventTime));
+  const manualArrivalTimes = rows.filter(row => ['到場', '遲到'].includes(String(row[9] || ''))).map(rowTime);
+  if (currentTaskManuallyArrived) manualArrivalTimes.push(Date.now());
+  const laterManualArrival = manualArrivalTimes.some(time => time >= latestRestrictionTime);
+  if (laterManualArrival) return null;
+  const unpaid = unpaidEvents.length > 0 || restrictionRows.some(row => String(row[9] || '') === '取消資格' && String(row[13] || '') === '保證金未繳');
+  const absent = restrictionRows.some(row => String(row[9] || '') === '缺席' || isArrivalTimeoutOperator(row[13]));
+  const detail = unpaid && absent
+    ? '考試週未到，且因考試前一天仍未繳保證金而取消資格'
+    : unpaid
+      ? '考試週因考試前一天仍未繳保證金而取消資格'
+      : '考試週未到，且未曾更正為到場／遲到';
+  return { detail, unpaid, absent };
+}
+
 function depositRefundPolicy(task, student, options = {}) {
   if (!isExam(task)) return { refundable: false, reason: '不適用', paid: false, late: false };
-  let registrations, records;
+  const operator = student.attendance === '取消資格' ? (options.operator ?? attendanceOperatorFor(task, student)) : '';
+  const originalRestriction = originalExamRefundRestriction(task, student);
+  let registrations = [], records = [], dataUnknown = false;
   try {
     registrations = options.registrations || registrationRows();
     records = options.records || depositRows();
   } catch (error) {
-    return { refundable: true, reason: '', paid: false, late: false, unknown: true };
+    dataUnknown = true;
   }
   const registration = registrationForStudent(student, registrations);
   const record = depositRecordFor(student, '考試', records);
   const deadline = depositDeadlineFor(registration, configuredDepositDeadline());
   const logged = options.logged || existingDepositLogKeys();
   const late = Boolean(record?.paid && deadline && depositPaymentWasLate(record, deadline, logged, student));
-  const operator = student.attendance === '取消資格' ? (options.operator ?? attendanceOperatorFor(task, student)) : '';
+  if (originalRestriction) {
+    return {
+      refundable: false,
+      reason: `不可退保證金（${originalRestriction.detail}）`,
+      detail: originalRestriction.detail,
+      examWeekRestriction: true,
+      paid: Boolean(record?.paid), late, deadline, registration,
+      ...(dataUnknown ? { unknown: true } : {})
+    };
+  }
   if (isArrivalTimeoutOperator(operator)) {
-    return { refundable: false, reason: `不可退保證金（${operator === '系統自動判定' ? EXAM_ARRIVAL_TIMEOUT_OPERATOR : operator}）`, paid: Boolean(record?.paid), late, deadline, registration };
+    const detail = operator === '系統自動判定' ? EXAM_ARRIVAL_TIMEOUT_OPERATOR : operator;
+    return { refundable: false, reason: `不可退保證金（${detail}）`, detail, paid: Boolean(record?.paid), late, deadline, registration };
   }
   if (operator === '保證金未繳') {
-    return { refundable: false, reason: '不可退保證金（考試前一天仍未繳）', paid: false, late, deadline, registration };
+    const detail = '考試前一天仍未繳保證金';
+    return { refundable: false, reason: `不可退保證金（${detail}）`, detail, paid: false, late, deadline, registration };
   }
+  if (dataUnknown) return { refundable: true, reason: '', paid: false, late: false, unknown: true };
   if (late) return { refundable: false, reason: '不可退保證金（逾截止日繳交）', paid: true, late, deadline, registration };
   if (record && !record.paid) return { refundable: false, reason: '保證金尚未繳交', paid: false, late, deadline, registration };
   return { refundable: true, reason: '', paid: Boolean(record?.paid), late: false, deadline, registration };
@@ -2031,6 +2096,9 @@ function depositPolicyNotice(task, student, options = {}) {
   if (!isExam(task)) return '';
   const policy = depositRefundPolicy(task, student, options);
   const operator = student.attendance === '取消資格' ? (options.operator ?? attendanceOperatorFor(task, student)) : '';
+  if (policy.examWeekRestriction) {
+    return `🚫【重點】不可退保證金\n目前仍可考試，但即使通過也不退費。\n原因：${policy.detail}。`;
+  }
   if (isArrivalTimeoutOperator(operator)) {
     const form = retestForm(task);
     const grace = operator === '超過 5 分鐘未到' ? 5 : EXAM_ARRIVAL_GRACE_MINUTES;

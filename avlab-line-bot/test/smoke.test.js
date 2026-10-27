@@ -1290,6 +1290,65 @@ test('deposit workbook parser normalizes initial and retest payment rows', () =>
   assert.equal(externalTeaching._test.dayBeforeDate(new Date('2026-10-09T00:00:00+08:00')), '2026-10-08');
 });
 
+test('exam-week absence or unpaid disqualification stays non-refundable until attendance is manually corrected', () => {
+  const isolated = new GoogleSheetsRuntime();
+  installGlobals(isolated);
+  try {
+    const results = isolated.openById(ids.externalResults);
+    const attendance = results.insertSheet('LINE點名紀錄');
+    const tasks = results.insertSheet('對外任務');
+    const students = results.insertSheet('任務學生');
+    const depositHistory = results.insertSheet('保證金提醒紀錄');
+    attendance.appendRow(['紀錄ID','任務ID','日期','開始時間','階段','器材','學生ID','學生姓名','學號','出席狀態','簡答題結果','上機結果','總結果','操作考官','考官LINE User ID','記錄時間','累計簡答題結果','累計上機結果','保證金狀態']);
+    tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','考官','考官LINE User ID','群組ID','狀態','前一天提醒','一小時提醒','前一天送達','一小時送達','來源分頁','來源範圍']);
+    students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間']);
+    depositHistory.appendRow(['提醒鍵','類型','學生姓名','學號','任務ID','提醒時間','狀態']);
+    const equipment = '歷史退費規則測試器材';
+    const task = { id: 'T-REFUND-HISTORY-RETEST', phase: '第一次補考', date: new Date('2026-10-27'), start: '18:00', equipment };
+    const student = { id: 'S-REFUND-HISTORY', name: '歷史退費測試生', number: 'REFUND-HISTORY-001', attendance: '到場', result: '全部通過' };
+    tasks.appendRow([task.id, '1151', task.phase, task.date, task.start, '19:00', equipment, '401', '測試者', '', 'G1', '點名中', true, true, '', '', '', '']);
+    students.appendRow([task.id, student.id, student.name, student.number, 1, student.attendance, student.result, new Date()]);
+    attendance.appendRow([
+      'T-REFUND-HISTORY-EXAM:S-REFUND-HISTORY', 'T-REFUND-HISTORY-EXAM', new Date('2026-10-20'), '18:00', '考試', equipment,
+      student.id, student.name, student.number, '取消資格', '不適用', '不適用', '取消資格', '超過 10 分鐘未到', 'SYSTEM', new Date('2026-10-20T18:11:00+08:00')
+    ]);
+    const originalRow = attendance.getLastRow();
+
+    let policy = externalTeaching._test.depositRefundPolicy(task, student);
+    assert.equal(policy.refundable, false);
+    assert.equal(policy.examWeekRestriction, true);
+    assert.match(policy.detail, /考試週未到/);
+    assert.match(policy.detail, /未曾更正為到場／遲到/);
+    let card = externalTeaching.handleCommand(`查看考生 ${task.id} ${student.id}`, { sourceType: 'group', chatId: 'G1', userId: 'U1' });
+    assert.match(card.text, /【重點】不可退保證金/);
+    assert.match(card.text, /不可退原因：考試週未到/);
+    const valueTexts = card.lineMessage.contents.body.contents.flatMap(item => item.contents || [item]);
+    assert.equal(valueTexts.find(item => item.text === '🚫 不可退保證金')?.color, '#C62828');
+
+    attendance.getRange(originalRow, 10).setValue('到場');
+    attendance.getRange(originalRow, 14).setValue('人工修正');
+    attendance.getRange(originalRow, 16).setValue(new Date('2026-10-27T17:00:00+08:00'));
+    policy = externalTeaching._test.depositRefundPolicy(task, student);
+    assert.equal(policy.examWeekRestriction, undefined);
+    assert.equal(policy.refundable, true);
+    card = externalTeaching.handleCommand(`查看考生 ${task.id} ${student.id}`, { sourceType: 'group', chatId: 'G1', userId: 'U1' });
+    assert.doesNotMatch(card.text, /考試週未到，且未曾更正/);
+
+    const unpaidStudent = { id: 'S-REFUND-UNPAID', name: '未繳退費測試生', number: 'REFUND-HISTORY-002', attendance: '到場', result: '全部通過' };
+    attendance.appendRow([
+      'T-REFUND-UNPAID-EXAM:S-REFUND-UNPAID', 'T-REFUND-UNPAID-EXAM', new Date('2026-10-21'), '18:00', '考試', equipment,
+      unpaidStudent.id, unpaidStudent.name, unpaidStudent.number, '取消資格', '不適用', '不適用', '取消資格', '保證金未繳', 'SYSTEM', new Date('2026-10-21T09:00:00+08:00')
+    ]);
+    const unpaidPolicy = externalTeaching._test.depositRefundPolicy(task, unpaidStudent);
+    assert.equal(unpaidPolicy.refundable, false);
+    assert.equal(unpaidPolicy.examWeekRestriction, true);
+    assert.match(unpaidPolicy.detail, /考試前一天仍未繳保證金/);
+    assert.match(unpaidPolicy.detail, /取消資格/);
+  } finally {
+    installGlobals(runtime);
+  }
+});
+
 test('registration response is the deposit authority and counts each exam equipment at fifty dollars', () => {
   const headers = Array(34).fill('');
   Object.assign(headers, { 0: '時間戳記', 4: '姓名', 5: '系級', 6: '學號', 9: '基礎配件課程', 10: 'X160考試', 20: 'H6考試', 31: '聲音工作區教學', 32: '聲音工作區考試' });
@@ -2071,7 +2130,7 @@ test('unpaid students are canceled only on the day before that equipment exam an
   assert.deepEqual(restored, { reminders: 2, canceled: 0, restored: 1 });
   assert.equal(students.getRange(2, 6).getValue(), '未點名');
   assert.equal(resultBook.getSheetByName('LINE點名紀錄').getRange(2, 14).getValue(), '保證金已確認');
-  assert.match(resultBook.getSheetByName('LINE點名紀錄').getRange(2, 19).getValue(), /逾截止日繳交/);
+  assert.match(resultBook.getSheetByName('LINE點名紀錄').getRange(2, 19).getValue(), /考試前一天仍未繳保證金/);
   const lateStudent = externalTeaching._test.studentsFor('DEPOSIT-TASK', { includeDisqualified: true })[0];
   const latePolicy = externalTeaching._test.depositRefundPolicy({ id: 'DEPOSIT-TASK', phase: '考試' }, lateStudent);
   assert.equal(latePolicy.refundable, false);
