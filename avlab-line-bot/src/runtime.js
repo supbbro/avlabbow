@@ -2,6 +2,7 @@
 
 const { google } = require('googleapis');
 const XLSX = require('xlsx');
+const { ensureHomeInPayload } = require('./line-navigation');
 const { workbooks, ids, excelWorkbookIds, timezone } = require('./config');
 const { parseInternalTaskWorkbook } = require('./internal-task-parser');
 
@@ -278,7 +279,13 @@ class GoogleSheetsRuntime {
 
   openById(id) { return new SpreadsheetFacade(this, id); }
   queueUpdate(sheet, row, column, values) { this.operations.push({ kind: 'update', sheet, row, column, values }); }
-  queueHttp(url, options = {}) { this.httpOperations.push({ url, options }); return { getResponseCode: () => 202 }; }
+  queueHttp(url, options = {}) {
+    const queuedOptions = /https:\/\/api\.line\.me\/v2\/bot\/message\//.test(String(url))
+      ? { ...options, payload: ensureHomeInPayload(options.payload) }
+      : options;
+    this.httpOperations.push({ url, options: queuedOptions });
+    return { getResponseCode: () => 202 };
+  }
 
   setProperty(key, value) {
     this.properties.set(String(key), String(value));

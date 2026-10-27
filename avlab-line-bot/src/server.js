@@ -20,6 +20,7 @@ const externalGroupSync = require('./external-group-sync');
 const { sendRegistrationConfirmations } = require('./registration-confirmations');
 const navigation = require('./navigation');
 const { WorkQueue } = require('./work-queue');
+const { ensureHomeOnLastMessage } = require('./line-navigation');
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const EXTERNAL_WORKBOOKS = [ids.externalClassSchedule, ids.externalResults, ids.master, ids.externalRegistration, ids.deposit];
@@ -59,10 +60,13 @@ function validLineSignature(buffer, signature) {
 }
 
 async function lineRequest(path, body) {
+  const requestBody = /^\/message\/(?:reply|push|multicast|broadcast|narrowcast)$/.test(path)
+    ? ensureHomeOnLastMessage(body)
+    : body;
   const response = await fetch(`https://api.line.me/v2/bot${path}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(10_000)
   });
   if (!response.ok) throw new Error(`LINE API ${response.status}: ${await response.text()}`);
