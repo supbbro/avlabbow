@@ -91,28 +91,21 @@ async function sendFirstRetestTestToHsinYu() {
 
 async function sendSecondRetestVisibilityTestToHsinYu() {
   const name = '黃忻妤';
-  const logKey = 'TEST:SECOND-RETEST-EXAMINER-ONLY:2026-10-27:V1:黃忻妤';
+  const logKey = 'TEST:SECOND-RETEST-STUDENT-FORMAT:2026-10-27:V2:黃忻妤';
   const logSheet = SpreadsheetApp.openById(ids.externalResults).getSheetByName('LINE補發紀錄');
   if (!logSheet) throw new Error('找不到 LINE補發紀錄');
   if (logSheet.getDataRange().getValues().slice(1).some(row => String(row[0] || '') === logKey)) return 0;
   const userId = externalTeaching._test.userIdForName(name, '');
   if (!userId) throw new Error(`${name} 尚未綁定 LINE`);
-  const formUrl = externalTeaching._test.retestForm({ phase: '第一次補考' }).url;
+  const fakeTask = { phase: '第一次補考', equipment: 'H6' };
+  const fakeStudent = { name: '測試考生小光' };
+  const form = externalTeaching._test.retestForm(fakeTask);
+  const message = `${externalTeaching._test.retestMessage(fakeTask, fakeStudent, ['上機'], form.label, '')}\n\n※ 功能測試：以上皆為假考生資料，不代表任何人的真實考試結果，也不會建立補考紀錄。`;
   await lineRequest('/message/push', {
     to: userId,
-    messages: [
-      {
-        type: 'text',
-        text: `【功能測試｜考官畫面】\n測試考生的上機第一次補考未通過，需要第二次補考。\n\n請考官協助考生完成第二次補考報名，並向考生收取 100 元報名費；該費用不退費。\n\n第二次補考報名網址：\n${formUrl}\n\n※ 本訊息僅測試版面，不會建立任何補考或收費紀錄。`,
-        quickReply: { items: [{ type: 'action', action: { type: 'uri', label: '第二次補考報名', uri: formUrl } }] }
-      },
-      {
-        type: 'text',
-        text: '【功能測試｜考生畫面】\n你的測試項目需要第二次補考。請洽現場考官，由考官協助完成報名。第二次補考須繳交 100 元報名費，且不退費。\n\n※ 考生訊息不會附報名網址；本訊息不代表本人有未通過項目。'
-      }
-    ]
+    messages: [{ type: 'text', text: message }]
   });
-  logSheet.appendRow([logKey, userId, '第二次補考考官／考生訊息權限測試', new Date()]);
+  logSheet.appendRow([logKey, userId, '第二次補考考生通知版型測試（假資料）', new Date()]);
   return 1;
 }
 

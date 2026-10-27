@@ -1141,7 +1141,9 @@ test('failed exam stages select the next retest form and stop after the second r
   assert.equal(externalTeaching._test.retestForm({ phase: '第二次補考' }).finalAttempt, true);
   assert.match(externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第一次補考', 'https://forms.gle/first'), /第二次補考須繳交 100 元，且不退費/);
   const secondRetestStudentMessage = externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['上機'], '第二次補考', secondRetestUrl);
-  assert.match(secondRetestStudentMessage, /請洽現場考官.*協助.*第二次補考報名/s);
+  assert.match(secondRetestStudentMessage, /^【第二次補考提醒】/);
+  assert.match(secondRetestStudentMessage, /學生甲你好，你的 H6 考試尚有項目未通過：上機/);
+  assert.match(secondRetestStudentMessage, /請完成第二次補考上機考報名.*依後續安排應試.*現場考官協助/s);
   assert.match(secondRetestStudentMessage, /100 元報名費/);
   assert.doesNotMatch(secondRetestStudentMessage, /https:\/\/|1FAIpQLScq1u/);
   const shortOnly = externalTeaching._test.retestMessage({ equipment: 'H6' }, { name: '學生甲' }, ['簡答題'], '第一次補考', '');
@@ -1176,7 +1178,8 @@ test('second-retest form is shown to the examiner but never sent to the student'
   assert.equal(runtime.httpOperations.length, 1);
   const studentPush = JSON.parse(runtime.httpOperations[0].options.payload);
   assert.equal(studentPush.to, 'U-SECOND-RETEST-STUDENT');
-  assert.match(studentPush.messages[0].text, /請洽現場考官/);
+  assert.match(studentPush.messages[0].text, /請完成第二次補考上機考報名/);
+  assert.match(studentPush.messages[0].text, /報名請由現場考官協助/);
   assert.match(studentPush.messages[0].text, /100 元報名費/);
   assert.doesNotMatch(JSON.stringify(studentPush), /1FAIpQLScq1u-GkuWTStst5s6UDT2puDOM3XkEy5R8Xq3H6Smd-Wn5Jg|publish-editor/);
 });

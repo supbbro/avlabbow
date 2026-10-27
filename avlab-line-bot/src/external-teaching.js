@@ -1799,7 +1799,7 @@ function retestMessage(task, student, failedParts, label, url, corrected = false
   const instructions = [
     short ? '🗣️ 簡答題：請在補考週期間，於影音實驗室開放時間隨時到場進行口頭補考；不必填寫上機報名表。現場助理會登記結果。' : '',
     practical ? examinerOnly
-      ? `🎬 上機考：請洽現場考官，由考官協助完成${label}報名。${short ? '須先通過簡答題，才可參加上機考。' : ''}`
+      ? `🎬 上機考：請完成${label}上機考報名，依後續安排應試。報名請由現場考官協助。${short ? '須先通過簡答題，才可參加上機考。' : ''}`
       : `🎬 上機考：請填寫${label}上機考報名表，依後續安排應試。${short ? '須先通過簡答題，才可參加上機考。' : ''}${url ? `\n報名連結：${url}` : ''}` : ''
   ].filter(Boolean).join('\n\n');
   const heading = corrected ? `考試結果更正｜${label || '補考'}提醒` : `${label || '補考'}提醒`;
