@@ -974,7 +974,8 @@ function ensureAttendanceHeaders(target, rows) {
 }
 
 function sameCertificationStudent(row, task, student) {
-  if (norm(row[5]) !== norm(task.equipment)) return false;
+  const rowEquipmentKeys = new Set(retestEquipmentKeys(row[5]));
+  if (!retestEquipmentKeys(task.equipment).some(key => rowEquipmentKeys.has(key))) return false;
   const rowNumber = norm(row[8]), studentNumber = norm(student.number);
   if (rowNumber && studentNumber) return rowNumber === studentNumber;
   return norm(row[7]) === norm(student.name);
@@ -1622,7 +1623,7 @@ function retestEquipmentKeys(value) {
   if (compact.includes('無線追焦') || compact.includes('無限追') || compact === '無線追') return ['無線追'];
   if (compact.includes('vortex4s8s') || compact === 'v4v8') return ['v4v8'];
   if (compact.includes('arris60pro') || compact === 'arris60') return ['arris60'];
-  if ((compact.includes('cx350') && compact.includes('棚內機')) || compact === '棚內機') return ['棚內機'];
+  if ((compact.includes('cx350') && compact.includes('棚內機')) || compact === 'cx350' || compact === '棚內機') return ['棚內機'];
   if (compact.includes('3play') || compact.includes('慢播機')) return ['3play'];
   if (compact === 'atomos螢幕' || compact === 'atomos') return ['atomos'];
   return [equipmentKey(raw)];
@@ -1842,7 +1843,7 @@ function oralRetestCandidates() {
     const missed = ['取消資格', '缺席'].includes(String(row[9] || ''));
     if (!missed && !['通過', '未通過'].includes(String(row[10] || '')) && !['通過', '未通過'].includes(String(row[16] || ''))) continue;
     const identity = norm(row[8]) || norm(row[7]);
-    const key = `${identity}|${equipmentKey(row[5])}`;
+    const key = `${identity}|${retestEquipmentKeys(row[5])[0]}`;
     const previous = latest.get(key);
     const shortPassed = row[10] === '通過' || row[16] === '通過' || Boolean(previous?.shortPassed);
     const practicalPassed = row[11] === '通過' || row[17] === '通過' || Boolean(previous?.practicalPassed);
@@ -1851,7 +1852,7 @@ function oralRetestCandidates() {
   for (const task of allTasks().filter(isRetest)) {
     for (const student of studentsFor(task.id, { includeDisqualified: true })) {
       const identity = norm(student.number) || norm(student.name);
-      const key = `${identity}|${equipmentKey(task.equipment)}`;
+      const key = `${identity}|${retestEquipmentKeys(task.equipment)[0]}`;
       const previous = latest.get(key);
       const [sessionShort, sessionPractical] = resultParts(student.result);
       latest.set(key, {

@@ -1310,6 +1310,7 @@ test('scheduled practical retests join the oral-retest section and cards preserv
   installGlobals(isolated);
   try {
     const results = isolated.openById(ids.externalResults);
+    const bindings = isolated.openById(ids.master).insertSheet('用戶綁定');
     const attendance = results.insertSheet('LINE點名紀錄');
     const tasks = results.insertSheet('對外任務');
     const students = results.insertSheet('任務學生');
@@ -1317,17 +1318,19 @@ test('scheduled practical retests join the oral-retest section and cards preserv
     attendance.appendRow(['紀錄ID','任務ID','日期','時間','階段','器材','學生ID','學生姓名','學號','出席','簡答題','上機','結果','操作人','操作人LINE','更新時間','累計簡答','累計上機','保證金']);
     tasks.appendRow(['任務ID','學期','階段','日期','開始時間','結束時間','器材','地點','考官','考官LINE User ID','群組ID','狀態']);
     students.appendRow(['任務ID','學生ID','學生姓名','學號','點名順序','出席狀態','考試結果','更新時間']);
-    tasks.appendRow(['T-RETEST-NEEDS-SHORT','1151','第一次補考',new Date('2026-10-29'),'12:00','13:00','A7S3','401','考官','','G1','已排定']);
+    tasks.appendRow(['T-RETEST-NEEDS-SHORT','1151','第一次補考',new Date('2026-10-29'),'12:00','13:00','棚內機','401','考官','','G1','已排定']);
     tasks.appendRow(['T-RETEST-SHORT-PASSED','1151','第一次補考',new Date('2026-10-29'),'13:00','14:00','H6','401','考官','','G1','已排定']);
     tasks.appendRow(['T-RETEST-NO-ORIGINAL','1151','第一次補考',new Date('2026-10-29'),'14:00','15:00','Dwarf圖傳','401','考官','','G1','已排定']);
     students.appendRow(['T-RETEST-NEEDS-SHORT','S-NEEDS-SHORT','需補簡答學生','SHORT-FAIL',1,'未點名','未記錄','']);
     students.appendRow(['T-RETEST-SHORT-PASSED','S-SHORT-PASSED','簡答已過學生','SHORT-PASS',1,'未點名','未記錄','']);
     students.appendRow(['T-RETEST-NO-ORIGINAL','S-NO-ORIGINAL','排程缺簡答學生','SHORT-NONE',1,'未點名','未記錄','']);
-    attendance.appendRow(['ORIGINAL-SHORT-FAIL','T-ORIGINAL-FAIL',new Date('2026-10-20'),'12:00','考試','A7S3','S-NEEDS-SHORT','需補簡答學生','SHORT-FAIL','到場','未通過','未記錄','簡答題未通過','','',new Date(),'未通過','未通過','不可退保證金']);
+    attendance.appendRow(['ORIGINAL-SHORT-FAIL','T-ORIGINAL-FAIL',new Date('2026-10-20'),'12:00','考試','新聞館影棚 CX350','S-NEEDS-SHORT','需補簡答學生','SHORT-FAIL','到場','未通過','未記錄','簡答題未通過','','',new Date(),'未通過','未通過','不可退保證金']);
     attendance.appendRow(['ORIGINAL-SHORT-PASS','T-ORIGINAL-PASS',new Date('2026-10-20'),'13:00','考試','H6','S-SHORT-PASSED','簡答已過學生','SHORT-PASS','到場','通過','未通過','僅簡答題通過','','',new Date(),'通過','未通過','不可退保證金']);
+    bindings.appendRow(['LINE User ID','姓名','系級','學號','身分']);
+    bindings.appendRow(['U1','考官','','','assistant']);
 
     const candidates = externalTeaching._test.oralRetestCandidates();
-    assert.equal(candidates.some(item => item.name === '需補簡答學生' && item.equipment === 'A7S3'), true);
+    assert.equal(candidates.some(item => item.name === '需補簡答學生' && item.equipment === '棚內機'), true);
     assert.equal(candidates.some(item => item.name === '排程缺簡答學生' && item.equipment === 'Dwarf圖傳'), true);
     assert.equal(candidates.some(item => item.name === '簡答已過學生' && item.equipment === 'H6'), false);
 
@@ -1337,6 +1340,11 @@ test('scheduled practical retests join the oral-retest section and cards preserv
     const passedCard = externalTeaching.handleCommand('查看考生 T-RETEST-SHORT-PASSED S-SHORT-PASSED', { sourceType: 'group', chatId: 'G1', userId: 'U1' });
     assert.match(passedCard.text, /歷史簡答：✅ 已通過（免重考）/);
     assert.doesNotMatch(passedCard.text, /須先補考/);
+
+    externalTeaching.handleCommand('到場判定 T-RETEST-NEEDS-SHORT S-NEEDS-SHORT', { sourceType: 'group', chatId: 'G1', userId: 'U1' });
+    const shortPassedDuringPracticalRetest = externalTeaching.handleCommand('簡答登記 T-RETEST-NEEDS-SHORT S-NEEDS-SHORT 通過', { sourceType: 'group', chatId: 'G1', userId: 'U1' });
+    assert.match(shortPassedDuringPracticalRetest.text, /簡答題：✅ 通過/);
+    assert.equal(externalTeaching._test.oralRetestCandidates().some(item => item.name === '需補簡答學生'), false);
   } finally {
     installGlobals(runtime);
   }
