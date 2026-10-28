@@ -983,7 +983,7 @@ var UNIFIED={
   對外時程:'🗓️【對外教學工作坊 - 重要時程表】\n\n📝 對外報名時間 (第2、3週)\n9/14 (一) － 9/25 (五)\n\n📚 教學週 (第4、5週)\n9/28 (一) － 10/9 (五)\n\n📝 考試週 (第6、7週)\n10/12 (一) － 10/23 (五)\n\n🔄 第一次補考 (第8週)\n10/27 (二) － 10/30 (五)\n\n🔄 第二次補考 (第9週)\n11/2 (一) － 11/6 (五)\n\n⚠️ 請密切注意各階段的報名與保證金繳交死線(10/9)喔！',
   題庫講義:'【考試題庫與上課講義】\n\n📚 簡答題題庫：\nhttps://docs.google.com/document/d/1pKjK2uqPmtcXIYRzyW87Ll7vvKFtcfzL/edit?usp=sharing&ouid=106559454873395212671&rtpof=true&sd=true\n\n📘 上課講義：\nhttps://avlab.nccu.edu.tw/PageDoc/Detail?fid=10543&id=18228',
   對外工作坊簡報:'【對外工作坊簡報】\n\n📊 簡報（一）\nhttps://docs.google.com/presentation/d/1u-2wqepFnNYsmo3T77yb5qqHdyoTnphH/edit?slide=id.p22#slide=id.p22\n\n📊 簡報（二）\nhttps://docs.google.com/presentation/d/1WdS6Qp6205Jp5eIVvnn5KfkBLn4VGJVB/edit?slide=id.p16#slide=id.p16',
-  保證金:'【保證金制度說明】\n\n✅ 同一項器材的「簡答題」與「上機考」都通過，才符合退還保證金資格。\n\n🔄 補考採累計制：已通過的項目會保留。例如簡答題已通過、上機未通過，補考只需重考上機；上機通過後即顯示可退保證金。\n\n✅ 考試週出席狀態為「缺席」者，補考完成並通過後，原考試保證金仍可退還。\n\n❌ 考試週出席狀態為「取消資格」者，補考通過仍不可退原考試保證金。\n\n完整規定：\nhttps://drive.google.com/file/d/1cSVpcW5allLz6_tImqg2KEd7A2Jfu101/view',
+  保證金:'【保證金制度說明】\n\n✅ 同一項器材的「簡答題」與「上機考」都通過，才符合退還保證金資格。\n\n🔄 補考採累計制：已通過的項目會保留。例如簡答題已通過、上機未通過，補考只需重考上機；上機通過後即顯示可退保證金。\n\n❌ 考試週出席狀態為「取消資格」者，補考通過仍不可退原考試保證金。\n\n完整規定：\nhttps://drive.google.com/file/d/1cSVpcW5allLz6_tImqg2KEd7A2Jfu101/view',
   學生請假:'【請假與更改時間規定 (對外學生)】\n\n⚠️ 對外考生「不可請假」，但可透過「對外考試時間異動表單」申請更改時間或取消報名。⚠️\n\n考試週出席狀態為「缺席」者，補考通過後原考試保證金仍可退；出席狀態為「取消資格」者不可退。\n\n⚠️ 更改時間表單：https://forms.gle/ek1ApLGp3g6cAeLB9',
   借用規定:'【器材借用權限說明】\n器材借用有兩大前提：\n1. 必須先上過「基礎配件課程」並取得權限。\n2. 器材是以「組」為單位，整組的「所有組員」都必須通過該項認證，才能開放借用權限！請督促隊友。',
   講義:'【對外教學工作坊 - 上課講義】\n上課前或複習時可以參考這裡的教學講義喔！\n\n👉 https://avlab.nccu.edu.tw/PageDoc/Detail?fid=10543&id=18228',
